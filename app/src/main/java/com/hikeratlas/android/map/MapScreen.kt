@@ -389,8 +389,9 @@ fun MapScreen(app: HikerAtlasApp, onSheetOpen: (Boolean) -> Unit = {}) {
                 containerPx = containerPx,
                 peekPx = peekPx,
                 onHeaderHeight = { headerPx = it },
-                halfAndFull = panel is Panel.Detail || panel is Panel.RouteList || panel is Panel.Trail,
-                header = { PanelHeader(model, full = sheet.settledValue == Stop.Full) },
+                // A hike with nothing below its peek stays at the peek.
+                halfAndFull = panel is Panel.RouteList || panel is Panel.Trail || (panel is Panel.Detail && hasDetailBody(panel)),
+                header = { PanelHeader(model, full = sheet.settledValue == Stop.Full) { p -> controller?.showHover(p) } },
                 body = { PanelBody(model) { p -> controller?.showHover(p) } },
             )
         }

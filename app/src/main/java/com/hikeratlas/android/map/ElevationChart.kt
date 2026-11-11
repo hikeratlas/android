@@ -48,6 +48,7 @@ fun ElevationChart(
     marks: List<Mark>,
     onScrub: (index: Int?) -> Unit,
     modifier: Modifier = Modifier,
+    height: androidx.compose.ui.unit.Dp = 140.dp,
 ) {
     val measurer = rememberTextMeasurer()
     var scrub by remember(profile) { mutableStateOf<Int?>(null) }
@@ -68,7 +69,7 @@ fun ElevationChart(
     Canvas(
         modifier
             .fillMaxWidth()
-            .height(140.dp)
+            .height(height)
             .semantics {
                 contentDescription = "Elevation from ${metres(lo)} m to ${metres(hi)} m over ${km(length / 1000)} km"
             }
@@ -87,7 +88,7 @@ fun ElevationChart(
                 })
             },
     ) {
-        val top = 16.dp.toPx()
+        val top = 6.dp.toPx()
         val bottom = size.height - 18.dp.toPx()
         val range = (hi - lo).coerceAtLeast(20.0)
         fun x(d: Double) = (d / length * size.width).toFloat()
@@ -117,13 +118,20 @@ fun ElevationChart(
             drawCircle(Color.White, 4.dp.toPx(), Offset(mx, my))
             drawCircle(MARK, 4.dp.toPx(), Offset(mx, my), style = Stroke(2.dp.toPx()))
             val t = measurer.measure(m.label, markLabel)
-            drawText(t, topLeft = Offset((mx + 4.dp.toPx()).coerceAtMost(size.width - t.size.width), (my - t.size.height - 4.dp.toPx()).coerceAtLeast(0f)))
+            val at = Offset((mx + 4.dp.toPx()).coerceAtMost(size.width - t.size.width), (my - t.size.height - 4.dp.toPx()).coerceAtLeast(0f))
+            // A pale backing, so the label reads where it crosses the line.
+            drawRoundRect(
+                Color.White.copy(alpha = 0.85f), at - Offset(2.dp.toPx(), 0f),
+                androidx.compose.ui.geometry.Size(t.size.width + 4.dp.toPx(), t.size.height.toFloat()),
+                androidx.compose.ui.geometry.CornerRadius(3.dp.toPx()),
+            )
+            drawText(t, topLeft = at)
         }
 
-        val hiText = measurer.measure("${metres(hi)} m", label)
-        drawText(hiText, topLeft = Offset(0f, 0f))
-        val loText = measurer.measure("${metres(lo)} m", label)
-        drawText(loText, topLeft = Offset(0f, bottom - loText.size.height - 2.dp.toPx()))
+        // The axes along the bottom, out of the line's way: 0 km, the
+        // range of heights, and the length.
+        val rangeText = measurer.measure("${metres(lo)}–${metres(hi)} m", label)
+        drawText(rangeText, topLeft = Offset((size.width - rangeText.size.width) / 2, bottom + 2.dp.toPx()))
         val end = measurer.measure("${km(length / 1000)} km", label)
         drawText(end, topLeft = Offset(size.width - end.size.width, bottom + 2.dp.toPx()))
         drawText(measurer.measure("0 km", label), topLeft = Offset(0f, bottom + 2.dp.toPx()))
@@ -134,7 +142,13 @@ fun ElevationChart(
             drawLine(onSurface, Offset(sx, top), Offset(sx, bottom))
             drawCircle(onSurface, 5.dp.toPx(), Offset(sx, sy))
             val t = measurer.measure("${km(profile.distances[i] / 1000)} km · ${metres(profile.elevations[i])} m", TextStyle(fontSize = 11.sp, color = onSurface))
-            drawText(t, topLeft = Offset((sx - t.size.width / 2).coerceIn(0f, size.width - t.size.width), 0f))
+            val at = Offset((sx - t.size.width / 2).coerceIn(0f, size.width - t.size.width), 0f)
+            drawRoundRect(
+                Color.White.copy(alpha = 0.9f), at - Offset(3.dp.toPx(), 0f),
+                androidx.compose.ui.geometry.Size(t.size.width + 6.dp.toPx(), t.size.height.toFloat()),
+                androidx.compose.ui.geometry.CornerRadius(3.dp.toPx()),
+            )
+            drawText(t, topLeft = at)
         }
     }
 }

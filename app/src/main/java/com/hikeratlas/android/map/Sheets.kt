@@ -76,7 +76,7 @@ private fun TitleRow(title: String, full: Boolean, onClose: () -> Unit, actions:
 @Composable
 fun PanelContent(model: PanelModel, onScrub: (DoubleArray?) -> Unit) {
     Column {
-        PanelHeader(model, full = true)
+        PanelHeader(model, full = true, onScrub)
         PanelBody(model, onScrub)
     }
 }
@@ -86,7 +86,7 @@ fun PanelContent(model: PanelModel, onScrub: (DoubleArray?) -> Unit) {
  * actions. At the sheet's lowest height, it's all that shows.
  */
 @Composable
-fun PanelHeader(model: PanelModel, full: Boolean) {
+fun PanelHeader(model: PanelModel, full: Boolean, onScrub: (DoubleArray?) -> Unit = {}) {
     val context = LocalContext.current
     Column(Modifier.fillMaxWidth().padding(bottom = 12.dp)) {
         when (val p = model.panel) {
@@ -154,36 +154,40 @@ fun PanelHeader(model: PanelModel, full: Boolean) {
             }
             is Panel.Detail -> {
                 val r = p.selected.route
-                TitleRow(p.selected.title, full, model::close)
-                Column(Modifier.padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                // The actions are icons beside the title, not a row of their
+                // own: the peek is the title, one line of numbers and the chart.
+                TitleRow(p.selected.title, full, model::close, actions = {
+                    val start = r.line.firstOrNull()
+                    if (start != null) {
+                        IconButton(onClick = { directions(context, start[1], start[0], p.selected.title) }) {
+                            Icon(Icons.Filled.Directions, contentDescription = "Directions to the start", tint = MaterialTheme.colorScheme.primary)
+                        }
+                    }
+                    if (p.shareUrl != null) {
+                        IconButton(onClick = { share(context, p.selected.title, p.shareUrl) }) {
+                            Icon(Icons.Filled.Share, contentDescription = "Share")
+                        }
+                    }
+                })
+                Column(Modifier.padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     val type = if (full) p.selected.label else p.selected.label.substringBefore(" · ")
                     Text(
-                        "$type · ${km(r.km)} km · ↑ ${metres(r.gain)} m · high ${metres(r.max_ele)} m",
+                        "$type · ${km(r.km)} km · ↑ ${metres(r.gain)} m · high ${metres(r.max_ele)} m" + if (r.scramble) " · scramble" else "",
                         style = MaterialTheme.typography.bodyMedium, color = MUTED,
+                        // Two lines at most: a scramble's note can need the second.
+                        maxLines = if (full) 3 else 2, overflow = TextOverflow.Ellipsis,
                     )
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        val start = r.line.firstOrNull()
-                        if (start != null) {
-                            Button(
-                                onClick = { directions(context, start[1], start[0], p.selected.title) },
-                                contentPadding = PaddingValues(horizontal = 16.dp),
-                                modifier = Modifier.height(40.dp),
-                            ) {
-                                Icon(Icons.Filled.Directions, contentDescription = null, modifier = Modifier.size(18.dp))
-                                Spacer(Modifier.width(6.dp))
-                                Text("Directions")
-                            }
-                        }
-                        if (p.shareUrl != null) {
-                            OutlinedButton(
-                                onClick = { share(context, p.selected.title, p.shareUrl) },
-                                contentPadding = PaddingValues(horizontal = 16.dp),
-                                modifier = Modifier.height(40.dp),
-                            ) {
-                                Icon(Icons.Filled.Share, contentDescription = null, modifier = Modifier.size(18.dp))
-                                Spacer(Modifier.width(6.dp))
-                                Text("Share")
-                            }
+                    // The same height loading or not, so the peek doesn't jump.
+                    Box(Modifier.fillMaxWidth().height(CHART_HEIGHT), contentAlignment = Alignment.CenterStart) {
+                        when (val prof = p.profile) {
+                            ProfileState.Loading -> Text("Measuring elevation…", color = MUTED, style = MaterialTheme.typography.bodySmall)
+                            is ProfileState.Failed -> Text("Couldn't measure elevation", color = MUTED, style = MaterialTheme.typography.bodySmall)
+                            is ProfileState.Ready -> ElevationChart(
+                                prof.profile,
+                                r.stopovers.map { Mark(it.km * 1000, it.name) },
+                                onScrub = { i -> onScrub(i?.let { prof.profile.coords[it] }) },
+                                height = CHART_HEIGHT,
+                            )
                         }
                     }
                 }
@@ -191,6 +195,12 @@ fun PanelHeader(model: PanelModel, full: Boolean) {
         }
     }
 }
+
+/** The hike chart's height in the sheet's peek: the route stays in view above it. */
+private val CHART_HEIGHT = 96.dp
+
+/** Whether a hike has anything below its peek: a scramble warning, or a base camp's hikes. */
+fun hasDetailBody(d: Panel.Detail) = d.selected.route.scramble || d.selected.base != null
 
 /** The rest of the sheet: lists, the elevation chart, details. Scrolls. */
 @Composable
@@ -207,7 +217,7 @@ fun PanelBody(model: PanelModel, onScrub: (DoubleArray?) -> Unit) {
                 for (item in shown) RouteRow(item) { model.openRoute(item.park, item.id) }
             }
         }
-        is Panel.Detail -> DetailBody(p, model, onScrub)
+        is Panel.Detail -> DetailBody(p, model)
         is Panel.Trail -> TrailBody(p, model, onScrub)
         else -> {}
     }
@@ -270,9 +280,9 @@ private fun RouteRow(item: RouteItem, onClick: () -> Unit) {
 }
 
 @Composable
-private fun DetailBody(d: Panel.Detail, model: PanelModel, onScrub: (DoubleArray?) -> Unit) {
+private fun DetailBody(d: Panel.Detail, model: PanelModel) {
     val r = d.selected.route
-    Column(Modifier.padding(horizontal = 20.dp).padding(bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    Column(Modifier.padding(horizontal = 20.dp).padding(top = 4.dp, bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         if (r.scramble) {
             Text(
                 "Includes scrambling (SAC T4, alpine hiking): expect to use your hands on rock, exposed sections, and possibly snow. Some sections may need route-finding.",
@@ -283,33 +293,6 @@ private fun DetailBody(d: Panel.Detail, model: PanelModel, onScrub: (DoubleArray
                     .padding(10.dp),
             )
         }
-
-        when (val prof = d.profile) {
-            ProfileState.Loading -> Box(Modifier.fillMaxWidth().height(110.dp), contentAlignment = Alignment.CenterStart) {
-                Text("Measuring elevation…", color = MUTED)
-            }
-            is ProfileState.Failed -> Text("Couldn't measure elevation: ${prof.message}", color = MUTED, style = MaterialTheme.typography.bodySmall)
-            is ProfileState.Ready -> ElevationChart(
-                prof.profile,
-                r.stopovers.map { Mark(it.km * 1000, it.name) },
-                onScrub = { i -> onScrub(i?.let { prof.profile.coords[it] }) },
-            )
-        }
-
-        val isCampWalkIn = d.selected.base != null && d.selected.id.split('/').size == 3
-        if (r.stopovers.isNotEmpty()) {
-            Row(if (isCampWalkIn) "Camp" else "Campsites", r.stopovers.joinToString(", ") { "${it.name} (${km(it.km)} km)" })
-        }
-        if (r.via.isNotEmpty()) Row("Via", r.via.take(6).joinToString(", ") + if (r.via.size > 6) "…" else "")
-        val passing = r.passing
-        if (passing.isNotEmpty()) {
-            Row("Passes", passing.joinToString("; ") { names -> names.take(3).joinToString(", ") + if (names.size > 3) "…" else "" })
-        }
-        val terrain = r.terrain.filter { it.second >= 0.05 }
-        if (terrain.isNotEmpty()) {
-            Row("Terrain", terrain.joinToString(", ") { (k, s) -> "$k ${Math.round(s * 100)}%" })
-        }
-
         d.selected.base?.let { b ->
             val park = d.selected.park
             val i = d.selected.baseIndex
@@ -324,34 +307,9 @@ private fun DetailBody(d: Panel.Detail, model: PanelModel, onScrub: (DoubleArray
                 LinkRow("The walk in", null) { model.openRoute(park, "$park/base/$i") }
             }
         }
-
-        if (d.selected.why.isNotEmpty()) {
-            var open by remember(d.selected.id) { mutableStateOf(false) }
-            Column {
-                TextButton(onClick = { open = !open }, contentPadding = PaddingValues(0.dp)) {
-                    Text(if (open) "▾ Why this route" else "▸ Why this route", color = MUTED)
-                }
-                if (open) {
-                    Text(
-                        d.selected.why.joinToString(" · ") { (k, v) -> "${k.replace('_', ' ')} ${if (v > 0) "+" else ""}${trim(v)}" },
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MUTED,
-                    )
-                }
-            }
-        }
     }
 }
 
-private fun trim(v: Double) = if (v == Math.floor(v)) v.toLong().toString() else v.toString()
-
-@Composable
-private fun Row(label: String, value: String) {
-    androidx.compose.foundation.layout.Row(Modifier.fillMaxWidth()) {
-        Text(label, color = MUTED, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.width(88.dp))
-        Text(value, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
-    }
-}
 
 @Composable
 private fun LinkRow(title: String, meta: String?, onClick: () -> Unit) {
