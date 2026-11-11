@@ -163,9 +163,12 @@ fun MapScreen(app: HikerAtlasApp, onSheetOpen: (Boolean) -> Unit = {}) {
         fun apply(json: String) = c.map.setStyle(Style.Builder().fromJson(json)) { s ->
             c.onStyleLoaded(s)
             mapLayers = MapLayers(s).also { it.apply(layerChoice) }
+            // A new style drops what was drawn on the old one.
+            (model.panel as? Panel.Detail)?.let { c.showRoute(it.selected.route.line) }
             style = s
         }
-        // Start from last time's style, and fetch a fresh one for next time.
+        // Start from last time's style, so the map draws at once; then use
+        // the fresh one if it's any different.
         val saved = if (attempt == 0) loader.cached() else null
         if (saved != null) {
             loader.registerArchives(saved)
@@ -173,7 +176,7 @@ fun MapScreen(app: HikerAtlasApp, onSheetOpen: (Boolean) -> Unit = {}) {
         }
         try {
             val fresh = loader.load()
-            if (saved == null) apply(fresh)
+            if (fresh != saved) apply(fresh)
         } catch (e: Exception) {
             if (saved == null) styleError = e.message ?: e.toString()
         }

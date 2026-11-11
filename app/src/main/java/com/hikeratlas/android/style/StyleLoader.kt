@@ -20,7 +20,8 @@ import java.io.IOException
  * copy is fetched for next time.
  */
 class StyleLoader(private val client: OkHttpClient, private val cacheDir: File) {
-    private val cached get() = File(cacheDir, "style.json")
+    // Named for the rewriting's version: an older build's copy is ignored.
+    private val cached get() = File(cacheDir, "style-v${StyleRewriter.VERSION}.json")
 
     /** The style from last time, if any. */
     fun cached(): String? = try {
