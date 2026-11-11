@@ -16,6 +16,7 @@ import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -28,6 +29,7 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.graphics.vector.ImageVector
+import android.net.Uri
 import com.hikeratlas.android.HikerAtlasApp
 import com.hikeratlas.android.map.MapScreen
 
@@ -38,8 +40,10 @@ private enum class Tab(val label: String, val selected: ImageVector, val unselec
 }
 
 @Composable
-fun AppScreen(app: HikerAtlasApp) {
+fun AppScreen(app: HikerAtlasApp, link: Uri? = null, onLinkHandled: () -> Unit = {}) {
     var tab by rememberSaveable { mutableStateOf(Tab.Map) }
+    // A website link opens on the map.
+    LaunchedEffect(link) { if (link != null) tab = Tab.Map }
     // A sheet on the map needs the room: the tabs step aside while it's open.
     var sheetOpen by remember { mutableStateOf(false) }
     val tabsShown = !(tab == Tab.Map && sheetOpen)
@@ -50,7 +54,10 @@ fun AppScreen(app: HikerAtlasApp) {
     Box(Modifier.fillMaxSize()) {
         // The map stays composed under the other tabs, so it keeps its place,
         // its tiles and whatever sheet is open.
-        MapScreen(app, onSheetOpen = { sheetOpen = it }, bottomBar = if (tabsShown) barHeight else 0.dp)
+        MapScreen(
+            app, onSheetOpen = { sheetOpen = it }, bottomBar = if (tabsShown) barHeight else 0.dp,
+            link = link, onLinkHandled = onLinkHandled,
+        )
         if (tab == Tab.You) Box(Modifier.fillMaxSize().padding(bottom = barHeight)) { YouScreen() }
         AnimatedVisibility(
             visible = tabsShown,
