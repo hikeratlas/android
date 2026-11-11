@@ -57,6 +57,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Dp
+import android.net.Uri
+import com.hikeratlas.android.routes.Link
+import kotlinx.coroutines.CancellationException
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
@@ -88,7 +91,14 @@ import org.maplibre.android.maps.Style
  * says whether a sheet is open, so the app can hide its tabs meanwhile.
  */
 @Composable
-fun MapScreen(app: HikerAtlasApp, onSheetOpen: (Boolean) -> Unit = {}, bottomBar: Dp = 0.dp) {
+fun MapScreen(
+    app: HikerAtlasApp,
+    onSheetOpen: (Boolean) -> Unit = {},
+    bottomBar: Dp = 0.dp,
+    /** A website link to open (a hike, park or region page), until [onLinkHandled]. */
+    link: Uri? = null,
+    onLinkHandled: () -> Unit = {},
+) {
     val context = LocalContext.current
     val density = LocalDensity.current.density
     val scope = rememberCoroutineScope()
@@ -269,6 +279,35 @@ fun MapScreen(app: HikerAtlasApp, onSheetOpen: (Boolean) -> Unit = {}, bottomBar
         planning = false
     }
     BackHandler(enabled = planning && !searching) { stopPlanning() }
+    // A website link the app was opened with: move to what it names, and
+    // open it. Links the app doesn't know just open the map.
+    LaunchedEffect(link, controller) {
+        val uri = link ?: return@LaunchedEffect
+        val c = controller ?: return@LaunchedEffect
+        onLinkHandled()
+        val parts = Link.parts(uri) ?: return@LaunchedEffect
+        searching = false
+        layersOpen = false
+        if (planning) stopPlanning()
+        val resolved = try {
+            Link.resolve(parts, app.routes.regions()) { app.routes.park(it) }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            null
+        }
+        fun fit(b: List<Double>, bottomPx: Int) = c.fitBox(b[0], b[1], b[2], b[3], bottomPx)
+        when (resolved) {
+            is Link.Region -> { model.close(); fit(resolved.bbox, 0) }
+            is Link.Park -> {
+                model.openPark(resolved.id, resolved.name)
+                resolved.bbox?.let { fit(it, (220 * density).toInt()) }
+            }
+            // Fitting the hike waits for its sheet, as for a tapped one.
+            is Link.Hike -> model.openRoute(resolved.park, resolved.id, fit = true, hint = resolved.title?.let { HikeHint(it, null) })
+            null -> {}
+        }
+    }
     // A newly opened panel starts at its lowest height: the map stays in view.
     LaunchedEffect(panel::class, (panel as? Panel.Detail)?.selected?.id, (panel as? Panel.RouteList)?.heading) {
         if (open && sheet.anchors.hasPositionFor(Stop.Peek)) sheet.animateTo(Stop.Peek)

@@ -115,12 +115,13 @@ data class BundleIndex(
 /** Every country, state and park with curated hikes (regions.json). */
 @Serializable
 data class Regions(val countries: List<Country> = emptyList()) {
+    // Slugs as in the website's URLs; bbox is [west, south, east, north].
     @Serializable
-    data class Country(val name: String, val states: List<State> = emptyList())
+    data class Country(val name: String, val slug: String = "", val bbox: List<Double>? = null, val states: List<State> = emptyList())
 
     @Serializable
-    data class State(val name: String, val areas: List<Area> = emptyList())
+    data class State(val name: String, val slug: String = "", val bbox: List<Double>? = null, val areas: List<Area> = emptyList())
 
     @Serializable
-    data class Area(val id: String, val name: String)
+    data class Area(val id: String, val name: String, val slug: String = "", val bbox: List<Double>? = null)
 }

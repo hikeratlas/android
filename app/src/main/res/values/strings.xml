@@ -1,4 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Hiker Atlas</string>
+    <!--
+      Names the website as this app's, so the site's hike pages can tell the
+      app is installed (navigator.getInstalledRelatedApps) and offer "Open in
+      app". Not about links: the intent filter isn't autoVerify'd.
+    -->
+    <string name="asset_statements" translatable="false">[{\"relation\": [\"delegate_permission/common.handle_all_urls\"], \"target\": {\"namespace\": \"web\", \"site\": \"https://www.hikeratlas.com\"}}]</string>
 </resources>
