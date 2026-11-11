@@ -4,12 +4,12 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import androidx.core.net.toUri
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -22,12 +22,11 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Directions
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.Button
-import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -40,13 +39,13 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.hikeratlas.android.routes.RouteItem
 import com.hikeratlas.android.routes.km
@@ -56,50 +55,141 @@ import java.util.Locale
 
 private val MUTED @Composable get() = MaterialTheme.colorScheme.onSurfaceVariant
 
-/** The sheet's header: an optional back link, a title, a subtitle and a close button. */
+/** The sheet's title row: a title (one line unless [full]) and a close button. */
 @Composable
-private fun Header(
-    title: String,
-    subtitle: String? = null,
-    back: String? = null,
-    onBack: (() -> Unit)? = null,
-    onClose: () -> Unit,
-    extra: @Composable () -> Unit = {},
-) {
-    Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 8.dp), verticalAlignment = Alignment.Top) {
-        Column(Modifier.weight(1f).padding(top = 4.dp)) {
-            if (back != null && onBack != null) {
-                TextButton(onClick = onBack, contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp)) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(Modifier.width(4.dp))
-                    Text(back, style = MaterialTheme.typography.labelLarge)
-                }
-            }
-            Text(title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-            if (subtitle != null) Text(subtitle, style = MaterialTheme.typography.bodyMedium, color = MUTED)
-            extra()
-        }
+private fun TitleRow(title: String, full: Boolean, onClose: () -> Unit, actions: @Composable () -> Unit = {}) {
+    Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(
+            title,
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.Bold,
+            maxLines = if (full) 3 else 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f),
+        )
+        actions()
         IconButton(onClick = onClose) { Icon(Icons.Filled.Close, contentDescription = "Close") }
     }
 }
 
+/** Header and body together, as one column: for tests and simple hosts. */
 @Composable
 fun PanelContent(model: PanelModel, onScrub: (DoubleArray?) -> Unit) {
-    when (val p = model.panel) {
-        Panel.None -> {}
-        is Panel.Loading -> {
-            Header(p.heading, onClose = model::close)
-            Box(Modifier.fillMaxWidth().height(120.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
-        }
-        is Panel.Failed -> {
-            Header(p.heading, onClose = model::close)
-            Column(Modifier.padding(20.dp)) {
-                Text("Couldn't load: ${p.message}", color = MaterialTheme.colorScheme.error)
-                Button(onClick = p.retry, modifier = Modifier.padding(top = 12.dp)) { Text("Try again") }
+    Column {
+        PanelHeader(model, full = true)
+        PanelBody(model, onScrub)
+    }
+}
+
+/**
+ * The part of the sheet that stays put: what it is, the key numbers and the
+ * actions. At the sheet's lowest height, it's all that shows.
+ */
+@Composable
+fun PanelHeader(model: PanelModel, full: Boolean) {
+    val context = LocalContext.current
+    Column(Modifier.fillMaxWidth().padding(bottom = 12.dp)) {
+        when (val p = model.panel) {
+            Panel.None -> {}
+            is Panel.Loading -> {
+                TitleRow(p.heading, full, model::close)
+                LinearProgressIndicator(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp))
+            }
+            is Panel.Failed -> {
+                TitleRow(p.heading, full, model::close)
+                Row(Modifier.padding(horizontal = 20.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text("Couldn't load: ${p.message}", color = MaterialTheme.colorScheme.error, modifier = Modifier.weight(1f))
+                    TextButton(onClick = p.retry) { Text("Try again") }
+                }
+            }
+            is Panel.RouteList -> {
+                TitleRow(p.heading, full, model::close, actions = {
+                    if (p.shareUrl != null) {
+                        IconButton(onClick = { share(context, p.heading, p.shareUrl) }) {
+                            Icon(Icons.Filled.Share, contentDescription = "Share")
+                        }
+                    }
+                })
+                Column(Modifier.padding(horizontal = 20.dp)) { AboutLine(p.about) }
+                val sections = p.items.mapNotNull { it.section }.distinct()
+                if (sections.size > 1) {
+                    Row(
+                        Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(start = 20.dp, end = 20.dp, top = 6.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        for (sec in sections) {
+                            FilterChip(
+                                selected = sec == model.section,
+                                onClick = { model.section = sec },
+                                label = { Text("$sec ${p.items.count { it.section == sec }}") },
+                            )
+                        }
+                    }
+                } else if (p.items.isNotEmpty()) {
+                    Text(
+                        "${p.items.size} ${if (p.items.size == 1) "route" else "routes"}",
+                        style = MaterialTheme.typography.bodyMedium, color = MUTED,
+                        modifier = Modifier.padding(horizontal = 20.dp),
+                    )
+                }
+            }
+            is Panel.Detail -> {
+                val r = p.selected.route
+                TitleRow(p.selected.title, full, model::close)
+                Column(Modifier.padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    val type = if (full) p.selected.label else p.selected.label.substringBefore(" · ")
+                    Text(
+                        "$type · ${km(r.km)} km · ↑ ${metres(r.gain)} m · high ${metres(r.max_ele)} m",
+                        style = MaterialTheme.typography.bodyMedium, color = MUTED,
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        val start = r.line.firstOrNull()
+                        if (start != null) {
+                            Button(
+                                onClick = { directions(context, start[1], start[0], p.selected.title) },
+                                contentPadding = PaddingValues(horizontal = 16.dp),
+                                modifier = Modifier.height(40.dp),
+                            ) {
+                                Icon(Icons.Filled.Directions, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Spacer(Modifier.width(6.dp))
+                                Text("Directions")
+                            }
+                        }
+                        if (p.shareUrl != null) {
+                            OutlinedButton(
+                                onClick = { share(context, p.selected.title, p.shareUrl) },
+                                contentPadding = PaddingValues(horizontal = 16.dp),
+                                modifier = Modifier.height(40.dp),
+                            ) {
+                                Icon(Icons.Filled.Share, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Spacer(Modifier.width(6.dp))
+                                Text("Share")
+                            }
+                        }
+                    }
+                }
             }
         }
-        is Panel.RouteList -> RouteListSheet(p, model)
-        is Panel.Detail -> DetailSheet(p, model, onScrub)
+    }
+}
+
+/** The rest of the sheet: lists, the elevation chart, details. Scrolls. */
+@Composable
+fun PanelBody(model: PanelModel, onScrub: (DoubleArray?) -> Unit) {
+    when (val p = model.panel) {
+        is Panel.RouteList -> {
+            if (p.items.isEmpty()) {
+                Text("No curated hikes here yet.", color = MUTED, modifier = Modifier.padding(20.dp))
+                return
+            }
+            val sections = p.items.mapNotNull { it.section }.distinct()
+            val shown = if (sections.size > 1) p.items.filter { it.section == model.section } else p.items
+            Column(Modifier.padding(bottom = 16.dp)) {
+                for (item in shown) RouteRow(item) { model.openRoute(item.park, item.id) }
+            }
+        }
+        is Panel.Detail -> DetailBody(p, model, onScrub)
+        else -> {}
     }
 }
 
@@ -122,43 +212,6 @@ private fun AboutLine(about: ParkAbout?) {
 }
 
 @Composable
-private fun RouteListSheet(list: Panel.RouteList, model: PanelModel) {
-    val sections = list.items.mapNotNull { it.section }.distinct()
-    var section by rememberSaveable(list.heading) { mutableStateOf(sections.firstOrNull()) }
-    val context = LocalContext.current
-    Header(list.heading, onClose = model::close, extra = { AboutLine(list.about) })
-    if (list.shareUrl != null) {
-        OutlinedButton(onClick = { share(context, list.heading, list.shareUrl) }, modifier = Modifier.padding(start = 20.dp, top = 4.dp)) {
-            Icon(Icons.Filled.Share, contentDescription = null, modifier = Modifier.size(18.dp))
-            Spacer(Modifier.width(6.dp))
-            Text("Share")
-        }
-    }
-    if (list.items.isEmpty()) {
-        Text("No curated hikes here yet.", color = MUTED, modifier = Modifier.padding(20.dp))
-        return
-    }
-    if (sections.size > 1) {
-        Row(
-            Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 20.dp, vertical = 8.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            for (s in sections) {
-                FilterChip(
-                    selected = s == section,
-                    onClick = { section = s },
-                    label = { Text("$s ${list.items.count { it.section == s }}") },
-                )
-            }
-        }
-    }
-    val shown = if (sections.size > 1) list.items.filter { it.section == section } else list.items
-    Column(Modifier.padding(bottom = 16.dp)) {
-        for (item in shown) RouteRow(item) { model.openRoute(item.park, item.id) }
-    }
-}
-
-@Composable
 private fun RouteRow(item: RouteItem, onClick: () -> Unit) {
     HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
     Column(Modifier.fillMaxWidth().clickable(onClick = onClick).heightIn(min = 56.dp).padding(horizontal = 20.dp, vertical = 10.dp)) {
@@ -168,17 +221,9 @@ private fun RouteRow(item: RouteItem, onClick: () -> Unit) {
 }
 
 @Composable
-private fun DetailSheet(d: Panel.Detail, model: PanelModel, onScrub: (DoubleArray?) -> Unit) {
+private fun DetailBody(d: Panel.Detail, model: PanelModel, onScrub: (DoubleArray?) -> Unit) {
     val r = d.selected.route
-    val context = LocalContext.current
-    Header(d.selected.title, d.selected.label, back = d.back?.heading, onBack = model::back, onClose = model::close)
-
     Column(Modifier.padding(horizontal = 20.dp).padding(bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Row(Modifier.fillMaxWidth().padding(top = 8.dp)) {
-            Stat("${km(r.km)} km", "distance", Modifier.weight(1f))
-            Stat("↑ ${metres(r.gain)} m", "climb", Modifier.weight(1f))
-            Stat("${metres(r.max_ele)} m", "high point", Modifier.weight(1f))
-        }
         if (r.scramble) {
             Text(
                 "Includes scrambling (SAC T4, alpine hiking): expect to use your hands on rock, exposed sections, and possibly snow. Some sections may need route-finding.",
@@ -189,37 +234,17 @@ private fun DetailSheet(d: Panel.Detail, model: PanelModel, onScrub: (DoubleArra
                     .padding(10.dp),
             )
         }
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            val start = r.line.firstOrNull()
-            if (start != null) {
-                Button(onClick = { directions(context, start[1], start[0], d.selected.title) }, modifier = Modifier.weight(1f)) {
-                    Icon(Icons.Filled.Directions, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(Modifier.width(6.dp))
-                    Text("Directions")
-                }
-            }
-            if (d.shareUrl != null) {
-                OutlinedButton(onClick = { share(context, d.selected.title, d.shareUrl) }, modifier = Modifier.weight(1f)) {
-                    Icon(Icons.Filled.Share, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(Modifier.width(6.dp))
-                    Text("Share")
-                }
-            }
-        }
 
         when (val prof = d.profile) {
-            ProfileState.Loading -> Box(Modifier.fillMaxWidth().height(140.dp), contentAlignment = Alignment.CenterStart) {
+            ProfileState.Loading -> Box(Modifier.fillMaxWidth().height(110.dp), contentAlignment = Alignment.CenterStart) {
                 Text("Measuring elevation…", color = MUTED)
             }
             is ProfileState.Failed -> Text("Couldn't measure elevation: ${prof.message}", color = MUTED, style = MaterialTheme.typography.bodySmall)
-            is ProfileState.Ready -> Column {
-                ElevationChart(
-                    prof.profile,
-                    r.stopovers.map { Mark(it.km * 1000, it.name) },
-                    onScrub = { i -> onScrub(i?.let { prof.profile.coords[it] }) },
-                )
-                Text("Drag along the chart to see each point on the map.", style = MaterialTheme.typography.bodySmall, color = MUTED)
-            }
+            is ProfileState.Ready -> ElevationChart(
+                prof.profile,
+                r.stopovers.map { Mark(it.km * 1000, it.name) },
+                onScrub = { i -> onScrub(i?.let { prof.profile.coords[it] }) },
+            )
         }
 
         val isCampWalkIn = d.selected.base != null && d.selected.id.split('/').size == 3
@@ -254,14 +279,12 @@ private fun DetailSheet(d: Panel.Detail, model: PanelModel, onScrub: (DoubleArra
         if (d.selected.why.isNotEmpty()) {
             var open by remember(d.selected.id) { mutableStateOf(false) }
             Column {
-                TextButton(onClick = { open = !open }, contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp)) {
+                TextButton(onClick = { open = !open }, contentPadding = PaddingValues(0.dp)) {
                     Text(if (open) "▾ Why this route" else "▸ Why this route", color = MUTED)
                 }
                 if (open) {
                     Text(
-                        d.selected.why.joinToString(" · ") { (k, v) ->
-                            "${k.replace('_', ' ')} ${if (v > 0) "+" else ""}${String.format(Locale.US, "%s", trim(v))}"
-                        },
+                        d.selected.why.joinToString(" · ") { (k, v) -> "${k.replace('_', ' ')} ${if (v > 0) "+" else ""}${trim(v)}" },
                         style = MaterialTheme.typography.bodySmall,
                         color = MUTED,
                     )
@@ -272,14 +295,6 @@ private fun DetailSheet(d: Panel.Detail, model: PanelModel, onScrub: (DoubleArra
 }
 
 private fun trim(v: Double) = if (v == Math.floor(v)) v.toLong().toString() else v.toString()
-
-@Composable
-private fun Stat(value: String, label: String, modifier: Modifier) {
-    Column(modifier) {
-        Text(value, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-        Text(label, style = MaterialTheme.typography.bodySmall, color = MUTED)
-    }
-}
 
 @Composable
 private fun Row(label: String, value: String) {

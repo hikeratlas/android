@@ -17,6 +17,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -32,9 +33,11 @@ private enum class Tab(val label: String, val selected: ImageVector, val unselec
 @Composable
 fun AppScreen(app: HikerAtlasApp) {
     var tab by rememberSaveable { mutableStateOf(Tab.Map) }
+    // A sheet on the map needs the room: the tabs step aside while it's open.
+    var sheetOpen by remember { mutableStateOf(false) }
     Scaffold(
         bottomBar = {
-            NavigationBar {
+            if (!(tab == Tab.Map && sheetOpen)) NavigationBar {
                 for (t in Tab.entries) {
                     NavigationBarItem(
                         selected = t == tab,
@@ -49,7 +52,7 @@ fun AppScreen(app: HikerAtlasApp) {
         Box(Modifier.fillMaxSize().padding(bottom = padding.calculateBottomPadding())) {
             // The map stays composed under the other tabs, so it keeps its place,
             // its tiles and whatever sheet is open.
-            MapScreen(app)
+            MapScreen(app, onSheetOpen = { sheetOpen = it })
             if (tab == Tab.You) YouScreen()
         }
     }
