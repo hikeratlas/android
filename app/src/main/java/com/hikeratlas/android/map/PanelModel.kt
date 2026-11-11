@@ -43,7 +43,12 @@ data class ParkAbout(val operator: String?, val website: String?) {
 /** What the bottom sheet shows. */
 sealed interface Panel {
     data object None : Panel
-    data class Loading(val heading: String) : Panel
+    /**
+     * Something on its way. For a hike, [hike] is what's known of it already
+     * (from the list or map it was picked on), so the sheet can show its
+     * title and numbers at its final height while the rest loads.
+     */
+    data class Loading(val heading: String, val hike: HikeHint? = null) : Panel
     data class Failed(val heading: String, val message: String, val retry: () -> Unit) : Panel
 
     /** Routes under a tap, routes in view, or a park's routes. */
@@ -83,6 +88,9 @@ sealed interface Panel {
         val profile: ProfileState = ProfileState.Loading,
     ) : Panel
 }
+
+/** A hike's title and summary line, as known before its park's routes are loaded. */
+data class HikeHint(val title: String, val meta: String?)
 
 sealed interface ProfileState {
     data object Loading : ProfileState
@@ -158,19 +166,35 @@ class PanelModel(
         }
     }
 
-    /** Opens a route; [fit] moves the map to it. */
-    fun openRoute(parkId: String, id: String, fit: Boolean = true) {
+    /**
+     * Opens a route; [fit] moves the map to it. [hint] is what's already known
+     * of it (its title and summary), shown while its park's routes load.
+     */
+    fun openRoute(parkId: String, id: String, fit: Boolean = true, hint: HikeHint? = null) {
         val from = panel as? Panel.RouteList ?: (panel as? Panel.Detail)?.back
-        load("Loading…", after = { p ->
+        val after = { p: Panel ->
             if (p is Panel.Detail) {
                 onRoute(p.selected, fit)
                 fitPending = fit
                 profile(p)
             }
-        }) {
-            val doc = routes.park(parkId) ?: error("This hike's park has no routes any more.")
-            val sel = lookup(doc, id) ?: error("That hike has changed since the map was drawn.")
-            Panel.Detail(sel, doc, from, hikeUrl(idx(), doc, id))
+        }
+        // Already loaded: straight to the hike, with no loading state between.
+        val doc = routes.cachedPark(parkId)
+        val idx = index
+        val sel = doc?.let { lookup(it, id) }
+        if (doc != null && sel != null && idx != null) {
+            job?.cancel()
+            onTrail(null)
+            val d = Panel.Detail(sel, doc, from, hikeUrl(idx, doc, id))
+            panel = d
+            after(d)
+            return
+        }
+        load("Loading…", hint, after) {
+            val loaded = routes.park(parkId) ?: error("This hike's park has no routes any more.")
+            val found = lookup(loaded, id) ?: error("That hike has changed since the map was drawn.")
+            Panel.Detail(found, loaded, from, hikeUrl(idx(), loaded, id))
         }
     }
 
@@ -268,19 +292,19 @@ class PanelModel(
         }
     }
 
-    private fun load(heading: String, after: (Panel) -> Unit = {}, block: suspend () -> Panel) {
+    private fun load(heading: String, hint: HikeHint? = null, after: (Panel) -> Unit = {}, block: suspend () -> Panel) {
         job?.cancel()
         onRoute(null, false)
         onTrail(null)
         fitPending = false
-        panel = Panel.Loading(heading)
+        panel = Panel.Loading(hint?.title ?: heading, hint)
         job = scope.launch {
             val p = try {
                 block()
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e
             } catch (e: Exception) {
-                Panel.Failed(heading, e.message ?: e.toString()) { load(heading, after, block) }
+                Panel.Failed(heading, e.message ?: e.toString()) { load(heading, hint, after, block) }
             }
             panel = p
             after(p)

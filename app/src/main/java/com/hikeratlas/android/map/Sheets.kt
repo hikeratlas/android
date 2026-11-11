@@ -93,7 +93,18 @@ fun PanelHeader(model: PanelModel, full: Boolean, onScrub: (DoubleArray?) -> Uni
             Panel.None -> {}
             is Panel.Loading -> {
                 TitleRow(p.heading, full, model::close)
-                LinearProgressIndicator(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp))
+                if (p.hike != null) {
+                    // Laid out as the hike's header will be, so the sheet
+                    // doesn't change height when it arrives.
+                    Column(Modifier.padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text(p.hike.meta ?: "", style = MaterialTheme.typography.bodyMedium, color = MUTED, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Box(Modifier.fillMaxWidth().height(CHART_HEIGHT), contentAlignment = Alignment.Center) {
+                            LinearProgressIndicator(Modifier.fillMaxWidth())
+                        }
+                    }
+                } else {
+                    LinearProgressIndicator(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp))
+                }
             }
             is Panel.Failed -> {
                 TitleRow(p.heading, full, model::close)
@@ -214,7 +225,7 @@ fun PanelBody(model: PanelModel, onScrub: (DoubleArray?) -> Unit) {
             val sections = p.items.mapNotNull { it.section }.distinct()
             val shown = if (sections.size > 1) p.items.filter { it.section == model.section } else p.items
             Column(Modifier.padding(bottom = 16.dp)) {
-                for (item in shown) RouteRow(item) { model.openRoute(item.park, item.id) }
+                for (item in shown) RouteRow(item) { model.openRoute(item.park, item.id, hint = HikeHint(item.title, item.meta)) }
             }
         }
         is Panel.Detail -> DetailBody(p, model)
@@ -239,7 +250,7 @@ private fun TrailBody(t: Panel.Trail, model: PanelModel, onScrub: (DoubleArray?)
         if (!hikes.isNullOrEmpty()) {
             Column {
                 Text("Hikes on this trail", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
-                for (h in hikes) LinkRow(h.title, h.meta) { model.openRoute(h.park, h.id) }
+                for (h in hikes) LinkRow(h.title, h.meta) { model.openRoute(h.park, h.id, hint = HikeHint(h.title, h.meta)) }
             }
         } else if (!t.loading && hikes != null) {
             Column {
@@ -300,9 +311,8 @@ private fun DetailBody(d: Panel.Detail, model: PanelModel) {
                 Text("From ${b.camp}:", color = MUTED, style = MaterialTheme.typography.bodyMedium)
                 b.hikes.forEachIndexed { j, h ->
                     val title = h.name?.takeIf { it.isNotEmpty() } ?: h.dest
-                    LinkRow(title, "${km(h.route.km)} km · ↑ ${metres(h.route.gain)} m" + if (h.route.scramble) " · scramble" else "") {
-                        model.openRoute(park, "$park/base/$i/$j")
-                    }
+                    val meta = "${km(h.route.km)} km · ↑ ${metres(h.route.gain)} m" + if (h.route.scramble) " · scramble" else ""
+                    LinkRow(title, meta) { model.openRoute(park, "$park/base/$i/$j", hint = HikeHint(title, meta)) }
                 }
                 LinkRow("The walk in", null) { model.openRoute(park, "$park/base/$i") }
             }

@@ -234,11 +234,11 @@ class SheetScreenshots {
         }
         compose.waitUntil(5_000) { planner != null }
         compose.runOnIdle {
-            planner!!.add(ll(200.0, 3000.0), 13.0)
-            planner!!.add(ll(2600.0, 2300.0), 13.0)
-            planner!!.add(ll(3900.0, 1000.0), 13.0)
+            planner?.add(ll(200.0, 3000.0), 13.0)
+            planner?.add(ll(2600.0, 2300.0), 13.0)
+            planner?.add(ll(3900.0, 1000.0), 13.0)
         }
-        compose.waitUntil(60_000) { planner!!.points.size == 3 && planner!!.profile != null }
+        compose.waitUntil(60_000) { planner?.let { it.points.size == 3 && it.profile != null } == true }
         compose.waitForIdle()
         val bmp = compose.onRoot().captureToImage().asAndroidBitmap()
         val out = File("build/screenshots/planner.png").apply { parentFile!!.mkdirs() }

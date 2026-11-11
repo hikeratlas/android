@@ -56,6 +56,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
@@ -67,6 +68,7 @@ import com.hikeratlas.android.HikerAtlasApp
 import com.hikeratlas.android.routes.RouteItem
 import com.hikeratlas.android.routes.itemsFromProperties
 import com.hikeratlas.android.routing.Planner
+import com.hikeratlas.android.search.SearchApi
 import com.hikeratlas.android.search.SearchItem
 import com.hikeratlas.android.search.SearchScreen
 import com.hikeratlas.android.pmtiles.HttpRangeSource
@@ -86,7 +88,7 @@ import org.maplibre.android.maps.Style
  * says whether a sheet is open, so the app can hide its tabs meanwhile.
  */
 @Composable
-fun MapScreen(app: HikerAtlasApp, onSheetOpen: (Boolean) -> Unit = {}) {
+fun MapScreen(app: HikerAtlasApp, onSheetOpen: (Boolean) -> Unit = {}, bottomBar: Dp = 0.dp) {
     val context = LocalContext.current
     val density = LocalDensity.current.density
     val scope = rememberCoroutineScope()
@@ -198,7 +200,7 @@ fun MapScreen(app: HikerAtlasApp, onSheetOpen: (Boolean) -> Unit = {}) {
                 val p = m.projection.toScreenLocation(latLng)
                 val found = itemsFromProperties(c.routesAt(p))
                 when {
-                    found.size == 1 -> model.openRoute(found[0].park, found[0].id, fit = false)
+                    found.size == 1 -> model.openRoute(found[0].park, found[0].id, fit = false, hint = HikeHint(found[0].title, found[0].meta))
                     found.size > 1 -> model.showList(Panel.RouteList("${found.size} routes here", found))
                     else -> {
                         val park = c.parkAt(p) ?: return@addOnMapClickListener false
@@ -246,9 +248,12 @@ fun MapScreen(app: HikerAtlasApp, onSheetOpen: (Boolean) -> Unit = {}) {
     }
 
     var containerPx by remember { mutableIntStateOf(0) }
-    var headerPx by remember { mutableIntStateOf(0) }
+    // Measured afresh for each sheet: a height left from the last one would
+    // put this one's first frame at the wrong height.
+    var headerPx by remember(panel != Panel.None) { mutableIntStateOf(0) }
     val navInsetPx = WindowInsets.navigationBars.getBottom(LocalDensity.current)
-    val peekPx = headerPx + navInsetPx
+    // Zero until the header is measured: the sheet waits off-screen till then.
+    val peekPx = if (headerPx > 0) headerPx + navInsetPx else 0
     val open = panel != Panel.None
     // A fresh sheet each time one opens, so it starts low however the last was left.
     val sheet = remember(open) { AnchoredDraggableState(Stop.Peek) }
@@ -374,7 +379,7 @@ fun MapScreen(app: HikerAtlasApp, onSheetOpen: (Boolean) -> Unit = {}) {
                 Surface(
                     shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp),
                     shadowElevation = 8.dp,
-                    modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth(),
+                    modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = bottomBar).fillMaxWidth(),
                 ) {
                     InViewPeek(inView.size) {
                         model.showList(Panel.RouteList("${inView.size} curated ${if (inView.size == 1) "hike" else "hikes"} in view", inView))
@@ -454,7 +459,10 @@ private fun onSearchPick(item: SearchItem, c: MapController?, model: PanelModel,
     when (item.kind) {
         "park" -> model.openPark(item.osm_id, item.name)
         // A curated hike's osm_id is its route id, <park>/day/i etc.
-        "hike" -> model.openRoute(item.osm_id.substringBefore('/'), item.osm_id, fit = false)
+        "hike" -> model.openRoute(
+            item.osm_id.substringBefore('/'), item.osm_id, fit = false,
+            hint = HikeHint(item.name, SearchApi.describe(item)),
+        )
         // An OSM trail: its own panel, with its elevation and the hikes that walk it.
         "trail" -> model.openTrail(
             item.name, item.km, item.park, item.state,
