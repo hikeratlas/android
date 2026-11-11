@@ -83,7 +83,12 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
-          mv app-debug.apk hiker-atlas.apk
+          set -euo pipefail
+          # Uploaded under its own name, then swapped in for hiker-atlas.apk:
+          # the old APK stays downloadable while this one uploads (~10-20 s),
+          # leaving a gap of only one API call between the delete and the rename.
+          upload="hiker-atlas-${GITHUB_SHA::7}.apk"
+          mv app-debug.apk "$upload"
           notes="The newest build of main, from ${GITHUB_SHA::7}: a debug build, signed with the shared debug key, so it installs over earlier ones. Download hiker-atlas.apk on your phone and open it to install."
           # Point the tag at this commit (made on first use).
           gh api -X PATCH "repos/$GH_REPO/git/refs/tags/latest" -f sha="$GITHUB_SHA" -F force=true >/dev/null 2>&1 \
@@ -93,4 +98,15 @@ jobs:
           else
             gh release create latest --title "Latest build" --notes "$notes" --latest --verify-tag
           fi
-          gh release upload latest hiker-atlas.apk --clobber
+          assets() { gh api "repos/$GH_REPO/releases/tags/latest" --jq '.assets[] | "\(.id) \(.name)"'; }
+          # A failed run's leftover upload.
+          assets | while read -r id name; do
+            if [[ "$name" == hiker-atlas-*.apk ]]; then gh api -X DELETE "repos/$GH_REPO/releases/assets/$id"; fi
+          done
+          gh release upload latest "$upload" --clobber
+          new=$(assets | awk -v n="$upload" '$2 == n { print $1 }')
+          old=$(assets | awk '$2 == "hiker-atlas.apk" { print $1 }')
+          [ -n "$new" ] || { echo "::error::$upload didn't upload"; exit 1; }
+          if [ -n "$old" ]; then gh api -X DELETE "repos/$GH_REPO/releases/assets/$old"; fi
+          gh api -X PATCH "repos/$GH_REPO/releases/assets/$new" -f name=hiker-atlas.apk >/dev/null
+          echo "Published: $(assets)"
