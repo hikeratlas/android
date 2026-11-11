@@ -66,6 +66,36 @@ class ProfileTest {
     }
 
     @Test
+    fun fetchesAProfilesTilesAtOnce() {
+        // Each tile takes 300 ms to come; a line across six z14 tiles.
+        val slow = object : ElevationProfiler.DemSource {
+            override val minZoom = 14
+            override val maxZoom = 14
+            override fun tile(z: Int, x: Int, y: Int): FloatArray {
+                Thread.sleep(300)
+                return FloatArray(512 * 512) { 100f }
+            }
+        }
+        val line = listOf(listOf(-123.0, 50.0), listOf(-122.86, 50.0)) // ~10 km: 6+ tiles across
+        val t0 = System.nanoTime()
+        profiler(slow).profile(line)
+        val ms = (System.nanoTime() - t0) / 1_000_000
+        assertTrue("took $ms ms: tiles were fetched one at a time", ms < 900)
+    }
+
+    @Test
+    fun nlDemCoversNewfoundlandOnly() {
+        fun at(lon: Double, lat: Double, z: Int): Boolean {
+            val (x, y) = ElevationProfiler.lngLatToTile(lon, lat, z)
+            return NlDemSource.covers(z, x.toInt(), y.toInt())
+        }
+        assertTrue(at(-57.75, 49.6, 13)) // Gros Morne
+        assertTrue(at(-52.71, 47.56, 13)) // St. John's
+        assertTrue(!at(-123.39, 48.77, 13)) // Ruckle, BC
+        assertTrue(!at(-63.57, 44.65, 13)) // Halifax
+    }
+
+    @Test
     fun decodesTerrarium() {
         // R=128, G=0, B=0 is 0 m; R=128 G=100 B=128 is 100.5 m.
         val px = intArrayOf(0xFF800000.toInt(), 0xFF806480.toInt())

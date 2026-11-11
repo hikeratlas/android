@@ -52,6 +52,12 @@ class ElevationProfiler(private val sources: List<DemSource>) {
     fun profile(line: List<List<Double>>, step: Double = 10.0, threshold: Double = 10.0): Profile {
         require(line.size >= 2) { "a line needs two points" }
         val samples = resample(line, step)
+        // Fetch the tiles the samples fall in all at once: one round trip's
+        // wait, not one each as the samples come to them.
+        val tiles = samples.map { (_, p) -> lngLatToTile(p[0], p[1], DEM_Z).let { (tx, ty) -> floor(tx).toInt() to floor(ty).toInt() } }.distinct()
+        if (tiles.size > 1) {
+            FETCHERS.invokeAll(tiles.map { (x, y) -> java.util.concurrent.Callable { runCatching { grid(x, y) } } })
+        }
         val elevations = DoubleArray(samples.size) { elevationAt(samples[it].second) }
         var gain = 0.0
         var loss = 0.0
@@ -98,6 +104,11 @@ class ElevationProfiler(private val sources: List<DemSource>) {
 
     companion object {
         const val DEM_Z = 14 // ~5 m pixels at 512 px: finer than the 10 m step
+
+        /** Threads for fetching a profile's tiles at once (network-bound, so more than the cores). */
+        private val FETCHERS = java.util.concurrent.Executors.newFixedThreadPool(8) { r ->
+            Thread(r, "dem-fetch").apply { isDaemon = true }
+        }
         const val SIZE = 512
 
         /** Terrarium: elevation = R * 256 + G + B / 256 - 32768 metres. */
