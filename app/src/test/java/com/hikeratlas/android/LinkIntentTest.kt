@@ -36,4 +36,15 @@ class LinkIntentTest {
         assertTrue(handlers("https://example.com/hikes/canada").isEmpty())
         assertTrue(handlers("http://www.hikeratlas.com/hikes/canada").isEmpty())
     }
+
+    // What Chrome reads to tell the website the app is installed.
+    @Test
+    fun assetStatementsNameTheSite() {
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        val info = context.packageManager.getApplicationInfo(context.packageName, android.content.pm.PackageManager.GET_META_DATA)
+        val json = context.getString(info.metaData.getInt("asset_statements"))
+        val target = kotlinx.serialization.json.Json.parseToJsonElement(json).let { it as kotlinx.serialization.json.JsonArray }
+            .single().let { it as kotlinx.serialization.json.JsonObject }["target"].toString()
+        assertEquals("""{"namespace":"web","site":"https://www.hikeratlas.com"}""", target)
+    }
 }
