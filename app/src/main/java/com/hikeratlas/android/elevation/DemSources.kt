@@ -55,14 +55,24 @@ class NlDemSource(client: OkHttpClient) : ElevationProfiler.DemSource {
     }
 
     private fun lookup(z: Int, x: Int, y: Int): ByteArray? {
-        // Outside Newfoundland (its header's bounds), skip the lookup.
-        val h = archive.header()
-        val n = (1 shl z).toDouble()
-        val west = x / n * 360 - 180
-        val east = (x + 1) / n * 360 - 180
-        val north = Math.toDegrees(Math.atan(Math.sinh(Math.PI * (1 - 2 * y / n))))
-        val south = Math.toDegrees(Math.atan(Math.sinh(Math.PI * (1 - 2 * (y + 1) / n))))
-        if (east < h.minLon || west > h.maxLon || north < h.minLat || south > h.maxLat) return null
+        // Outside Newfoundland, skip the lookup, without reading the
+        // archive's header for its bounds (a round trip).
+        if (!covers(z, x, y)) return null
         return archive.tile(z, x, y)
+    }
+
+    companion object {
+        /** The archive's bounds (from its header, rounded out a little): w, s, e, n. As the website's NL_BOUNDS. */
+        val BOUNDS = doubleArrayOf(-59.5, 46.5, -52.5, 51.7)
+
+        /** Whether tile z/x/y overlaps nl-dem's bounds. */
+        fun covers(z: Int, x: Int, y: Int): Boolean {
+            val n = (1 shl z).toDouble()
+            val west = x / n * 360 - 180
+            val east = (x + 1) / n * 360 - 180
+            val north = Math.toDegrees(Math.atan(Math.sinh(Math.PI * (1 - 2 * y / n))))
+            val south = Math.toDegrees(Math.atan(Math.sinh(Math.PI * (1 - 2 * (y + 1) / n))))
+            return east >= BOUNDS[0] && west <= BOUNDS[2] && north >= BOUNDS[1] && south <= BOUNDS[3]
+        }
     }
 }
