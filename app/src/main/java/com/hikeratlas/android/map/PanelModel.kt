@@ -77,6 +77,12 @@ class PanelModel(
     var panel by mutableStateOf<Panel>(Panel.None)
         private set
 
+    /** The section a park's list shows (its chips), shared by the sheet's header and body. */
+    var section by mutableStateOf<String?>(null)
+
+    /** A route the map should fit into the space the sheet leaves, once it can. */
+    var fitPending by mutableStateOf(false)
+
     private var job: Job? = null
     private var index: BundleIndex? = null
 
@@ -84,6 +90,7 @@ class PanelModel(
 
     fun close() {
         job?.cancel()
+        fitPending = false
         panel = Panel.None
         onRoute(null, false)
     }
@@ -100,6 +107,8 @@ class PanelModel(
     fun showList(list: Panel.RouteList) {
         job?.cancel()
         onRoute(null, false)
+        fitPending = false
+        if ((panel as? Panel.RouteList)?.heading != list.heading) section = list.items.firstOrNull()?.section
         panel = list
     }
 
@@ -110,7 +119,9 @@ class PanelModel(
                 Panel.RouteList(name, emptyList(), about)
             } else {
                 val parkAbout = ParkAbout.of(doc.park?.operator, doc.park?.website) ?: about
-                Panel.RouteList(doc.park?.name ?: name, itemsFromPark(doc), parkAbout, parkId, parkUrl(idx(), parkId))
+                val items = itemsFromPark(doc)
+                section = items.firstOrNull()?.section
+                Panel.RouteList(doc.park?.name ?: name, items, parkAbout, parkId, parkUrl(idx(), parkId))
             }
         }
     }
@@ -121,6 +132,7 @@ class PanelModel(
         load("Loading…", after = { p ->
             if (p is Panel.Detail) {
                 onRoute(p.selected, fit)
+                fitPending = fit
                 profile(p)
             }
         }) {
@@ -145,6 +157,7 @@ class PanelModel(
     private fun load(heading: String, after: (Panel) -> Unit = {}, block: suspend () -> Panel) {
         job?.cancel()
         onRoute(null, false)
+        fitPending = false
         panel = Panel.Loading(heading)
         job = scope.launch {
             val p = try {

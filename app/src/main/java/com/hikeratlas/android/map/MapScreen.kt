@@ -8,6 +8,16 @@ import android.view.Gravity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.gestures.AnchoredDraggableState
+import androidx.compose.foundation.gestures.animateTo
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.text.style.TextOverflow
+import kotlin.math.roundToInt
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -19,25 +29,16 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material3.BottomSheetDefaults
-import androidx.compose.material3.BottomSheetScaffold
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.SheetValue
-import androidx.compose.material3.SmallFloatingActionButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.rememberBottomSheetScaffoldState
-import androidx.compose.material3.rememberStandardBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -52,7 +53,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
@@ -75,13 +75,14 @@ import org.maplibre.android.location.modes.RenderMode
 import org.maplibre.android.maps.MapView
 import org.maplibre.android.maps.Style
 
-@OptIn(ExperimentalMaterial3Api::class)
+/**
+ * The map, its search, and the sheet for routes and parks. [onSheetOpen]
+ * says whether a sheet is open, so the app can hide its tabs meanwhile.
+ */
 @Composable
-fun MapScreen(app: HikerAtlasApp) {
+fun MapScreen(app: HikerAtlasApp, onSheetOpen: (Boolean) -> Unit = {}) {
     val context = LocalContext.current
     val density = LocalDensity.current.density
-    val screenHeightPx = LocalWindowInfo.current.containerSize.height
-    val halfSheetPx = (screenHeightPx * 0.5).toInt()
     val scope = rememberCoroutineScope()
     val mapView = rememberMapViewWithLifecycle()
 
@@ -93,11 +94,11 @@ fun MapScreen(app: HikerAtlasApp) {
     var searching by remember { mutableStateOf(false) }
 
     val model = remember {
-        PanelModel(scope, app.routes, app.profiler) { sel, fit ->
+        // Fitting the route waits for the sheet to know its height (see below).
+        PanelModel(scope, app.routes, app.profiler) { sel, _ ->
             val c = controller ?: return@PanelModel
             c.showHover(null)
             c.showRoute(sel?.route?.line)
-            if (fit && sel != null) c.fitLine(sel.route.line, halfSheetPx)
         }
     }
     val panel = model.panel
@@ -172,56 +173,89 @@ fun MapScreen(app: HikerAtlasApp) {
         }
     }
 
-    val sheetState = rememberStandardBottomSheetState(initialValue = SheetValue.PartiallyExpanded, skipHiddenState = true)
-    val scaffoldState = rememberBottomSheetScaffoldState(bottomSheetState = sheetState)
-    val peek = when {
-        panel != Panel.None -> (halfSheetPx / density).dp
-        inView.isNotEmpty() -> 76.dp
-        else -> 0.dp
-    }
-    // A newly opened panel starts half open.
+    var containerPx by remember { mutableIntStateOf(0) }
+    var headerPx by remember { mutableIntStateOf(0) }
+    val navInsetPx = WindowInsets.navigationBars.getBottom(LocalDensity.current)
+    val peekPx = headerPx + navInsetPx
+    val open = panel != Panel.None
+    // A fresh sheet each time one opens, so it starts low however the last was left.
+    val sheet = remember(open) { AnchoredDraggableState(Stop.Peek) }
+
+    LaunchedEffect(open) { onSheetOpen(open) }
+    // A newly opened panel starts at its lowest height: the map stays in view.
     LaunchedEffect(panel::class, (panel as? Panel.Detail)?.selected?.id, (panel as? Panel.RouteList)?.heading) {
-        if (panel != Panel.None) sheetState.partialExpand()
+        if (open && sheet.anchors.hasPositionFor(Stop.Peek)) sheet.animateTo(Stop.Peek)
     }
-    BackHandler(enabled = panel != Panel.None && !searching) { model.back() }
+    // Fit the route into the map the sheet leaves: when it opens (if asked),
+    // and whenever the sheet comes to rest at half height.
+    val detail = panel as? Panel.Detail
+    LaunchedEffect(detail?.selected?.id, model.fitPending, sheet.settledValue, peekPx, containerPx) {
+        val c = controller ?: return@LaunchedEffect
+        val d = detail ?: return@LaunchedEffect
+        if (peekPx <= navInsetPx || sheet.offset.isNaN()) return@LaunchedEffect
+        val settled = sheet.settledValue
+        if ((model.fitPending && settled != Stop.Full) || settled == Stop.Half) {
+            c.fitLine(d.selected.route.line, (containerPx - sheet.offset).roundToInt())
+            model.fitPending = false
+        }
+    }
+    BackHandler(enabled = open && !searching) { model.back() }
 
     val permissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { granted ->
         val c = controller
         val s = style
         if (granted.values.any { it } && c != null && s != null) followLocation(context, c, s)
     }
+    val locate = {
+        val c = controller
+        val s = style
+        if (c != null && s != null) {
+            if (hasLocationPermission(context)) {
+                followLocation(context, c, s)
+            } else {
+                permissionLauncher.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION))
+            }
+        }
+    }
 
-    BottomSheetScaffold(
-        scaffoldState = scaffoldState,
-        sheetPeekHeight = peek,
-        sheetSwipeEnabled = panel != Panel.None,
-        // The "hikes in view" row is tapped, not dragged: no handle.
-        sheetDragHandle = if (panel != Panel.None) ({ BottomSheetDefaults.DragHandle() }) else null,
-        sheetContent = {
-            if (panel == Panel.None) {
-                if (inView.isNotEmpty()) {
-                    InViewPeek(inView.size) {
-                        model.showList(Panel.RouteList("${inView.size} curated ${if (inView.size == 1) "hike" else "hikes"} in view", inView))
+    Box(Modifier.fillMaxSize().onSizeChanged { containerPx = it.height }) {
+        AndroidView(factory = { mapView }, modifier = Modifier.fillMaxSize())
+
+        if (style == null && styleError == null) CircularProgressIndicator(Modifier.align(Alignment.Center))
+        styleError?.let { msg ->
+            Column(Modifier.align(Alignment.Center).padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                Text("Couldn't load the map: $msg", style = MaterialTheme.typography.bodyMedium)
+                Button(onClick = { attempt++ }, modifier = Modifier.padding(top = 12.dp)) { Text("Try again") }
+            }
+        }
+
+        if (open) {
+            // While a sheet is open: back (to the list it came from), search
+            // and location, as small buttons. At full height, just back.
+            val back = (panel as? Panel.Detail)?.back
+            Row(Modifier.fillMaxWidth().statusBarsPadding().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                if (back != null) {
+                    Surface(
+                        onClick = { model.back() },
+                        shape = RoundedCornerShape(24.dp),
+                        shadowElevation = 4.dp,
+                        modifier = Modifier.height(48.dp).widthIn(max = 240.dp),
+                    ) {
+                        Row(Modifier.padding(start = 10.dp, end = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = null, modifier = Modifier.size(20.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text(back.heading, style = MaterialTheme.typography.labelLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
                     }
                 }
-            } else {
-                Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState())) {
-                    PanelContent(model) { p -> controller?.showHover(p) }
+                Spacer(Modifier.weight(1f))
+                if (sheet.settledValue != Stop.Full) {
+                    RoundButton(Icons.Filled.Search, "Search") { searching = true }
+                    Spacer(Modifier.width(8.dp))
+                    RoundButton(Icons.Filled.MyLocation, "Show my location", locate)
                 }
             }
-        },
-    ) {
-        Box(Modifier.fillMaxSize()) {
-            AndroidView(factory = { mapView }, modifier = Modifier.fillMaxSize())
-
-            if (style == null && styleError == null) CircularProgressIndicator(Modifier.align(Alignment.Center))
-            styleError?.let { msg ->
-                Column(Modifier.align(Alignment.Center).padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text("Couldn't load the map: $msg", style = MaterialTheme.typography.bodyMedium)
-                    Button(onClick = { attempt++ }, modifier = Modifier.padding(top = 12.dp)) { Text("Try again") }
-                }
-            }
-
+        } else {
             Column(Modifier.fillMaxWidth().statusBarsPadding().padding(12.dp)) {
                 Surface(
                     onClick = { searching = true },
@@ -235,22 +269,33 @@ fun MapScreen(app: HikerAtlasApp) {
                         Text("Search hikes, parks, peaks, trails", color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
-                SmallFloatingActionButton(
-                    onClick = {
-                        val c = controller ?: return@SmallFloatingActionButton
-                        val s = style ?: return@SmallFloatingActionButton
-                        if (hasLocationPermission(context)) {
-                            followLocation(context, c, s)
-                        } else {
-                            permissionLauncher.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION))
-                        }
-                    },
-                    containerColor = MaterialTheme.colorScheme.surface,
-                    modifier = Modifier.align(Alignment.End).padding(top = 10.dp).size(48.dp),
-                ) {
-                    Icon(Icons.Filled.MyLocation, contentDescription = "Show my location")
+                Box(Modifier.align(Alignment.End).padding(top = 10.dp)) {
+                    RoundButton(Icons.Filled.MyLocation, "Show my location", locate)
                 }
             }
+            if (inView.isNotEmpty()) {
+                Surface(
+                    shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp),
+                    shadowElevation = 8.dp,
+                    modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth(),
+                ) {
+                    InViewPeek(inView.size) {
+                        model.showList(Panel.RouteList("${inView.size} curated ${if (inView.size == 1) "hike" else "hikes"} in view", inView))
+                    }
+                }
+            }
+        }
+
+        if (open && containerPx > 0) {
+            MapSheet(
+                state = sheet,
+                containerPx = containerPx,
+                peekPx = peekPx,
+                onHeaderHeight = { headerPx = it },
+                halfAndFull = panel is Panel.Detail || panel is Panel.RouteList,
+                header = { PanelHeader(model, full = sheet.settledValue == Stop.Full) },
+                body = { PanelBody(model) { p -> controller?.showHover(p) } },
+            )
         }
     }
 
@@ -264,10 +309,17 @@ fun MapScreen(app: HikerAtlasApp) {
             nearLon = near?.longitude,
             onPick = { item ->
                 searching = false
-                scope.launch { onSearchPick(item, controller, model, halfSheetPx) }
+                scope.launch { onSearchPick(item, controller, model, (220 * density).toInt()) }
             },
             onClose = { searching = false },
         )
+    }
+}
+
+@Composable
+private fun RoundButton(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, onClick: () -> Unit) {
+    Surface(onClick = onClick, shape = CircleShape, shadowElevation = 4.dp, modifier = Modifier.size(48.dp)) {
+        Box(contentAlignment = Alignment.Center) { Icon(icon, contentDescription = label) }
     }
 }
 
