@@ -15,6 +15,10 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Text
+import com.hikeratlas.android.track.SavedScreen
+import androidx.compose.material3.Surface
+import androidx.compose.material.icons.outlined.BookmarkBorder
+import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -34,8 +38,9 @@ import com.hikeratlas.android.HikerAtlasApp
 import com.hikeratlas.android.map.MapScreen
 
 private enum class Tab(val label: String, val selected: ImageVector, val unselected: ImageVector) {
-    // Saved (offline areas, recorded tracks) joins these once it has something in it.
     Map("Map", Icons.Filled.Map, Icons.Outlined.Map),
+    // Recorded tracks (and later offline areas): shown once it has something in it.
+    Saved("Saved", Icons.Filled.Bookmark, Icons.Outlined.BookmarkBorder),
     You("You", Icons.Filled.Person, Icons.Outlined.Person),
 }
 
@@ -44,6 +49,14 @@ fun AppScreen(app: HikerAtlasApp, link: Uri? = null, onLinkHandled: () -> Unit =
     var tab by rememberSaveable { mutableStateOf(Tab.Map) }
     // A website link opens on the map.
     LaunchedEffect(link) { if (link != null) tab = Tab.Map }
+    val library = app.library
+    LaunchedEffect(Unit) {
+        library.refresh()
+        library.fillMissing()
+    }
+    // A saved track being looked at on the map.
+    var viewTrack by rememberSaveable { mutableStateOf<Long?>(null) }
+    val tabs = Tab.entries.filter { it != Tab.Saved || library.tracks.isNotEmpty() || tab == Tab.Saved }
     // A sheet on the map needs the room: the tabs step aside while it's open.
     var sheetOpen by remember { mutableStateOf(false) }
     val tabsShown = !(tab == Tab.Map && sheetOpen)
@@ -57,7 +70,16 @@ fun AppScreen(app: HikerAtlasApp, link: Uri? = null, onLinkHandled: () -> Unit =
         MapScreen(
             app, onSheetOpen = { sheetOpen = it }, bottomBar = if (tabsShown) barHeight else 0.dp,
             link = link, onLinkHandled = onLinkHandled,
+            viewTrack = viewTrack.takeIf { tab == Tab.Map }, onViewClosed = { viewTrack = null },
         )
+        if (tab == Tab.Saved) {
+            Surface(Modifier.fillMaxSize().padding(bottom = barHeight)) {
+                SavedScreen(library.tracks) { id ->
+                    viewTrack = id
+                    tab = Tab.Map
+                }
+            }
+        }
         if (tab == Tab.You) Box(Modifier.fillMaxSize().padding(bottom = barHeight)) { YouScreen() }
         AnimatedVisibility(
             visible = tabsShown,
@@ -66,7 +88,7 @@ fun AppScreen(app: HikerAtlasApp, link: Uri? = null, onLinkHandled: () -> Unit =
             modifier = Modifier.align(Alignment.BottomCenter),
         ) {
             NavigationBar(Modifier.onSizeChanged { barPx = it.height }) {
-                for (t in Tab.entries) {
+                for (t in tabs) {
                     NavigationBarItem(
                         selected = t == tab,
                         onClick = { tab = t },
