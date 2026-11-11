@@ -12,6 +12,9 @@ import com.hikeratlas.android.pmtiles.TileServer
 import com.hikeratlas.android.routes.RoutesRepository
 import com.hikeratlas.android.search.RecentSearches
 import com.hikeratlas.android.search.SearchApi
+import com.hikeratlas.android.track.RecorderHost
+import com.hikeratlas.android.track.TrackRecorder
+import com.hikeratlas.android.track.TrackStore
 import okhttp3.Dispatcher
 import okhttp3.OkHttpClient
 import org.maplibre.android.offline.OfflineManager
@@ -19,7 +22,7 @@ import org.maplibre.android.MapLibre
 import org.maplibre.android.module.http.HttpRequestUtil
 import java.util.concurrent.TimeUnit
 
-class HikerAtlasApp : Application() {
+class HikerAtlasApp : Application(), RecorderHost {
     /** For our own requests: the style, and PMTiles range reads. */
     lateinit var http: OkHttpClient
         private set
@@ -31,6 +34,8 @@ class HikerAtlasApp : Application() {
     val profiler by lazy { ElevationProfiler(demSources) }
     val search by lazy { SearchApi(http) }
     val recentSearches by lazy { RecentSearches(this) }
+    val tracks by lazy { TrackStore(this) }
+    override val recorder by lazy { TrackRecorder(tracks, profiler) }
 
     override fun onCreate() {
         super.onCreate()
