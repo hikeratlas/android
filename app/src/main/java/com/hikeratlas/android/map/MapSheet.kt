@@ -45,6 +45,9 @@ private const val FULL = 0.2f
  * A bottom sheet over the map with three heights: [Stop.Peek] shows just the
  * [header], [Stop.Half] some of the [body], [Stop.Full] all of it, scrolling.
  *
+ * With [halfAndFull] false the sheet rests only at the peek, and shows no
+ * grab handle.
+ *
  * The header never scrolls. The body scrolls only at [Stop.Full]; below that,
  * dragging anywhere moves the sheet. At [Stop.Full], pulling the body down
  * from its top moves the sheet down.
@@ -126,10 +129,10 @@ fun MapSheet(
                     Modifier.fillMaxWidth().padding(top = 8.dp, bottom = 6.dp),
                     contentAlignment = Alignment.Center,
                 ) {
-                    Box(
-                        Modifier.size(width = 36.dp, height = 4.dp)
-                            .background(MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(2.dp)),
-                    )
+                    // The grab handle, only where there's somewhere to drag to:
+                    // otherwise just its space, so the header sits the same.
+                    val handle = Modifier.size(width = 36.dp, height = 4.dp)
+                    Box(if (halfAndFull) handle.background(MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(2.dp)) else handle)
                 }
                 header()
             }
