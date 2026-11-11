@@ -46,9 +46,9 @@ data class SearchItem(
     val hasBox get() = min_lat != null && min_lon != null && max_lat != null && max_lon != null
 }
 
-class SearchApi(private val client: OkHttpClient) {
+class SearchApi(private val client: OkHttpClient, private val endpoint: String = ENDPOINT) {
     suspend fun search(query: String, nearLat: Double?, nearLon: Double?): List<SearchItem> = withContext(Dispatchers.IO) {
-        val url = ENDPOINT.toHttpUrl().newBuilder().addQueryParameter("q", query).apply {
+        val url = endpoint.toHttpUrl().newBuilder().addQueryParameter("q", query).apply {
             if (nearLat != null && nearLon != null) {
                 addQueryParameter("lat", String.format(Locale.US, "%.3f", nearLat))
                 addQueryParameter("lon", String.format(Locale.US, "%.3f", nearLon))
