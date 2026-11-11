@@ -60,6 +60,7 @@ import androidx.compose.ui.unit.Dp
 import android.net.Uri
 import com.hikeratlas.android.track.TrackSummarySheet
 import com.hikeratlas.android.track.TrackPanel
+import com.hikeratlas.android.track.gpxShareIntent
 import com.hikeratlas.android.track.TrackLibrary
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.Dispatchers
@@ -505,6 +506,12 @@ fun MapScreen(
                     v,
                     onClose = onViewClosed,
                     onDelete = { scope.launch { app.library.delete(v.track.id); onViewClosed() } },
+                    onShare = {
+                        scope.launch {
+                            val file = app.library.gpx(v.track.id, context.cacheDir) ?: return@launch
+                            context.startActivity(gpxShareIntent(context, file, v.name))
+                        }
+                    },
                     onScrub = { p -> controller?.showHover(p) },
                     modifier = Modifier.align(Alignment.BottomCenter).onSizeChanged { trackPanelPx = it.height },
                 )

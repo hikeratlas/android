@@ -9,6 +9,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -89,6 +90,16 @@ class TrackLibrary(
         if (missing.isEmpty()) return
         for (t in missing) detail(t.id)
         refresh()
+    }
+
+    /** Writes a track as GPX into [cacheDir]'s gpx/ (what FileProvider shares), named for the track. */
+    suspend fun gpx(id: Long, cacheDir: File): File? = withContext(io) {
+        val t = store.track(id) ?: return@withContext null
+        val name = t.name ?: "Track"
+        val dir = File(cacheDir, "gpx").apply { mkdirs() }
+        // Only the one being shared is kept.
+        dir.listFiles()?.forEach { it.delete() }
+        File(dir, Gpx.fileName(name)).apply { writeText(Gpx.write(name, t.started, store.points(id))) }
     }
 
     suspend fun rename(id: Long, name: String) {

@@ -19,6 +19,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -116,12 +117,13 @@ fun TrackSummarySheet(
     }
 }
 
-/** A saved track on the map: its name and numbers, its profile, and Delete. */
+/** A saved track on the map: its name and numbers, its profile, Share (as GPX) and Delete. */
 @Composable
 fun TrackPanel(
     detail: TrackLibrary.Detail,
     onClose: () -> Unit,
     onDelete: () -> Unit,
+    onShare: () -> Unit,
     onScrub: (DoubleArray?) -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -133,6 +135,7 @@ fun TrackPanel(
                     Text(detail.name, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, maxLines = 1)
                     Text(statsLine(detail.stats), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
+                IconButton(onClick = onShare) { Icon(Icons.Filled.Share, contentDescription = "Share as GPX") }
                 IconButton(onClick = onClose) { Icon(Icons.Filled.Close, contentDescription = "Close") }
             }
             Box(Modifier.padding(end = 12.dp)) { Chart(detail.profile, onScrub) }
