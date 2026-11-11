@@ -22,6 +22,20 @@ class TrackStore(context: Context, name: String? = "tracks.db") :
         val pausedMs: Long,
         /** When it was paused, if it is. */
         val pausedAt: Long?,
+        /** Worked out when it's stopped (null before, or if that didn't finish). */
+        val stats: Stats? = null,
+    )
+
+    /** A finished track's numbers, kept for the list. */
+    data class Stats(
+        val metres: Double,
+        /** Recording, not counting pauses. */
+        val elapsedMs: Long,
+        /** Of that, moving. */
+        val movingMs: Long,
+        /** From the DEM; null where there was none. */
+        val gain: Double?,
+        val loss: Double?,
     )
 
     override fun onCreate(db: SQLiteDatabase) {
@@ -35,6 +49,7 @@ class TrackStore(context: Context, name: String? = "tracks.db") :
                 paused_at INTEGER
             )""",
         )
+        addStats(db)
         // alt: above the WGS84 ellipsoid; msl_alt: above sea level; both GPS's own.
         db.execSQL(
             """CREATE TABLE points (
@@ -53,7 +68,16 @@ class TrackStore(context: Context, name: String? = "tracks.db") :
         db.execSQL("CREATE INDEX points_track ON points(track, t)")
     }
 
-    override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) = Unit
+    override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
+        if (oldVersion < 2) addStats(db)
+    }
+
+    // Version 2: a finished track's numbers.
+    private fun addStats(db: SQLiteDatabase) {
+        for (col in listOf("metres REAL", "elapsed_ms INTEGER", "moving_ms INTEGER", "gain REAL", "loss REAL")) {
+            db.execSQL("ALTER TABLE tracks ADD COLUMN $col")
+        }
+    }
 
     override fun onConfigure(db: SQLiteDatabase) = db.setForeignKeyConstraintsEnabled(true)
 
@@ -81,6 +105,43 @@ class TrackStore(context: Context, name: String? = "tracks.db") :
         writableDatabase.update("tracks", ContentValues().apply { put("ended", now) }, "id = ?", arrayOf(track.toString()))
     }
 
+    fun setStats(track: Long, st: Stats) {
+        writableDatabase.update(
+            "tracks",
+            ContentValues().apply {
+                put("metres", st.metres); put("elapsed_ms", st.elapsedMs); put("moving_ms", st.movingMs)
+                put("gain", st.gain); put("loss", st.loss)
+            },
+            "id = ?", arrayOf(track.toString()),
+        )
+    }
+
+    fun rename(track: Long, name: String) {
+        writableDatabase.update("tracks", ContentValues().apply { put("name", name) }, "id = ?", arrayOf(track.toString()))
+    }
+
+    /** Deletes a track and its fixes. */
+    fun delete(track: Long) {
+        writableDatabase.delete("tracks", "id = ?", arrayOf(track.toString()))
+    }
+
+    /** Makes a stopped track unfinished again, paused at [pausedAt], to record on; its numbers are worked out again when it stops. */
+    fun reopen(track: Long, pausedAt: Long) {
+        writableDatabase.update(
+            "tracks",
+            ContentValues().apply {
+                putNull("ended"); put("paused_at", pausedAt)
+                for (c in listOf("metres", "elapsed_ms", "moving_ms", "gain", "loss")) putNull(c)
+            },
+            "id = ?", arrayOf(track.toString()),
+        )
+    }
+
+    /** Finished tracks, newest first. */
+    fun saved(): List<Track> = readableDatabase.query("tracks", null, "ended IS NOT NULL", null, null, null, "started DESC").use { c ->
+        buildList { while (c.moveToNext()) add(c.track()) }
+    }
+
     fun track(id: Long): Track? = readableDatabase.query("tracks", null, "id = ?", arrayOf(id.toString()), null, null, null).use {
         if (it.moveToFirst()) it.track() else null
     }
@@ -105,7 +166,12 @@ class TrackStore(context: Context, name: String? = "tracks.db") :
             }
         }
 
-    private fun Cursor.track() = Track(long("id"), long("started"), longOrNull("ended"), string("name"), long("paused_ms"), longOrNull("paused_at"))
+    private fun Cursor.track() = Track(
+        long("id"), long("started"), longOrNull("ended"), string("name"), long("paused_ms"), longOrNull("paused_at"),
+        double("metres")?.let { m ->
+            Stats(m, longOrNull("elapsed_ms") ?: 0, longOrNull("moving_ms") ?: 0, double("gain"), double("loss"))
+        },
+    )
     private fun Cursor.col(n: String) = getColumnIndexOrThrow(n)
     private fun Cursor.long(n: String) = getLong(col(n))
     private fun Cursor.int(n: String) = getInt(col(n))
@@ -114,6 +180,6 @@ class TrackStore(context: Context, name: String? = "tracks.db") :
     private fun Cursor.string(n: String) = col(n).let { if (isNull(it)) null else getString(it) }
 
     private companion object {
-        const val VERSION = 1
+        const val VERSION = 2
     }
 }

@@ -54,7 +54,8 @@ fun summary(s: TrackRecorder.State, now: Long): String =
 
 /**
  * The recording bar, under search: a dot (red recording, grey paused), the
- * track so far, and pause or resume and stop. Stopping asks first.
+ * track so far, and pause or resume and stop. (Stopping shows the track's
+ * summary, which can resume it, so it doesn't ask.)
  */
 @Composable
 fun RecordingBar(
@@ -73,7 +74,6 @@ fun RecordingBar(
             now = clock()
         }
     }
-    var confirming by remember { mutableStateOf(false) }
     Surface(shape = RoundedCornerShape(26.dp), shadowElevation = 4.dp, modifier = modifier.fillMaxWidth()) {
         Row(Modifier.padding(start = 16.dp, end = 4.dp).height(52.dp), verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.size(10.dp).background(if (state.paused) Color(0xFF9AA5A0) else Color(0xFFDC2626), CircleShape))
@@ -90,16 +90,7 @@ fun RecordingBar(
             } else {
                 IconButton(onClick = onPause) { Icon(Icons.Filled.Pause, contentDescription = "Pause recording") }
             }
-            IconButton(onClick = { confirming = true }) { Icon(Icons.Filled.Stop, contentDescription = "Stop recording") }
+            IconButton(onClick = onStop) { Icon(Icons.Filled.Stop, contentDescription = "Stop recording") }
         }
-    }
-    if (confirming) {
-        AlertDialog(
-            onDismissRequest = { confirming = false },
-            title = { Text("Stop recording?") },
-            text = { Text("The track is kept on this phone.") },
-            confirmButton = { TextButton(onClick = { confirming = false; onStop() }) { Text("Stop") } },
-            dismissButton = { TextButton(onClick = { confirming = false }) { Text("Keep recording") } },
-        )
     }
 }

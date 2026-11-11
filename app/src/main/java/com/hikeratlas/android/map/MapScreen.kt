@@ -58,6 +58,9 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Dp
 import android.net.Uri
+import com.hikeratlas.android.track.TrackSummarySheet
+import com.hikeratlas.android.track.TrackPanel
+import com.hikeratlas.android.track.TrackLibrary
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.Dispatchers
 import com.hikeratlas.android.track.RecordingService
@@ -105,6 +108,9 @@ fun MapScreen(
     /** A website link to open (a hike, park or region page), until [onLinkHandled]. */
     link: Uri? = null,
     onLinkHandled: () -> Unit = {},
+    /** A saved track to show (from the Saved tab), until [onViewClosed]. */
+    viewTrack: Long? = null,
+    onViewClosed: () -> Unit = {},
 ) {
     val context = LocalContext.current
     val density = LocalDensity.current.density
@@ -275,7 +281,7 @@ fun MapScreen(
     // A fresh sheet each time one opens, so it starts low however the last was left.
     val sheet = remember(open) { AnchoredDraggableState(Stop.Peek) }
 
-    LaunchedEffect(open, planning) { onSheetOpen(open || planning) }
+    LaunchedEffect(open, planning, viewTrack) { onSheetOpen(open || planning || viewTrack != null) }
     // Draw the plan as it changes.
     LaunchedEffect(planner.points, planner.coords, planner.pending, style) {
         controller?.showPlan(planner.points, planner.coords, planner.pending)
@@ -358,6 +364,30 @@ fun MapScreen(
         RecordingService.start(context)
         locate()
     }
+    // Just stopped: its summary, to save, resume or discard. And a saved
+    // track from the Saved tab, on the map.
+    var summary by remember { mutableStateOf<TrackLibrary.Detail?>(null) }
+    var viewing by remember { mutableStateOf<TrackLibrary.Detail?>(null) }
+    var trackPanelPx by remember { mutableIntStateOf(0) }
+    LaunchedEffect(summary, viewing, style) { controller?.showViewedTrack((summary ?: viewing)?.segments.orEmpty()) }
+    LaunchedEffect(viewTrack) {
+        viewing = null
+        val id = viewTrack ?: return@LaunchedEffect
+        model.close()
+        if (planning) stopPlanning()
+        viewing = app.library.detail(id) ?: run { onViewClosed(); null }
+    }
+    // Fitted into the map the panel leaves, once it's measured.
+    LaunchedEffect(viewing?.track?.id, trackPanelPx) {
+        val v = viewing ?: return@LaunchedEffect
+        if (trackPanelPx > 0) controller?.fitLine(v.segments.flatten(), trackPanelPx)
+    }
+    BackHandler(enabled = viewing != null && !open && !searching) { onViewClosed() }
+    val stopRecording = {
+        val id = recorder.stop()
+        RecordingService.stop(context)
+        if (id != null) scope.launch { summary = app.library.detail(id) }
+    }
     val recordPermissions = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { granted ->
         // Without the notification it still records; without precise location it can't.
         if (granted[Manifest.permission.ACCESS_FINE_LOCATION] == true || hasFineLocation(context)) {
@@ -437,7 +467,7 @@ fun MapScreen(
                         r,
                         onPause = { RecordingService.pause(context) },
                         onResume = record,
-                        onStop = { RecordingService.stop(context) },
+                        onStop = stopRecording,
                         modifier = Modifier.padding(top = 10.dp),
                     )
                 }
@@ -456,7 +486,7 @@ fun MapScreen(
                     RoundButton(Icons.Filled.MyLocation, "Show my location", locate)
                 }
             }
-            if (inView.isNotEmpty()) {
+            if (inView.isNotEmpty() && viewing == null) {
                 Surface(
                     shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp),
                     shadowElevation = 8.dp,
@@ -466,6 +496,18 @@ fun MapScreen(
                         model.showList(Panel.RouteList("${inView.size} curated ${if (inView.size == 1) "hike" else "hikes"} in view", inView))
                     }
                 }
+            }
+        }
+
+        viewing?.let { v ->
+            if (!open && !planning) {
+                TrackPanel(
+                    v,
+                    onClose = onViewClosed,
+                    onDelete = { scope.launch { app.library.delete(v.track.id); onViewClosed() } },
+                    onScrub = { p -> controller?.showHover(p) },
+                    modifier = Modifier.align(Alignment.BottomCenter).onSizeChanged { trackPanelPx = it.height },
+                )
             }
         }
 
@@ -481,6 +523,23 @@ fun MapScreen(
                 body = { PanelBody(model) { p -> controller?.showHover(p) } },
             )
         }
+    }
+
+    summary?.let { d ->
+        val id = d.track.id
+        TrackSummarySheet(
+            d,
+            onSave = { name -> summary = null; scope.launch { app.library.rename(id, name) } },
+            onResume = {
+                summary = null
+                scope.launch {
+                    app.library.reopen(id)
+                    record()
+                }
+            },
+            onDiscard = { summary = null; scope.launch { app.library.delete(id) } },
+            onScrub = { p -> controller?.showHover(p) },
+        )
     }
 
     if (layersOpen) {

@@ -13,6 +13,7 @@ import com.hikeratlas.android.routes.RoutesRepository
 import com.hikeratlas.android.search.RecentSearches
 import com.hikeratlas.android.search.SearchApi
 import com.hikeratlas.android.track.RecorderHost
+import com.hikeratlas.android.track.TrackLibrary
 import com.hikeratlas.android.track.TrackRecorder
 import com.hikeratlas.android.track.TrackStore
 import okhttp3.Dispatcher
@@ -36,6 +37,7 @@ class HikerAtlasApp : Application(), RecorderHost {
     val recentSearches by lazy { RecentSearches(this) }
     val tracks by lazy { TrackStore(this) }
     override val recorder by lazy { TrackRecorder(tracks, profiler) }
+    val library by lazy { TrackLibrary(tracks, profiler, regions = { routes.regions() }) }
 
     override fun onCreate() {
         super.onCreate()
