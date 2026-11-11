@@ -310,18 +310,17 @@ fun MapScreen(
     LaunchedEffect(panel::class, (panel as? Panel.Detail)?.selected?.id, (panel as? Panel.RouteList)?.heading) {
         if (open && sheet.anchors.hasPositionFor(Stop.Peek)) sheet.animateTo(Stop.Peek)
     }
-    // Fit the route into the map the sheet leaves: when it opens (if asked),
-    // and whenever the sheet comes to rest at half height.
     val detail = panel as? Panel.Detail
-    LaunchedEffect(detail?.selected?.id, model.fitPending, sheet.settledValue, peekPx, containerPx) {
-        val c = controller ?: return@LaunchedEffect
-        val d = detail ?: return@LaunchedEffect
-        if (peekPx <= navInsetPx || sheet.offset.isNaN()) return@LaunchedEffect
-        val settled = sheet.settledValue
-        if ((model.fitPending && settled != Stop.Full) || settled == Stop.Half) {
-            c.fitLine(d.selected.route.line, (containerPx - sheet.offset).roundToInt())
-            model.fitPending = false
-        }
+    RouteFitEffect(
+        routeId = detail?.selected?.id,
+        pending = model.fitPending,
+        sheet = sheet,
+        ready = controller != null && peekPx > navInsetPx,
+        containerPx = containerPx,
+    ) { top ->
+        val line = (model.panel as? Panel.Detail)?.selected?.route?.line ?: return@RouteFitEffect
+        controller?.fitLine(line, (containerPx - top).roundToInt())
+        model.fitPending = false
     }
     BackHandler(enabled = open && !searching) { model.back() }
 
