@@ -47,6 +47,18 @@ class MapController(val map: MapLibreMap, private val density: Float) {
     /** Adds the selection layers once the basemap style has loaded. */
     fun onStyleLoaded(s: Style) {
         style = s
+        // The track being recorded, under the selected route.
+        s.addSource(GeoJsonSource(TRACK))
+        s.addLayer(
+            LineLayer("$TRACK-casing", TRACK).withProperties(
+                lineColor("#ffffff"), lineWidth(7f), lineCap(Property.LINE_CAP_ROUND), lineJoin(Property.LINE_JOIN_ROUND),
+            ),
+        )
+        s.addLayer(
+            LineLayer(TRACK, TRACK).withProperties(
+                lineColor(TRACK_COLOR), lineWidth(4f), lineCap(Property.LINE_CAP_ROUND), lineJoin(Property.LINE_JOIN_ROUND),
+            ),
+        )
         s.addSource(GeoJsonSource(SEL))
         s.addSource(GeoJsonSource(HOVER))
         s.addLayer(
@@ -153,6 +165,15 @@ class MapController(val map: MapLibreMap, private val density: Float) {
         s.getSourceAs<GeoJsonSource>(PLAN_PENDING)?.setGeoJson(FeatureCollection.fromFeatures(pendingFeatures))
     }
 
+    /** Draws the track being recorded: a line per stretch between pauses (none: clears it). */
+    fun showTrack(segments: List<List<List<Double>>>) {
+        val src = style?.getSourceAs<GeoJsonSource>(TRACK) ?: return
+        val lines = segments.filter { it.size >= 2 }.map { seg ->
+            Feature.fromGeometry(LineString.fromLngLats(seg.map { Point.fromLngLat(it[0], it[1]) }))
+        }
+        src.setGeoJson(FeatureCollection.fromFeatures(lines))
+    }
+
     /** The planned point under a touch, by index, if any. */
     fun planPointAt(p: PointF): Int? {
         if (style?.getLayer(PLAN_HIT) == null) return null
@@ -248,6 +269,8 @@ class MapController(val map: MapLibreMap, private val density: Float) {
         private const val PLAN_POINTS = "plan-points"
         private const val PLAN_PENDING = "plan-pending"
         private const val PLAN_HIT = "plan-hit"
+        const val TRACK_COLOR = "#e8590c"
+        private const val TRACK = "track-recording"
         private const val SEL = "curated-sel"
         private const val HOVER = "curated-hover"
     }

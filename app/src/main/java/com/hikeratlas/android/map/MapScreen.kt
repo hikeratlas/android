@@ -58,6 +58,13 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Dp
 import android.net.Uri
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.Dispatchers
+import com.hikeratlas.android.track.RecordingService
+import com.hikeratlas.android.track.RecordingBar
+import androidx.compose.material.icons.filled.FiberManualRecord
+import android.widget.Toast
+import android.os.Build
 import com.hikeratlas.android.routes.Link
 import kotlinx.coroutines.CancellationException
 import androidx.compose.ui.unit.dp
@@ -341,6 +348,34 @@ fun MapScreen(
         }
     }
 
+    // Track recording (RecordingService). A track left unfinished (the app
+    // was killed) comes back paused, to resume or stop.
+    val recorder = app.recorder
+    val recording = recorder.state
+    LaunchedEffect(Unit) { withContext(Dispatchers.IO) { recorder.resumeUnfinished(paused = true) } }
+    LaunchedEffect(recording?.segments, style) { controller?.showTrack(recording?.segments.orEmpty()) }
+    val beginRecording = {
+        RecordingService.start(context)
+        locate()
+    }
+    val recordPermissions = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { granted ->
+        // Without the notification it still records; without precise location it can't.
+        if (granted[Manifest.permission.ACCESS_FINE_LOCATION] == true || hasFineLocation(context)) {
+            beginRecording()
+        } else {
+            Toast.makeText(context, "Recording a track needs precise location.", Toast.LENGTH_LONG).show()
+        }
+    }
+    val record = {
+        val needed = buildList {
+            if (!hasFineLocation(context)) add(Manifest.permission.ACCESS_FINE_LOCATION)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+            ) add(Manifest.permission.POST_NOTIFICATIONS)
+        }
+        if (needed.isEmpty()) beginRecording() else recordPermissions.launch(needed.toTypedArray())
+    }
+
     Box(Modifier.fillMaxSize().onSizeChanged { containerPx = it.height }) {
         AndroidView(factory = { mapView }, modifier = Modifier.fillMaxSize())
 
@@ -397,6 +432,15 @@ fun MapScreen(
                         Text("Search hikes, parks, peaks, trails", color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
+                recording?.let { r ->
+                    RecordingBar(
+                        r,
+                        onPause = { RecordingService.pause(context) },
+                        onResume = record,
+                        onStop = { RecordingService.stop(context) },
+                        modifier = Modifier.padding(top = 10.dp),
+                    )
+                }
                 Column(Modifier.align(Alignment.End).padding(top = 10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     RoundButton(Icons.Filled.Layers, "Map layers") { layersOpen = true }
                     RoundButton(Icons.Filled.Route, "Plan a route") {
@@ -408,6 +452,7 @@ fun MapScreen(
                             planner.prefetchView(b.longitudeWest, b.latitudeSouth, b.longitudeEast, b.latitudeNorth, m.cameraPosition.zoom)
                         }
                     }
+                    if (recording == null) RoundButton(Icons.Filled.FiberManualRecord, "Record a track", record)
                     RoundButton(Icons.Filled.MyLocation, "Show my location", locate)
                 }
             }
@@ -512,6 +557,9 @@ private fun onSearchPick(item: SearchItem, c: MapController?, model: PanelModel,
         c.jumpTo(item.lat, item.lon, 13.0)
     }
 }
+
+private fun hasFineLocation(context: Context) =
+    ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
 
 private fun hasLocationPermission(context: Context) =
     ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED ||
