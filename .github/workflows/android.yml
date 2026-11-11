@@ -15,6 +15,11 @@ jobs:
           distribution: temurin
           java-version: 21
       - uses: gradle/actions/setup-gradle@v6
+      # Robolectric's Android runtime jar (~200 MB), fetched on first use.
+      - uses: actions/cache@v6
+        with:
+          path: ~/.m2/repository/org/robolectric
+          key: robolectric-${{ hashFiles('gradle/libs.versions.toml') }}
       - name: Test
         run: ./gradlew testDebugUnitTest lintDebug
         env:
