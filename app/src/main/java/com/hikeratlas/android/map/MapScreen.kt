@@ -4,26 +4,38 @@ import android.Manifest
 import android.annotation.SuppressLint
 import android.content.Context
 import android.content.pm.PackageManager
-import android.graphics.RectF
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.MyLocation
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material3.BottomSheetScaffold
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.ListItem
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.SheetValue
 import androidx.compose.material3.SmallFloatingActionButton
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.rememberBottomSheetScaffoldState
+import androidx.compose.material3.rememberStandardBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -31,11 +43,14 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
@@ -43,112 +58,212 @@ import androidx.core.content.edit
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import com.hikeratlas.android.HikerAtlasApp
+import com.hikeratlas.android.routes.RouteItem
+import com.hikeratlas.android.routes.itemsFromProperties
+import com.hikeratlas.android.search.SearchItem
+import com.hikeratlas.android.search.SearchScreen
 import com.hikeratlas.android.style.StyleLoader
-import okhttp3.OkHttpClient
+import kotlinx.coroutines.launch
 import org.maplibre.android.camera.CameraPosition
 import org.maplibre.android.geometry.LatLng
 import org.maplibre.android.location.LocationComponentActivationOptions
 import org.maplibre.android.location.modes.CameraMode
 import org.maplibre.android.location.modes.RenderMode
-import org.maplibre.android.maps.MapLibreMap
 import org.maplibre.android.maps.MapView
 import org.maplibre.android.maps.Style
 
-private const val ROUTES_LAYER = "routes-route"
-
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun MapScreen(http: OkHttpClient) {
+fun MapScreen(app: HikerAtlasApp) {
     val context = LocalContext.current
     val density = LocalDensity.current.density
+    val screenHeightPx = LocalWindowInfo.current.containerSize.height
+    val halfSheetPx = (screenHeightPx * 0.5).toInt()
+    val scope = rememberCoroutineScope()
     val mapView = rememberMapViewWithLifecycle()
-    var map by remember { mutableStateOf<MapLibreMap?>(null) }
+
+    var controller by remember { mutableStateOf<MapController?>(null) }
     var style by remember { mutableStateOf<Style?>(null) }
-    var error by remember { mutableStateOf<String?>(null) }
+    var styleError by remember { mutableStateOf<String?>(null) }
     var attempt by remember { mutableIntStateOf(0) }
-    var routes by remember { mutableStateOf<List<RouteInfo>>(emptyList()) }
+    var inView by remember { mutableStateOf<List<RouteItem>>(emptyList()) }
+    var searching by remember { mutableStateOf(false) }
+
+    val model = remember {
+        PanelModel(scope, app.routes, app.profiler) { sel, fit ->
+            val c = controller ?: return@PanelModel
+            c.showHover(null)
+            c.showRoute(sel?.route?.line)
+            if (fit && sel != null) c.fitLine(sel.route.line, halfSheetPx)
+        }
+    }
+    val panel = model.panel
+
+    // Parks with curated hikes, for tapping park names.
+    var hikedParks by remember { mutableStateOf<Set<String>>(emptySet()) }
+    LaunchedEffect(Unit) {
+        try { hikedParks = app.routes.index().parks.keys } catch (_: Exception) { /* names just aren't tappable */ }
+    }
+    val currentHiked by rememberUpdatedState(hikedParks)
 
     LaunchedEffect(Unit) {
         mapView.getMapAsync { m ->
+            val c = MapController(m, density)
             m.cameraPosition = CameraStore.load(context)
-            m.addOnCameraIdleListener { CameraStore.save(context, m.cameraPosition) }
+            m.uiSettings.isCompassEnabled = true
+            m.addOnCameraIdleListener {
+                CameraStore.save(context, m.cameraPosition)
+                inView = itemsFromProperties(c.routesInView(mapView.width, mapView.height), fromCamp = false)
+            }
             m.addOnMapClickListener { latLng ->
                 val p = m.projection.toScreenLocation(latLng)
-                val r = 12 * density
-                val hits = m.queryRenderedFeatures(RectF(p.x - r, p.y - r, p.x + r, p.y + r), ROUTES_LAYER)
-                routes = RouteInfo.distinct(hits)
-                routes.isNotEmpty()
+                val found = itemsFromProperties(c.routesAt(p))
+                when {
+                    found.size == 1 -> model.openRoute(found[0].park, found[0].id, fit = false)
+                    found.size > 1 -> model.showList(Panel.RouteList("${found.size} routes here", found))
+                    else -> {
+                        val park = c.parkAt(p) ?: return@addOnMapClickListener false
+                        val id = park["osm_id"]?.toString()?.removeSuffix(".0") ?: return@addOnMapClickListener false
+                        val name = (park["name"] ?: park["short_name"] ?: "").toString()
+                        val about = ParkAbout.of(park["operator"], park["website"])
+                        when {
+                            id in currentHiked -> model.openPark(id, name, about)
+                            about != null -> model.showList(Panel.RouteList(name, emptyList(), about))
+                            else -> return@addOnMapClickListener false
+                        }
+                    }
+                }
+                true
             }
-            map = m
+            controller = c
         }
     }
 
-    LaunchedEffect(map, attempt) {
-        val m = map ?: return@LaunchedEffect
-        error = null
+    LaunchedEffect(controller, attempt) {
+        val c = controller ?: return@LaunchedEffect
+        styleError = null
         try {
-            val json = StyleLoader(http).load()
-            m.setStyle(Style.Builder().fromJson(json)) { style = it }
+            val json = StyleLoader(app.http).load()
+            c.map.setStyle(Style.Builder().fromJson(json)) { s ->
+                c.onStyleLoaded(s)
+                style = s
+            }
         } catch (e: Exception) {
-            error = e.message ?: e.toString()
+            styleError = e.message ?: e.toString()
         }
     }
 
-    val permissionLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestMultiplePermissions(),
-    ) { granted ->
-        if (granted.values.any { it }) {
-            val m = map
-            val s = style
-            if (m != null && s != null) followLocation(context, m, s)
-        }
+    val sheetState = rememberStandardBottomSheetState(initialValue = SheetValue.PartiallyExpanded, skipHiddenState = true)
+    val scaffoldState = rememberBottomSheetScaffoldState(bottomSheetState = sheetState)
+    val peek = when {
+        panel != Panel.None -> (halfSheetPx / density).dp
+        inView.isNotEmpty() -> 76.dp
+        else -> 0.dp
+    }
+    // A newly opened panel starts half open.
+    LaunchedEffect(panel::class, (panel as? Panel.Detail)?.selected?.id, (panel as? Panel.RouteList)?.heading) {
+        if (panel != Panel.None) sheetState.partialExpand()
+    }
+    BackHandler(enabled = panel != Panel.None && !searching) { model.back() }
+
+    val permissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { granted ->
+        val c = controller
+        val s = style
+        if (granted.values.any { it } && c != null && s != null) followLocation(context, c, s)
     }
 
-    Box(Modifier.fillMaxSize()) {
-        AndroidView(factory = { mapView }, modifier = Modifier.fillMaxSize())
+    BottomSheetScaffold(
+        scaffoldState = scaffoldState,
+        sheetPeekHeight = peek,
+        sheetSwipeEnabled = panel != Panel.None,
+        sheetContent = {
+            if (panel == Panel.None) {
+                if (inView.isNotEmpty()) {
+                    InViewPeek(inView.size) {
+                        model.showList(Panel.RouteList("${inView.size} curated ${if (inView.size == 1) "hike" else "hikes"} in view", inView))
+                    }
+                }
+            } else {
+                Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState())) {
+                    PanelContent(model) { p -> controller?.showHover(p) }
+                }
+            }
+        },
+    ) {
+        Box(Modifier.fillMaxSize()) {
+            AndroidView(factory = { mapView }, modifier = Modifier.fillMaxSize())
 
-        if (style == null && error == null) {
-            CircularProgressIndicator(Modifier.align(Alignment.Center))
-        }
-        error?.let { msg ->
-            Column(
-                Modifier.align(Alignment.Center).padding(24.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-            ) {
-                Text("Couldn't load the map: $msg", style = MaterialTheme.typography.bodyMedium)
-                Button(onClick = { attempt++ }, modifier = Modifier.padding(top = 12.dp)) { Text("Try again") }
+            if (style == null && styleError == null) CircularProgressIndicator(Modifier.align(Alignment.Center))
+            styleError?.let { msg ->
+                Column(Modifier.align(Alignment.Center).padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text("Couldn't load the map: $msg", style = MaterialTheme.typography.bodyMedium)
+                    Button(onClick = { attempt++ }, modifier = Modifier.padding(top = 12.dp)) { Text("Try again") }
+                }
+            }
+
+            Column(Modifier.fillMaxWidth().statusBarsPadding().padding(12.dp)) {
+                Surface(
+                    onClick = { searching = true },
+                    shape = RoundedCornerShape(26.dp),
+                    shadowElevation = 4.dp,
+                    modifier = Modifier.fillMaxWidth().height(52.dp),
+                ) {
+                    Row(Modifier.padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Filled.Search, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Spacer(Modifier.width(10.dp))
+                        Text("Search hikes, parks, peaks, trails", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+                SmallFloatingActionButton(
+                    onClick = {
+                        val c = controller ?: return@SmallFloatingActionButton
+                        val s = style ?: return@SmallFloatingActionButton
+                        if (hasLocationPermission(context)) {
+                            followLocation(context, c, s)
+                        } else {
+                            permissionLauncher.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION))
+                        }
+                    },
+                    containerColor = MaterialTheme.colorScheme.surface,
+                    modifier = Modifier.align(Alignment.End).padding(top = 10.dp).size(48.dp),
+                ) {
+                    Icon(Icons.Filled.MyLocation, contentDescription = "Show my location")
+                }
             }
         }
+    }
 
-        SmallFloatingActionButton(
-            onClick = {
-                val m = map ?: return@SmallFloatingActionButton
-                val s = style ?: return@SmallFloatingActionButton
-                if (hasLocationPermission(context)) {
-                    followLocation(context, m, s)
-                } else {
-                    permissionLauncher.launch(
-                        arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION),
-                    )
-                }
+    if (searching) {
+        val target = controller?.map?.cameraPosition
+        val near = target?.takeIf { it.zoom >= 5 }?.target
+        SearchScreen(
+            api = app.search,
+            recents = app.recentSearches,
+            nearLat = near?.latitude,
+            nearLon = near?.longitude,
+            onPick = { item ->
+                searching = false
+                scope.launch { onSearchPick(item, controller, model, halfSheetPx) }
             },
-            modifier = Modifier.align(Alignment.TopEnd).statusBarsPadding().padding(12.dp),
-        ) {
-            Text("◎", style = MaterialTheme.typography.titleLarge)
-        }
+            onClose = { searching = false },
+        )
     }
+}
 
-    if (routes.isNotEmpty()) {
-        ModalBottomSheet(onDismissRequest = { routes = emptyList() }) {
-            LazyColumn(Modifier.fillMaxWidth().navigationBarsPadding()) {
-                items(routes, key = { it.id }) { r ->
-                    ListItem(
-                        headlineContent = { Text(r.displayTitle) },
-                        supportingContent = { Text(r.summary) },
-                    )
-                }
-            }
-        }
+/** Moves to a search result, and opens its park or hike. */
+private fun onSearchPick(item: SearchItem, c: MapController?, model: PanelModel, sheetPx: Int) {
+    c ?: return
+    when (item.kind) {
+        "park" -> model.openPark(item.osm_id, item.name)
+        // A curated hike's osm_id is its route id, <park>/day/i etc.
+        "hike" -> model.openRoute(item.osm_id.substringBefore('/'), item.osm_id, fit = false)
+        else -> model.close()
+    }
+    if (item.hasBox) {
+        c.fitBox(item.min_lon!!, item.min_lat!!, item.max_lon!!, item.max_lat!!, if (item.kind == "park" || item.kind == "hike") sheetPx else 0)
+    } else {
+        c.jumpTo(item.lat, item.lon, 13.0)
     }
 }
 
@@ -157,17 +272,15 @@ private fun hasLocationPermission(context: Context) =
         ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
 
 @SuppressLint("MissingPermission") // callers check
-private fun followLocation(context: Context, map: MapLibreMap, style: Style) {
-    val lc = map.locationComponent
+private fun followLocation(context: Context, c: MapController, style: Style) {
+    val lc = c.map.locationComponent
     if (!lc.isLocationComponentActivated) {
-        lc.activateLocationComponent(
-            LocationComponentActivationOptions.builder(context, style).useDefaultLocationEngine(true).build(),
-        )
+        lc.activateLocationComponent(LocationComponentActivationOptions.builder(context, style).useDefaultLocationEngine(true).build())
     }
     lc.isLocationComponentEnabled = true
     lc.renderMode = RenderMode.COMPASS
     lc.cameraMode = CameraMode.TRACKING
-    if (map.cameraPosition.zoom < 12) lc.zoomWhileTracking(14.0)
+    if (c.map.cameraPosition.zoom < 12) lc.zoomWhileTracking(14.0)
 }
 
 @Composable
