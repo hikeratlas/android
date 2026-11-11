@@ -4,6 +4,7 @@ import android.Manifest
 import android.annotation.SuppressLint
 import android.content.Context
 import android.content.pm.PackageManager
+import android.view.Gravity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -24,6 +25,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material3.BottomSheetDefaults
 import androidx.compose.material3.BottomSheetScaffold
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -111,7 +113,15 @@ fun MapScreen(app: HikerAtlasApp) {
         mapView.getMapAsync { m ->
             val c = MapController(m, density)
             m.cameraPosition = CameraStore.load(context)
+            // The bottom sheet covers the map's bottom edge: keep the credits
+            // and compass up top, below the search bar and location button.
+            val dp = { v: Int -> (v * density).toInt() }
             m.uiSettings.isCompassEnabled = true
+            m.uiSettings.compassGravity = Gravity.TOP or Gravity.START
+            m.uiSettings.setCompassMargins(dp(12), dp(76), 0, 0)
+            m.uiSettings.isLogoEnabled = false
+            m.uiSettings.attributionGravity = Gravity.TOP or Gravity.END
+            m.uiSettings.setAttributionMargins(0, dp(136), dp(16), 0)
             m.addOnCameraIdleListener {
                 CameraStore.save(context, m.cameraPosition)
                 inView = itemsFromProperties(c.routesInView(mapView.width, mapView.height), fromCamp = false)
@@ -177,6 +187,8 @@ fun MapScreen(app: HikerAtlasApp) {
         scaffoldState = scaffoldState,
         sheetPeekHeight = peek,
         sheetSwipeEnabled = panel != Panel.None,
+        // The "hikes in view" row is tapped, not dragged: no handle.
+        sheetDragHandle = if (panel != Panel.None) ({ BottomSheetDefaults.DragHandle() }) else null,
         sheetContent = {
             if (panel == Panel.None) {
                 if (inView.isNotEmpty()) {

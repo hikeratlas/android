@@ -5,14 +5,22 @@ basemap and curated hikes as the website, as a native Kotlin app.
 
 ## Status
 
-Version 0.1 shows the map:
+The app matches more of the website with each version:
 
-- The basemap style from `public.hikeratlas.com`, rendered by
-  [MapLibre Native](https://github.com/maplibre/maplibre-native).
-- The curated routes layer. Tap a route to see its type, distance and climb.
-- "Where am I?" with the device's own location provider (no Google Play
-  Services, so the app could go on F-Droid too).
-- It reopens where you left the map.
+- **Map**: the basemap style from `public.hikeratlas.com`, rendered by
+  [MapLibre Native](https://github.com/maplibre/maplibre-native), with the
+  curated routes layer and "where am I?". It uses the device's own location
+  provider rather than Google Play Services, so the app could go on F-Droid.
+- **Search**: the website's search API, with the same result lines and recent
+  picks.
+- **Sheets**: tap a route, a park's name, or "hikes in view". A park lists its
+  hikes by section. A hike shows its stats, an elevation chart (drag it to see
+  each point on the map), campsites, via, passes and terrain, plus directions
+  to the trailhead and a share link to its page on hikeratlas.com.
+- **Tabs**: Map and You. Saved joins them with offline areas and tracks.
+
+Still to come for parity with the website: map layers (aerial imagery,
+contours, hillshade), the route planner, and OSM trail pages from search.
 
 ## How the map works
 
@@ -40,23 +48,25 @@ You need JDK 17 or later and the Android SDK (platform 37):
 ./gradlew assembleDebug       # app/build/outputs/apk/debug/app-debug.apk
 ```
 
+`SCREENSHOTS=1 ./gradlew testDebugUnitTest` renders the sheets to
+`app/build/screenshots/` with Robolectric, to check layouts without a device.
+
 CI builds a debug APK for every push and PR (see the workflow run's
 artifacts). Install it with `adb install app-debug.apk`, or by opening it on
 the phone.
 
 ## Roadmap
 
-1. **Find hikes**: search parks and hikes, using the website's search index,
-   and park and hike pages built from routes' per-park JSON, with elevation
-   profiles.
+1. **Website parity** (in progress): map layers, the route planner, and OSM
+   trail pages.
 2. **Offline**: download an area, i.e. a bbox extract of the basemap and routes
    archives written as a local PMTiles file and served by a `FileRangeSource`,
-   plus glyphs, sprites and terrain tiles. Also cache the style.
-3. **Contours**: generate contour lines on the device from the Mapterhorn DEM,
-   as maplibre-contour does on the website.
-4. **GPS track recording**: a foreground service that records while the screen
+   plus glyphs, sprites and terrain tiles.
+3. **GPS track recording**: a foreground service that records while the screen
    is off, with the track on the map, stats, and GPX export.
-5. **Photos**: take geotagged photos on a hike and share them back to the
+4. **Photos**: take geotagged photos on a hike and share them back to the
    route. This needs an upload API and moderation on the server side.
-6. **OSM edits**: fix trail tags and add missing features, via OSM's OAuth 2
+5. **OSM edits**: fix trail tags and add missing features, via OSM's OAuth 2
    and changeset API.
+6. **Explore and deep links**: browse by country, state and park; open
+   hikeratlas.com links in the app.

@@ -36,6 +36,8 @@ android {
 
     testOptions {
         unitTests.isReturnDefaultValues = true
+        unitTests.isIncludeAndroidResources = true
+        unitTests.all { it.systemProperty("robolectric.graphicsMode", "NATIVE") }
     }
 }
 
@@ -58,6 +60,10 @@ dependencies {
     implementation("${libs.zstd.get()}@aar")
 
     testImplementation(libs.junit)
+    testImplementation(libs.robolectric)
+    testImplementation(platform(libs.compose.bom))
+    testImplementation(libs.compose.ui.test.junit4)
+    debugImplementation(libs.compose.ui.test.manifest)
     testImplementation(libs.okhttp.mockwebserver)
     // The plain jar carries the desktop (Linux, macOS, Windows) native
     // libraries the JVM unit tests need.
