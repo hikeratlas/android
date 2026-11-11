@@ -18,9 +18,12 @@ The app matches more of the website with each version:
   each point on the map), campsites, via, passes and terrain, plus directions
   to the trailhead and a share link to its page on hikeratlas.com.
 - **Tabs**: Map and You. Saved joins them with offline areas and tracks.
+- **Layers**: aerial imagery (the website's services, clipped to where each
+  has imagery), contour lines and hillshade, each switchable; and a link to
+  the same view on OpenStreetMap.
 
-Still to come for parity with the website: map layers (aerial imagery,
-contours, hillshade), the route planner, and OSM trail pages from search.
+Still to come for parity with the website: the route planner, and OSM trail
+pages from search.
 
 ## How the map works
 
@@ -36,8 +39,17 @@ support can't read them, so the app has its own reader:
   It answers `https://tiles.hikeratlas.invalid/<archive>/{z}/{x}/{y}` with the
   decompressed tile.
 - `style/StyleRewriter.kt` points the style's `pmtiles://` sources at those
-  URLs. It also drops sources that only the website's JavaScript provides:
-  contours come from maplibre-contour's `dem-contour://`.
+  URLs, and its contour and terrain sources at the app's own servers:
+  - `contours/ContourServer.kt` makes contour tiles on the device from the
+    terrain tiles (marching squares, written as vector tiles), with the
+    options, layer and properties the website's maplibre-contour uses, so
+    the style's contour layers work unchanged.
+  - `elevation/DemServer.kt` serves terrain tiles: nl-dem's over
+    Newfoundland, else Mapterhorn's, cut from an ancestor where a tile is
+    missing.
+- `imagery/ImageryServer.kt` serves aerial imagery as the website's
+  `imagery://` does: each service only where its outline says it has
+  imagery (`assets/imagery/`, copied from the website's `public/imagery/`).
 
 ## Building
 

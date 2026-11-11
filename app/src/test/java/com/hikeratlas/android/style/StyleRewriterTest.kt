@@ -11,19 +11,21 @@ class StyleRewriterTest {
          "sources": {
            "terrain": {"type": "raster-dem", "tiles": ["https://tiles.mapterhorn.com/{z}/{x}/{y}.webp"]},
            "contours": {"type": "vector", "tiles": ["dem-contour://{z}/{x}/{y}?buffer=1"]},
+           "other": {"type": "vector", "tiles": ["custom://{z}/{x}/{y}"]},
            "tiles1": {"type": "vector", "url": "pmtiles://https://public.hikeratlas.com/north-america.pmtiles",
                       "attribution": "OSM"}
          },
          "layers": [
            {"id": "background", "type": "background"},
            {"id": "contour-major", "type": "line", "source": "contours"},
+           {"id": "custom", "type": "line", "source": "other"},
            {"id": "roads", "type": "line", "source": "tiles1"},
            {"id": "hillshade", "type": "hillshade", "source": "terrain"}
          ]}
     """.trimIndent()
 
     @Test
-    fun rewritesPmtilesAndDropsJavascriptOnlySources() {
+    fun rewritesSourcesTheAppServesAndDropsOthers() {
         val opened = mutableListOf<String>()
         val out = JSONObject(StyleRewriter.rewrite(style) { url ->
             opened += url
@@ -32,7 +34,15 @@ class StyleRewriterTest {
         assertEquals(listOf("https://public.hikeratlas.com/north-america.pmtiles"), opened)
 
         val sources = out.getJSONObject("sources")
-        assertFalse(sources.has("contours"))
+        assertEquals(
+            "https://contours.hikeratlas.invalid/{z}/{x}/{y}?buffer=1",
+            sources.getJSONObject("contours").getJSONArray("tiles").getString(0),
+        )
+        assertEquals(
+            "https://dem.hikeratlas.invalid/{z}/{x}/{y}",
+            sources.getJSONObject("terrain").getJSONArray("tiles").getString(0),
+        )
+        assertFalse(sources.has("other"))
         val t = sources.getJSONObject("tiles1")
         assertFalse(t.has("url"))
         assertEquals("https://tiles.example/{z}/{x}/{y}", t.getJSONArray("tiles").getString(0))
@@ -43,6 +53,6 @@ class StyleRewriterTest {
         assertEquals(listOf("https://public.hikeratlas.com/north-america.pmtiles"), StyleRewriter.pmtilesUrls(style))
 
         val layers = out.getJSONArray("layers")
-        assertEquals(listOf("background", "roads", "hillshade"), (0 until layers.length()).map { layers.getJSONObject(it).getString("id") })
+        assertEquals(listOf("background", "contour-major", "roads", "hillshade"), (0 until layers.length()).map { layers.getJSONObject(it).getString("id") })
     }
 }

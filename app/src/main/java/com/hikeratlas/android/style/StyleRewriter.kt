@@ -9,8 +9,13 @@ import org.json.JSONObject
  * - pmtiles:// sources become tile URL templates served by
  *   [com.hikeratlas.android.pmtiles.TileServer], with the zoom range from the
  *   archive's header.
- * - Sources on protocols only the website's JavaScript provides (contours
- *   from maplibre-contour's dem-contour://) are dropped, with their layers.
+ * - Contours (maplibre-contour's dem-contour:// on the website) come from
+ *   [com.hikeratlas.android.contours.ContourServer], with the same options.
+ * - Mapterhorn's terrain tiles go through
+ *   [com.hikeratlas.android.elevation.DemServer], for nl-dem over
+ *   Newfoundland and no holes past Mapterhorn's coverage.
+ * - Sources on any other protocol the app can't serve are dropped, with
+ *   their layers.
  */
 object StyleRewriter {
     /** What [rewrite] needs to know about an archive. */
@@ -32,8 +37,11 @@ object StyleRewriter {
                 source.put("tiles", JSONArray().put(archive.template))
                 source.put("minzoom", archive.minZoom)
                 source.put("maxzoom", archive.maxZoom)
-            } else if (!servable(url) || !allServable(source.optJSONArray("tiles"))) {
-                dropped += name
+            } else {
+                source.optJSONArray("tiles")?.let { tiles ->
+                    for (k in 0 until tiles.length()) tiles.put(k, local(tiles.getString(k)))
+                }
+                if (!servable(url) || !allServable(source.optJSONArray("tiles"))) dropped += name
             }
         }
         dropped.forEach { sources.remove(it) }
@@ -67,6 +75,15 @@ object StyleRewriter {
     }
 
     private const val PMTILES = "pmtiles://"
+    private const val CONTOURS = "dem-contour://{z}/{x}/{y}"
+    private const val MAPTERHORN = "https://tiles.mapterhorn.com/{z}/{x}/{y}.webp"
+
+    /** A tile URL template the app serves itself, in place of [url]. */
+    private fun local(url: String): String = when {
+        url.startsWith(CONTOURS) -> "https://${com.hikeratlas.android.contours.ContourServer.HOST}/{z}/{x}/{y}" + url.removePrefix(CONTOURS)
+        url == MAPTERHORN -> "https://${com.hikeratlas.android.elevation.DemServer.HOST}/{z}/{x}/{y}"
+        else -> url
+    }
 
     private fun servable(url: String) = url.isEmpty() || url.startsWith("https://") || url.startsWith("http://")
 

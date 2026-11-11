@@ -22,6 +22,9 @@ class ElevationProfiler(private val sources: List<DemSource>) {
         val minZoom: Int
         val maxZoom: Int
         fun tile(z: Int, x: Int, y: Int): FloatArray?
+
+        /** The tile as published (a Terrarium image), where the source can give it. */
+        fun raw(z: Int, x: Int, y: Int): ByteArray? = null
     }
 
     data class Profile(
