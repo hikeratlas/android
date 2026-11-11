@@ -20,11 +20,13 @@ object StyleRewriter {
         val json = JSONObject(style)
         val sources = json.getJSONObject("sources")
         val dropped = mutableSetOf<String>()
+        val archives = JSONArray()
 
         for (name in sources.keys().asSequence().toList()) {
             val source = sources.getJSONObject(name)
             val url = source.optString("url")
             if (url.startsWith(PMTILES)) {
+                archives.put(url.removePrefix(PMTILES))
                 val archive = openArchive(url.removePrefix(PMTILES))
                 source.remove("url")
                 source.put("tiles", JSONArray().put(archive.template))
@@ -43,7 +45,25 @@ object StyleRewriter {
             if (layer.optString("source") !in dropped) kept.put(layer)
         }
         json.put("layers", kept)
+        // Which archives the tile URLs serve, for starting from a saved copy.
+        val meta = json.optJSONObject("metadata") ?: JSONObject().also { json.put("metadata", it) }
+        meta.put(ARCHIVES, archives)
         return json.toString()
+    }
+
+    /** The archives a rewritten style's tiles come from. */
+    fun archivesOf(rewritten: String): List<String> {
+        val a = JSONObject(rewritten).optJSONObject("metadata")?.optJSONArray(ARCHIVES) ?: return emptyList()
+        return (0 until a.length()).map { a.getString(it) }
+    }
+
+    private const val ARCHIVES = "hikeratlas:archives"
+
+    /** The archives a style's pmtiles:// sources name. */
+    fun pmtilesUrls(style: String): List<String> {
+        val sources = JSONObject(style).getJSONObject("sources")
+        return sources.keys().asSequence().mapNotNull { sources.getJSONObject(it).optString("url").takeIf { u -> u.startsWith(PMTILES) } }
+            .map { it.removePrefix(PMTILES) }.distinct().toList()
     }
 
     private const val PMTILES = "pmtiles://"

@@ -39,6 +39,9 @@ class StyleRewriterTest {
         assertEquals(15, t.getInt("maxzoom"))
         assertEquals("OSM", t.getString("attribution"))
 
+        assertEquals(listOf("https://public.hikeratlas.com/north-america.pmtiles"), StyleRewriter.archivesOf(out.toString()))
+        assertEquals(listOf("https://public.hikeratlas.com/north-america.pmtiles"), StyleRewriter.pmtilesUrls(style))
+
         val layers = out.getJSONArray("layers")
         assertEquals(listOf("background", "roads", "hillshade"), (0 until layers.length()).map { layers.getJSONObject(it).getString("id") })
     }
