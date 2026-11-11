@@ -16,6 +16,24 @@ android {
         versionName = "0.1.0"
     }
 
+    signingConfigs {
+        // One debug key for every build that has it, so a debug build installs
+        // over another: Android only updates an app with an APK signed by the
+        // same key. The key is a secret (the repo is public, and anyone with it
+        // could sign an update that inherits the app's data): CI writes it to
+        // app/debug.keystore from the DEBUG_KEYSTORE secret. Without the file,
+        // builds use the machine's own debug key, as before.
+        val shared = file("debug.keystore")
+        if (shared.exists()) {
+            getByName("debug") {
+                storeFile = shared
+                storePassword = "android"
+                keyAlias = "androiddebugkey"
+                keyPassword = "android"
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = true
