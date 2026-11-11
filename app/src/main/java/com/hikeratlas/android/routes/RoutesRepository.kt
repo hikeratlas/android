@@ -50,6 +50,13 @@ class RoutesRepository(
     /** Whether a park has curated hikes. */
     suspend fun hasHikes(parkId: String): Boolean = index().parks.containsKey(parkId)
 
+    /** The park's routes if they're already loaded, without waiting; else null. */
+    fun cachedPark(parkId: String): ParkDoc? = if (mutex.tryLock()) {
+        try { parks[parkId] } finally { mutex.unlock() }
+    } else {
+        null
+    }
+
     /** The park's routes, or null if it has none. */
     suspend fun park(parkId: String): ParkDoc? {
         mutex.withLock { parks[parkId] }?.let { return it }
