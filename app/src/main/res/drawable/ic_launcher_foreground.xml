@@ -1,14 +1,32 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Placeholder: two peaks. -->
+<!--
+  The website's icon (public/favicon.svg): the "mountain" icon from Lucide
+  (https://lucide.dev), in white on the icon background. The site's 24-unit
+  tile maps to the 72dp an adaptive icon shows, so the mountain sits as it
+  does on the site: Lucide's 24 units at 0.75, offset (3, 3.4).
+
+  Lucide is ISC licensed: Copyright (c) for portions of Lucide are held by
+  Cole Bemis 2013-2022 as part of Feather (MIT). All other copyright (c)
+  for Lucide are held by Lucide Contributors 2022. Permission to use, copy,
+  modify, and/or distribute this software for any purpose with or without
+  fee is hereby granted, provided that the above copyright notice and this
+  permission notice appear in all copies.
+-->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-    <path
-        android:fillColor="#F1F8F3"
-        android:pathData="M30,72 L48,42 L56,54 L64,40 L80,72 Z" />
-    <path
-        android:fillColor="#FFFFFF"
-        android:pathData="M48,42 L53,50.3 L48,48 L43.6,49.3 Z M64,40 L69.5,51.4 L64,49 L59.6,50.6 Z" />
+    <group
+        android:translateX="27"
+        android:translateY="28.2"
+        android:scaleX="2.25"
+        android:scaleY="2.25">
+        <path
+            android:pathData="M8,3 L12,11 L17,6 L22,21 L2,21 Z"
+            android:strokeColor="#FFFFFF"
+            android:strokeWidth="2.4"
+            android:strokeLineCap="round"
+            android:strokeLineJoin="round" />
+    </group>
 </vector>

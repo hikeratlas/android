@@ -2,5 +2,5 @@
 <resources>
     <!-- The basemap style's background colour. -->
     <color name="map_background">#F1F8F3</color>
-    <color name="icon_background">#2F6B3F</color>
+    <color name="icon_background">#2F855A</color>
 </resources>
