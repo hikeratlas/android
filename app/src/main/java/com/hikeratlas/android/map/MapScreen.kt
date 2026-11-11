@@ -153,14 +153,22 @@ fun MapScreen(app: HikerAtlasApp) {
     LaunchedEffect(controller, attempt) {
         val c = controller ?: return@LaunchedEffect
         styleError = null
+        val loader = StyleLoader(app.http, context.cacheDir)
+        fun apply(json: String) = c.map.setStyle(Style.Builder().fromJson(json)) { s ->
+            c.onStyleLoaded(s)
+            style = s
+        }
+        // Start from last time's style, and fetch a fresh one for next time.
+        val saved = if (attempt == 0) loader.cached() else null
+        if (saved != null) {
+            loader.registerArchives(saved)
+            apply(saved)
+        }
         try {
-            val json = StyleLoader(app.http).load()
-            c.map.setStyle(Style.Builder().fromJson(json)) { s ->
-                c.onStyleLoaded(s)
-                style = s
-            }
+            val fresh = loader.load()
+            if (saved == null) apply(fresh)
         } catch (e: Exception) {
-            styleError = e.message ?: e.toString()
+            if (saved == null) styleError = e.message ?: e.toString()
         }
     }
 
