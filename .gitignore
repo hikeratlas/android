@@ -7,3 +7,6 @@ local.properties
 captures/
 *.apk
 *.aab
+
+# The debug signing key: CI writes it from the DEBUG_KEYSTORE secret; never committed.
+app/debug.keystore

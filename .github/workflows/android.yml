@@ -15,6 +15,21 @@ jobs:
           distribution: temurin
           java-version: 21
       - uses: gradle/actions/setup-gradle@v6
+      # The shared debug signing key, from a secret (see app/build.gradle.kts).
+      # Fork PRs don't get secrets: their builds use the runner's own key.
+      - name: Debug signing key
+        env:
+          DEBUG_KEYSTORE: ${{ secrets.DEBUG_KEYSTORE }}
+          FORK: ${{ github.event.pull_request.head.repo.fork }}
+        run: |
+          if [ -n "$DEBUG_KEYSTORE" ]; then
+            echo "$DEBUG_KEYSTORE" | base64 -d > app/debug.keystore
+          elif [ "$FORK" = "true" ]; then
+            echo "::notice::No DEBUG_KEYSTORE secret on a fork PR: this build is signed with the runner's own key."
+          else
+            echo "::error::The DEBUG_KEYSTORE secret isn't set: builds wouldn't install over each other."
+            exit 1
+          fi
       # Robolectric's Android runtime jar (~200 MB), fetched on first use.
       - uses: actions/cache@v6
         with:
@@ -27,13 +42,14 @@ jobs:
           HIKERATLAS_LIVE: "1"
       - name: Build
         run: ./gradlew assembleDebug
-      # Signed with the repo's debug key (app/debug.keystore), so it installs
-      # over any other debug build, as phones already have.
+      # Signed with the shared debug key, so it installs over any other
+      # debug build.
       - name: Check the debug key
+        if: hashFiles('app/debug.keystore') != ''
         run: |
           apksigner="$(ls -d "$ANDROID_HOME"/build-tools/*/ | sort -V | tail -1)apksigner"
           "$apksigner" verify --print-certs app/build/outputs/apk/debug/app-debug.apk | tee /dev/stderr \
-            | grep -q "SHA-256 digest: d44aece1e41acc0599fe7be8f5db7d3f8e0b30c244888851123896ed21213053"
+            | grep -q "SHA-256 digest: 0de3e1aefa1a47fc04ccc05766ab39fc56a97721322ae0f6816d3b2c3eff7e9d"
       - uses: actions/upload-artifact@v7
         with:
           name: app-debug

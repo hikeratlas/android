@@ -17,16 +17,20 @@ android {
     }
 
     signingConfigs {
-        // One debug key for every machine (CI's runners, anyone's checkout),
-        // so a debug build from anywhere installs over another: Android only
-        // updates an app with an APK signed by the same key, and each machine
-        // otherwise makes its own. Debug builds only: a release key would be
-        // a secret, kept out of the repo.
-        getByName("debug") {
-            storeFile = file("debug.keystore")
-            storePassword = "android"
-            keyAlias = "androiddebugkey"
-            keyPassword = "android"
+        // One debug key for every build that has it, so a debug build installs
+        // over another: Android only updates an app with an APK signed by the
+        // same key. The key is a secret (the repo is public, and anyone with it
+        // could sign an update that inherits the app's data): CI writes it to
+        // app/debug.keystore from the DEBUG_KEYSTORE secret. Without the file,
+        // builds use the machine's own debug key, as before.
+        val shared = file("debug.keystore")
+        if (shared.exists()) {
+            getByName("debug") {
+                storeFile = shared
+                storePassword = "android"
+                keyAlias = "androiddebugkey"
+                keyPassword = "android"
+            }
         }
     }
 
