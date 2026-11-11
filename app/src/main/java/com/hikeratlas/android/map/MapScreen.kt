@@ -281,11 +281,9 @@ fun MapScreen(
     BackHandler(enabled = planning && !searching) { stopPlanning() }
     // A website link the app was opened with: move to what it names, and
     // open it. Links the app doesn't know just open the map.
-    LaunchedEffect(link, controller) {
-        val uri = link ?: return@LaunchedEffect
-        val c = controller ?: return@LaunchedEffect
-        onLinkHandled()
-        val parts = Link.parts(uri) ?: return@LaunchedEffect
+    LinkEffect(link, ready = controller != null, onHandled = onLinkHandled) { uri ->
+        val c = controller ?: return@LinkEffect
+        val parts = Link.parts(uri) ?: return@LinkEffect
         searching = false
         layersOpen = false
         if (planning) stopPlanning()
