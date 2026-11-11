@@ -60,6 +60,16 @@ class MapController(val map: MapLibreMap, private val density: Float) {
         }
     }
 
+    /** Draws a trail's lines (all its ways) as the selection, or clears it. */
+    fun showLines(lines: List<List<List<Double>>>?) {
+        val src = style?.getSourceAs<GeoJsonSource>(SEL) ?: return
+        src.setGeoJson(
+            FeatureCollection.fromFeatures(
+                lines.orEmpty().filter { it.size >= 2 }.map { l -> Feature.fromGeometry(LineString.fromLngLats(l.map { Point.fromLngLat(it[0], it[1]) })) },
+            ),
+        )
+    }
+
     fun showHover(p: DoubleArray?) {
         val src = style?.getSourceAs<GeoJsonSource>(HOVER) ?: return
         if (p == null) src.setGeoJson(FeatureCollection.fromFeatures(emptyList())) else src.setGeoJson(Feature.fromGeometry(Point.fromLngLat(p[0], p[1])))

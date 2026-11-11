@@ -48,7 +48,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -163,7 +162,7 @@ private fun KindIcon(kind: String?) {
         else -> Triple(Icons.Filled.Place, Color(0xFF4F5D55), Color(0xFFEEF2EF))
     }
     Box(Modifier.size(40.dp).background(bg, CircleShape), contentAlignment = Alignment.Center) {
-        Icon(icon as ImageVector, contentDescription = null, tint = tint, modifier = Modifier.size(22.dp))
+        Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(22.dp))
     }
 }
 

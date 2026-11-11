@@ -30,6 +30,23 @@ class RoutesRepository(
         }.also { index = it }
     }
 
+    private var regions: Regions? = null
+
+    suspend fun regions(): Regions = mutex.withLock {
+        regions ?: withContext(Dispatchers.IO) {
+            JSON.decodeFromString(Regions.serializer(), get("$root/regions.json", null).decodeToString())
+        }.also { regions = it }
+    }
+
+    /**
+     * The routes id of a park named as search names it: shortened ("Jasper
+     * NP"), in a state. Null if it has no curated hikes.
+     */
+    suspend fun parkIdFor(state: String?, shortName: String): String? {
+        val st = regions().countries.flatMap { it.states }.firstOrNull { it.name == state } ?: return null
+        return st.areas.firstOrNull { shortPark(it.name) == shortName }?.id
+    }
+
     /** Whether a park has curated hikes. */
     suspend fun hasHikes(parkId: String): Boolean = index().parks.containsKey(parkId)
 
@@ -47,7 +64,7 @@ class RoutesRepository(
     }
 
     /** Forgets the index and parks, e.g. after a rebuild moved the bundle. */
-    suspend fun refresh() = mutex.withLock { index = null; parks.clear() }
+    suspend fun refresh() = mutex.withLock { index = null; regions = null; parks.clear() }
 
     private fun get(url: String, range: LongRange?): ByteArray {
         val req = Request.Builder().url(url)
@@ -59,6 +76,10 @@ class RoutesRepository(
     }
 
     companion object {
+        /** A park's name shortened as the basemap's export/zindex.lua does for search. */
+        fun shortPark(name: String) = name.replace("National Park", "NP").replace("State Park", "SP")
+            .replace("Provincial Park", "PP").replace("National Forest", "NF")
+
         val JSON = Json { ignoreUnknownKeys = true; coerceInputValues = true }
     }
 }

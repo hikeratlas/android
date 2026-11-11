@@ -67,6 +67,8 @@ import com.hikeratlas.android.routes.RouteItem
 import com.hikeratlas.android.routes.itemsFromProperties
 import com.hikeratlas.android.search.SearchItem
 import com.hikeratlas.android.search.SearchScreen
+import com.hikeratlas.android.pmtiles.HttpRangeSource
+import com.hikeratlas.android.pmtiles.TileServer
 import com.hikeratlas.android.style.StyleLoader
 import kotlinx.coroutines.launch
 import org.maplibre.android.camera.CameraPosition
@@ -100,7 +102,11 @@ fun MapScreen(app: HikerAtlasApp, onSheetOpen: (Boolean) -> Unit = {}) {
 
     val model = remember {
         // Fitting the route waits for the sheet to know its height (see below).
-        PanelModel(scope, app.routes, app.profiler) { sel, _ ->
+        PanelModel(
+            scope, app.routes, app.profiler,
+            basemap = { TileServer.register(HttpRangeSource(StyleLoader.BASEMAP_URL, app.http)).first },
+            onTrail = { lines -> controller?.showLines(lines) },
+        ) { sel, _ ->
             val c = controller ?: return@PanelModel
             c.showHover(null)
             c.showRoute(sel?.route?.line)
@@ -304,7 +310,7 @@ fun MapScreen(app: HikerAtlasApp, onSheetOpen: (Boolean) -> Unit = {}) {
                 containerPx = containerPx,
                 peekPx = peekPx,
                 onHeaderHeight = { headerPx = it },
-                halfAndFull = panel is Panel.Detail || panel is Panel.RouteList,
+                halfAndFull = panel is Panel.Detail || panel is Panel.RouteList || panel is Panel.Trail,
                 header = { PanelHeader(model, full = sheet.settledValue == Stop.Full) },
                 body = { PanelBody(model) { p -> controller?.showHover(p) } },
             )
@@ -360,10 +366,15 @@ private fun onSearchPick(item: SearchItem, c: MapController?, model: PanelModel,
         "park" -> model.openPark(item.osm_id, item.name)
         // A curated hike's osm_id is its route id, <park>/day/i etc.
         "hike" -> model.openRoute(item.osm_id.substringBefore('/'), item.osm_id, fit = false)
+        // An OSM trail: its own panel, with its elevation and the hikes that walk it.
+        "trail" -> model.openTrail(
+            item.name, item.km, item.park, item.state,
+            if (item.hasBox) doubleArrayOf(item.min_lon!!, item.min_lat!!, item.max_lon!!, item.max_lat!!) else null,
+        )
         else -> model.close()
     }
     if (item.hasBox) {
-        c.fitBox(item.min_lon!!, item.min_lat!!, item.max_lon!!, item.max_lat!!, if (item.kind == "park" || item.kind == "hike") sheetPx else 0)
+        c.fitBox(item.min_lon!!, item.min_lat!!, item.max_lon!!, item.max_lat!!, if (item.kind in setOf("park", "hike", "trail")) sheetPx else 0)
     } else {
         c.jumpTo(item.lat, item.lon, 13.0)
     }

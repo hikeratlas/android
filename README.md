@@ -22,8 +22,11 @@ The app matches more of the website with each version:
   has imagery), contour lines and hillshade, each switchable; and a link to
   the same view on OpenStreetMap.
 
-Still to come for parity with the website: the route planner, and OSM trail
-pages from search.
+- **Trails**: an OSM trail picked in search shows its ways on the map, its
+  elevation (end to end, or along its longest stretch if it branches), and
+  its park's curated hikes that walk it.
+
+Still to come for parity with the website: the route planner.
 
 ## How the map works
 
