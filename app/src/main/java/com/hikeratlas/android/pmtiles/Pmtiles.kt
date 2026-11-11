@@ -1,5 +1,9 @@
 package com.hikeratlas.android.pmtiles
 
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.withContext
 import java.io.IOException
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -91,6 +95,12 @@ class Pmtiles(private val source: RangeSource) {
     }
 
     private fun readTile(z: Int, x: Int, y: Int): ByteArray? {
+        val (offset, length) = locate(z, x, y) ?: return null
+        return Compression.decompress(source.read(offset, length), load().header.tileCompression)
+    }
+
+    /** Where a tile's bytes are in the archive (offset, length), or null if it has none. */
+    private fun locate(z: Int, x: Int, y: Int): Pair<Long, Int>? {
         val s = load()
         val h = s.header
         if (z < h.minZoom || z > h.maxZoom) return null
@@ -98,14 +108,59 @@ class Pmtiles(private val source: RangeSource) {
         var dir = s.root
         for (depth in 0..3) {
             val entry = findTile(dir, id) ?: return null
-            if (entry.runLength > 0) {
-                val data = source.read(h.tileDataOffset + entry.offset, entry.length)
-                return Compression.decompress(data, h.tileCompression)
-            }
+            if (entry.runLength > 0) return (h.tileDataOffset + entry.offset) to entry.length
             dir = leaf(h, h.leafDirsOffset + entry.offset, entry.length)
         }
         throw IOException("PMTiles directories nested too deep")
     }
+
+    /**
+     * Many tiles at one zoom, decompressed (null where the archive has none).
+     * Tiles near each other on the map are near each other in the archive
+     * (it's ordered along a Hilbert curve), so their ranges are merged into
+     * a few larger reads, as the website's CoalescingSource does: one read a
+     * tile was far slower, each costing a round trip.
+     */
+    suspend fun tiles(z: Int, coords: List<Pair<Int, Int>>): Map<Pair<Int, Int>, ByteArray?> = try {
+        readTiles(z, coords)
+    } catch (e: ArchiveChangedException) {
+        reset()
+        readTiles(z, coords)
+    }
+
+    private suspend fun readTiles(z: Int, coords: List<Pair<Int, Int>>): Map<Pair<Int, Int>, ByteArray?> =
+        withContext(Dispatchers.IO) {
+            val located = coords.distinct().map { c -> async { c to locate(z, c.first, c.second) } }.awaitAll()
+            val out = HashMap<Pair<Int, Int>, ByteArray?>()
+            located.filter { it.second == null }.forEach { out[it.first] = null }
+            val compression = load().header.tileCompression
+            // Groups of ranges with gaps of at most MAX_GAP, up to MAX_READ each.
+            val groups = ArrayList<MutableList<Pair<Pair<Int, Int>, Pair<Long, Int>>>>()
+            var end = -1L
+            for (t in located.filter { it.second != null }.map { it.first to it.second!! }.sortedBy { it.second.first }) {
+                val (offset, length) = t.second
+                val g = groups.lastOrNull()
+                if (g == null || offset > end + MAX_GAP || offset + length - g.first().second.first > MAX_READ) {
+                    groups += mutableListOf(t)
+                    end = offset + length
+                } else {
+                    g += t
+                    end = maxOf(end, offset + length)
+                }
+            }
+            groups.map { g ->
+                async {
+                    val start = g.first().second.first
+                    val stop = g.maxOf { it.second.first + it.second.second }
+                    val bytes = source.read(start, (stop - start).toInt())
+                    g.map { (c, r) ->
+                        val from = (r.first - start).toInt()
+                        c to Compression.decompress(bytes.copyOfRange(from, from + r.second), compression)
+                    }
+                }
+            }.awaitAll().flatten().forEach { (c, b) -> out[c] = b }
+            out
+        }
 
     private fun load(): State {
         state?.let { return it }
@@ -148,6 +203,8 @@ class Pmtiles(private val source: RangeSource) {
         // The spec puts the header and root directory in the first 16 KiB.
         const val INITIAL_READ = 16384
         const val MAX_CACHED_LEAVES = 256
+        const val MAX_GAP = 64L * 1024
+        const val MAX_READ = 4L * 1024 * 1024
 
         fun findTile(entries: List<Entry>, tileId: Long): Entry? {
             var lo = 0

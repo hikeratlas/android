@@ -11,7 +11,22 @@ import org.maplibre.android.maps.Style
 import org.maplibre.android.style.layers.CircleLayer
 import org.maplibre.android.style.layers.LineLayer
 import org.maplibre.android.style.layers.Property
+import androidx.core.graphics.toColorInt
+import org.maplibre.android.style.expressions.Expression
+import org.maplibre.android.style.layers.SymbolLayer
 import org.maplibre.android.style.layers.PropertyFactory.circleColor
+import org.maplibre.android.style.layers.PropertyFactory.circleOpacity
+import org.maplibre.android.style.layers.PropertyFactory.lineDasharray
+import org.maplibre.android.style.layers.PropertyFactory.lineOpacity
+import org.maplibre.android.style.layers.PropertyFactory.textAllowOverlap
+import org.maplibre.android.style.layers.PropertyFactory.textAnchor
+import org.maplibre.android.style.layers.PropertyFactory.textColor
+import org.maplibre.android.style.layers.PropertyFactory.textField
+import org.maplibre.android.style.layers.PropertyFactory.textFont
+import org.maplibre.android.style.layers.PropertyFactory.textHaloColor
+import org.maplibre.android.style.layers.PropertyFactory.textHaloWidth
+import org.maplibre.android.style.layers.PropertyFactory.textOffset
+import org.maplibre.android.style.layers.PropertyFactory.textSize
 import org.maplibre.android.style.layers.PropertyFactory.circleRadius
 import org.maplibre.android.style.layers.PropertyFactory.circleStrokeColor
 import org.maplibre.android.style.layers.PropertyFactory.circleStrokeWidth
@@ -49,6 +64,99 @@ class MapController(val map: MapLibreMap, private val density: Float) {
                 circleRadius(6f), circleColor("#0b0b0b"), circleStrokeColor("#ffffff"), circleStrokeWidth(2.5f),
             ),
         )
+        addPlannerLayers(s)
+    }
+
+    /**
+     * The route planner's line and points, as the website draws them: the
+     * start green, the end red, the rest the route's colour, with a wide
+     * invisible ring under each to take a finger's drag; taps still being
+     * routed hollow, joined to the route by a dashed line.
+     */
+    private fun addPlannerLayers(s: Style) {
+        for (id in listOf(PLAN_LINE, PLAN_POINTS, PLAN_PENDING)) s.addSource(GeoJsonSource(id))
+        val round = arrayOf(lineCap(Property.LINE_CAP_ROUND), lineJoin(Property.LINE_JOIN_ROUND))
+        s.addLayer(LineLayer("$PLAN_LINE-casing", PLAN_LINE).withProperties(*round, lineColor("#ffffff"), lineWidth(7f)))
+        s.addLayer(LineLayer(PLAN_LINE, PLAN_LINE).withProperties(*round, lineColor(ROUTE_COLOR), lineWidth(4f)))
+        s.addLayer(
+            LineLayer("$PLAN_PENDING-line", PLAN_PENDING)
+                .withFilter(Expression.eq(Expression.geometryType(), Expression.literal("LineString")))
+                .withProperties(lineColor(ROUTE_COLOR), lineWidth(2f), lineDasharray(arrayOf(2f, 2f)), lineOpacity(0.8f)),
+        )
+        s.addLayer(
+            CircleLayer("$PLAN_PENDING-points", PLAN_PENDING)
+                .withFilter(Expression.eq(Expression.geometryType(), Expression.literal("Point")))
+                .withProperties(circleRadius(6f), circleColor("#ffffff"), circleStrokeColor(ROUTE_COLOR), circleStrokeWidth(2.5f)),
+        )
+        s.addLayer(CircleLayer(PLAN_HIT, PLAN_POINTS).withProperties(circleRadius(22f), circleColor("#000000"), circleOpacity(0f)))
+        val role = Expression.get("role")
+        s.addLayer(
+            CircleLayer(PLAN_POINTS, PLAN_POINTS).withProperties(
+                circleRadius(Expression.match(role, Expression.literal(8f), Expression.stop("via", 6f))),
+                circleColor(
+                    Expression.match(
+                        role, Expression.color(ROUTE_COLOR.toColorInt()),
+                        Expression.stop("start", Expression.color(START_COLOR.toColorInt())),
+                        Expression.stop("end", Expression.color(END_COLOR.toColorInt())),
+                    ),
+                ),
+                circleStrokeColor("#ffffff"), circleStrokeWidth(2.5f),
+            ),
+        )
+        s.addLayer(
+            SymbolLayer("$PLAN_POINTS-labels", PLAN_POINTS)
+                .withFilter(Expression.neq(role, Expression.literal("via")))
+                .withProperties(
+                    textField(Expression.get("label")), textFont(arrayOf(LABEL_FONT)), textSize(13f),
+                    textOffset(arrayOf(0f, 1.3f)), textAnchor(Property.TEXT_ANCHOR_TOP), textAllowOverlap(true),
+                    textColor(
+                        Expression.match(
+                            role, Expression.color(START_COLOR.toColorInt()),
+                            Expression.stop("end", Expression.color(END_COLOR.toColorInt())),
+                        ),
+                    ),
+                    textHaloColor("#ffffff"), textHaloWidth(2f),
+                ),
+        )
+    }
+
+    /** Draws the planned route: its points (start, via, end), its line, and taps still being routed. */
+    fun showPlan(points: List<List<Double>>, line: List<List<Double>>, pending: List<List<Double>>) {
+        val s = style ?: return
+        s.getSourceAs<GeoJsonSource>(PLAN_LINE)?.let { src ->
+            if (line.size < 2) src.setGeoJson(FeatureCollection.fromFeatures(emptyList()))
+            else src.setGeoJson(Feature.fromGeometry(LineString.fromLngLats(line.map { Point.fromLngLat(it[0], it[1]) })))
+        }
+        val loop = points.size > 2 && com.hikeratlas.android.elevation.ElevationProfiler.haversine(points.first(), points.last()) <=
+            com.hikeratlas.android.routing.Planner.SAME_END_M
+        val features = points.mapIndexed { i, p ->
+            val role = when {
+                i == 0 -> "start"
+                i == points.size - 1 -> if (loop) "via" else "end"
+                else -> "via"
+            }
+            val label = if (i == 0) (if (loop) "Start · End" else "Start") else if (role == "end") "End" else ""
+            Feature.fromGeometry(Point.fromLngLat(p[0], p[1])).apply {
+                addNumberProperty("i", i)
+                addStringProperty("role", role)
+                addStringProperty("label", label)
+            }
+        // The start drawn last, so on a loop it sits on top of the end.
+        }.sortedBy { if (it.getStringProperty("role") == "start") 1 else 0 }
+        s.getSourceAs<GeoJsonSource>(PLAN_POINTS)?.setGeoJson(FeatureCollection.fromFeatures(features))
+        val from = points.lastOrNull()?.let { listOf(it) }.orEmpty()
+        val chain = from + pending
+        val pendingFeatures = buildList {
+            if (pending.isNotEmpty() && chain.size > 1) add(Feature.fromGeometry(LineString.fromLngLats(chain.map { Point.fromLngLat(it[0], it[1]) })))
+            pending.forEach { add(Feature.fromGeometry(Point.fromLngLat(it[0], it[1]))) }
+        }
+        s.getSourceAs<GeoJsonSource>(PLAN_PENDING)?.setGeoJson(FeatureCollection.fromFeatures(pendingFeatures))
+    }
+
+    /** The planned point under a touch, by index, if any. */
+    fun planPointAt(p: PointF): Int? {
+        if (style?.getLayer(PLAN_HIT) == null) return null
+        return map.queryRenderedFeatures(p, PLAN_HIT).firstOrNull()?.getNumberProperty("i")?.toInt()
     }
 
     fun showRoute(line: List<List<Double>>?) {
@@ -132,6 +240,14 @@ class MapController(val map: MapLibreMap, private val density: Float) {
         // The basemap's park names (styles/parks.json's label-park, prefixed by mapt).
         const val PARK_LABEL = "parks-label-park"
         const val ROUTE_COLOR = "#c026d3"
+        const val START_COLOR = "#15803d"
+        const val END_COLOR = "#b91c1c"
+        // The basemap style's label font: its glyphs are what the map can draw.
+        const val LABEL_FONT = "Hubot Sans-Regular"
+        private const val PLAN_LINE = "plan-line"
+        private const val PLAN_POINTS = "plan-points"
+        private const val PLAN_PENDING = "plan-pending"
+        private const val PLAN_HIT = "plan-hit"
         private const val SEL = "curated-sel"
         private const val HOVER = "curated-hover"
     }

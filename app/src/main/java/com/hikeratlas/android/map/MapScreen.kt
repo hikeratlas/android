@@ -34,6 +34,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.MyLocation
+import androidx.compose.material.icons.filled.Route
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -65,6 +66,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.hikeratlas.android.HikerAtlasApp
 import com.hikeratlas.android.routes.RouteItem
 import com.hikeratlas.android.routes.itemsFromProperties
+import com.hikeratlas.android.routing.Planner
 import com.hikeratlas.android.search.SearchItem
 import com.hikeratlas.android.search.SearchScreen
 import com.hikeratlas.android.pmtiles.HttpRangeSource
@@ -99,6 +101,15 @@ fun MapScreen(app: HikerAtlasApp, onSheetOpen: (Boolean) -> Unit = {}) {
     var layersOpen by remember { mutableStateOf(false) }
     var layerChoice by remember { mutableStateOf(LayerChoice.load(context)) }
     var mapLayers by remember { mutableStateOf<MapLayers?>(null) }
+    var planning by remember { mutableStateOf(false) }
+    val planner = remember {
+        Planner(
+            scope,
+            fetch = { z, tiles -> TileServer.register(HttpRangeSource(StyleLoader.BASEMAP_URL, app.http)).first.tiles(z, tiles) },
+            profiler = app.profiler,
+        )
+    }
+    val isPlanning by rememberUpdatedState(planning)
 
     val model = remember {
         // Fitting the route waits for the sheet to know its height (see below).
@@ -137,8 +148,53 @@ fun MapScreen(app: HikerAtlasApp, onSheetOpen: (Boolean) -> Unit = {}) {
             m.addOnCameraIdleListener {
                 CameraStore.save(context, m.cameraPosition)
                 inView = itemsFromProperties(c.routesInView(mapView.width, mapView.height), fromCamp = false)
+                if (isPlanning) {
+                    val b = m.projection.visibleRegion.latLngBounds
+                    planner.prefetchView(b.longitudeWest, b.latitudeSouth, b.longitudeEast, b.latitudeNorth, m.cameraPosition.zoom)
+                }
+            }
+            // While planning, a finger on a point drags it: the legs either
+            // side are routed again through where it's let go.
+            var dragging: Int? = null
+            mapView.onPlannerTouch { v, ev ->
+                if (!isPlanning) return@onPlannerTouch false
+                val at = android.graphics.PointF(ev.x, ev.y)
+                when (ev.actionMasked) {
+                    android.view.MotionEvent.ACTION_DOWN -> {
+                        dragging = c.planPointAt(at)
+                        dragging != null
+                    }
+                    android.view.MotionEvent.ACTION_MOVE -> {
+                        val i = dragging ?: return@onPlannerTouch false
+                        val ll = m.projection.fromScreenLocation(at)
+                        c.showPlan(planner.points.toMutableList().also { it[i] = listOf(ll.longitude, ll.latitude) }, planner.coords, planner.pending)
+                        true
+                    }
+                    android.view.MotionEvent.ACTION_UP, android.view.MotionEvent.ACTION_CANCEL -> {
+                        val i = dragging ?: return@onPlannerTouch false
+                        dragging = null
+                        v.performClick()
+                        val ll = m.projection.fromScreenLocation(at)
+                        val p = listOf(ll.longitude, ll.latitude)
+                        val last = planner.points.size - 1
+                        // A loop starts and ends at one place: dragging either end moves both.
+                        if (ev.actionMasked == android.view.MotionEvent.ACTION_CANCEL) {
+                            c.showPlan(planner.points, planner.coords, planner.pending)
+                        } else if ((i == 0 || i == last) && planner.isLoop()) {
+                            planner.moveEnds(p, m.cameraPosition.zoom)
+                        } else {
+                            planner.move(i, p, m.cameraPosition.zoom)
+                        }
+                        true
+                    }
+                    else -> dragging != null
+                }
             }
             m.addOnMapClickListener { latLng ->
+                if (isPlanning) {
+                    planner.add(listOf(latLng.longitude, latLng.latitude), m.cameraPosition.zoom)
+                    return@addOnMapClickListener true
+                }
                 val p = m.projection.toScreenLocation(latLng)
                 val found = itemsFromProperties(c.routesAt(p))
                 when {
@@ -171,6 +227,7 @@ fun MapScreen(app: HikerAtlasApp, onSheetOpen: (Boolean) -> Unit = {}) {
             mapLayers = MapLayers(s).also { it.apply(layerChoice) }
             // A new style drops what was drawn on the old one.
             (model.panel as? Panel.Detail)?.let { c.showRoute(it.selected.route.line) }
+            c.showPlan(planner.points, planner.coords, planner.pending)
             style = s
         }
         // Start from last time's style, so the map draws at once; then use
@@ -196,7 +253,17 @@ fun MapScreen(app: HikerAtlasApp, onSheetOpen: (Boolean) -> Unit = {}) {
     // A fresh sheet each time one opens, so it starts low however the last was left.
     val sheet = remember(open) { AnchoredDraggableState(Stop.Peek) }
 
-    LaunchedEffect(open) { onSheetOpen(open) }
+    LaunchedEffect(open, planning) { onSheetOpen(open || planning) }
+    // Draw the plan as it changes.
+    LaunchedEffect(planner.points, planner.coords, planner.pending, style) {
+        controller?.showPlan(planner.points, planner.coords, planner.pending)
+    }
+    val stopPlanning = {
+        planner.clear()
+        controller?.showHover(null)
+        planning = false
+    }
+    BackHandler(enabled = planning && !searching) { stopPlanning() }
     // A newly opened panel starts at its lowest height: the map stays in view.
     LaunchedEffect(panel::class, (panel as? Panel.Detail)?.selected?.id, (panel as? Panel.RouteList)?.heading) {
         if (open && sheet.anchors.hasPositionFor(Stop.Peek)) sheet.animateTo(Stop.Peek)
@@ -244,7 +311,10 @@ fun MapScreen(app: HikerAtlasApp, onSheetOpen: (Boolean) -> Unit = {}) {
             }
         }
 
-        if (open) {
+        if (planning) {
+            PlannerBar(planner, onDone = stopPlanning, modifier = Modifier.statusBarsPadding().padding(12.dp))
+            PlannerPanel(planner, onScrub = { p -> controller?.showHover(p) }, modifier = Modifier.align(Alignment.BottomCenter))
+        } else if (open) {
             // While a sheet is open: back (to the list it came from), search
             // and location, as small buttons. At full height, just back.
             val back = (panel as? Panel.Detail)?.back
@@ -288,6 +358,15 @@ fun MapScreen(app: HikerAtlasApp, onSheetOpen: (Boolean) -> Unit = {}) {
                 }
                 Column(Modifier.align(Alignment.End).padding(top = 10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     RoundButton(Icons.Filled.Layers, "Map layers") { layersOpen = true }
+                    RoundButton(Icons.Filled.Route, "Plan a route") {
+                        model.close()
+                        planner.clear()
+                        planning = true
+                        controller?.map?.let { m ->
+                            val b = m.projection.visibleRegion.latLngBounds
+                            planner.prefetchView(b.longitudeWest, b.latitudeSouth, b.longitudeEast, b.latitudeNorth, m.cameraPosition.zoom)
+                        }
+                    }
                     RoundButton(Icons.Filled.MyLocation, "Show my location", locate)
                 }
             }
@@ -304,7 +383,7 @@ fun MapScreen(app: HikerAtlasApp, onSheetOpen: (Boolean) -> Unit = {}) {
             }
         }
 
-        if (open && containerPx > 0) {
+        if (open && !planning && containerPx > 0) {
             MapSheet(
                 state = sheet,
                 containerPx = containerPx,
@@ -351,6 +430,15 @@ fun MapScreen(app: HikerAtlasApp, onSheetOpen: (Boolean) -> Unit = {}) {
         )
     }
 }
+
+/**
+ * The planner's touch handling: drags of its points only. MapView (MapLibre's)
+ * doesn't override performClick; taps still go through its own click
+ * listeners, and a drag's release calls performClick.
+ */
+@SuppressLint("ClickableViewAccessibility")
+private fun MapView.onPlannerTouch(listener: (android.view.View, android.view.MotionEvent) -> Boolean) =
+    setOnTouchListener(listener)
 
 @Composable
 private fun RoundButton(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, onClick: () -> Unit) {
