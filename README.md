@@ -26,7 +26,12 @@ The app matches more of the website with each version:
   elevation (end to end, or along its longest stretch if it branches), and
   its park's curated hikes that walk it.
 
-Still to come for parity with the website: the route planner.
+- **Route planner**: tap points and each is routed along trails and roads
+  from the one before, on the basemap's own tiles (as the website's
+  planner); drag a point to move it, undo, clear; distance, climb and an
+  elevation chart.
+
+That's parity with the website's map. Next: offline areas.
 
 ## How the map works
 
@@ -72,16 +77,14 @@ the phone.
 
 ## Roadmap
 
-1. **Website parity** (in progress): map layers, the route planner, and OSM
-   trail pages.
-2. **Offline**: download an area, i.e. a bbox extract of the basemap and routes
+1. **Offline**: download an area, i.e. a bbox extract of the basemap and routes
    archives written as a local PMTiles file and served by a `FileRangeSource`,
    plus glyphs, sprites and terrain tiles.
-3. **GPS track recording**: a foreground service that records while the screen
+2. **GPS track recording**: a foreground service that records while the screen
    is off, with the track on the map, stats, and GPX export.
-4. **Photos**: take geotagged photos on a hike and share them back to the
+3. **Photos**: take geotagged photos on a hike and share them back to the
    route. This needs an upload API and moderation on the server side.
-5. **OSM edits**: fix trail tags and add missing features, via OSM's OAuth 2
+4. **OSM edits**: fix trail tags and add missing features, via OSM's OAuth 2
    and changeset API.
-6. **Explore and deep links**: browse by country, state and park; open
+5. **Explore and deep links**: browse by country, state and park; open
    hikeratlas.com links in the app.

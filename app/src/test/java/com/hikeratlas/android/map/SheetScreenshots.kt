@@ -5,6 +5,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.gestures.AnchoredDraggableState
 import androidx.compose.foundation.gestures.snapTo
@@ -194,6 +195,49 @@ class SheetScreenshots {
         { openTrail("Black Tusk Trail", 2.4, "Garibaldi PP", "British Columbia", null) },
         Stop.Full,
     ) { (modelState.value?.panel as? Panel.Trail)?.loading == false }
+
+    @Test
+    fun planner() {
+        // A trail across one z14 tile near Garibaldi; every other tile empty.
+        val (tx, ty) = 2597 to 5561
+        val trail = com.hikeratlas.android.contours.MvtLayer("path").apply {
+            add(mapOf("name" to "x"), listOf(intArrayOf(200, 3000, 1500, 2000, 2600, 2300, 3900, 1000)))
+        }.encode()
+        fun ll(x: Double, y: Double): List<Double> {
+            val n = 4096.0 * (1 shl 14)
+            val wx = tx * 4096 + x
+            val wy = ty * 4096 + y
+            return listOf(wx / n * 360 - 180, Math.toDegrees(Math.atan(Math.sinh(Math.PI * (1 - 2 * wy / n)))))
+        }
+        var planner: com.hikeratlas.android.routing.Planner? = null
+        compose.setContent {
+            val scope = androidx.compose.runtime.rememberCoroutineScope()
+            val p = androidx.compose.runtime.remember {
+                com.hikeratlas.android.routing.Planner(
+                    scope,
+                    fetch = { z, tiles -> tiles.associateWith { (x, y) -> if (z == 14 && x == tx && y == ty) trail else null } },
+                    profiler = ElevationProfiler(listOf(hill)),
+                ).also { planner = it }
+            }
+            com.hikeratlas.android.ui.HikerAtlasTheme {
+                androidx.compose.foundation.layout.Box(Modifier.size(390.dp, 844.dp).background(Color(0xFFD3EFDF))) {
+                    PlannerBar(p, onDone = {}, modifier = Modifier.padding(12.dp))
+                    PlannerPanel(p, onScrub = {}, modifier = Modifier.align(androidx.compose.ui.Alignment.BottomCenter))
+                }
+            }
+        }
+        compose.waitUntil(5_000) { planner != null }
+        compose.runOnIdle {
+            planner!!.add(ll(200.0, 3000.0), 13.0)
+            planner!!.add(ll(2600.0, 2300.0), 13.0)
+            planner!!.add(ll(3900.0, 1000.0), 13.0)
+        }
+        compose.waitUntil(60_000) { planner!!.points.size == 3 && planner!!.profile != null }
+        compose.waitForIdle()
+        val bmp = compose.onRoot().captureToImage().asAndroidBitmap()
+        val out = File("build/screenshots/planner.png").apply { parentFile!!.mkdirs() }
+        out.outputStream().use { bmp.compress(Bitmap.CompressFormat.PNG, 100, it) }
+    }
 
     @Test
     fun park() {

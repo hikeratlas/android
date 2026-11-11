@@ -4,7 +4,7 @@ import java.io.ByteArrayOutputStream
 
 /**
  * A minimal Mapbox Vector Tile writer: one layer of line strings with
- * integer or string properties, which is all contours (and tests) need.
+ * integer, string or boolean properties, which is all contours (and tests) need.
  */
 class MvtLayer(private val name: String, private val extent: Int = 4096) {
     private class Feature(val props: List<Pair<Int, Int>>, val lines: List<IntArray>)
@@ -43,6 +43,7 @@ class MvtLayer(private val name: String, private val extent: Int = 4096) {
                 is String -> value.bytesField(1, v.toByteArray())
                 // sint_value: zigzag-encoded
                 is Long -> value.varintField(6, (v shl 1) xor (v shr 63))
+                is Boolean -> value.varintField(7, if (v) 1 else 0)
                 else -> error("unsupported property value $v")
             }
             layer.bytesField(4, value.bytes())
