@@ -18,6 +18,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.text.style.TextOverflow
 import kotlin.math.roundToInt
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -31,6 +32,7 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Button
@@ -92,6 +94,9 @@ fun MapScreen(app: HikerAtlasApp, onSheetOpen: (Boolean) -> Unit = {}) {
     var attempt by remember { mutableIntStateOf(0) }
     var inView by remember { mutableStateOf<List<RouteItem>>(emptyList()) }
     var searching by remember { mutableStateOf(false) }
+    var layersOpen by remember { mutableStateOf(false) }
+    var layerChoice by remember { mutableStateOf(LayerChoice.load(context)) }
+    var mapLayers by remember { mutableStateOf<MapLayers?>(null) }
 
     val model = remember {
         // Fitting the route waits for the sheet to know its height (see below).
@@ -157,6 +162,7 @@ fun MapScreen(app: HikerAtlasApp, onSheetOpen: (Boolean) -> Unit = {}) {
         val loader = StyleLoader(app.http, context.cacheDir)
         fun apply(json: String) = c.map.setStyle(Style.Builder().fromJson(json)) { s ->
             c.onStyleLoaded(s)
+            mapLayers = MapLayers(s).also { it.apply(layerChoice) }
             style = s
         }
         // Start from last time's style, and fetch a fresh one for next time.
@@ -252,6 +258,8 @@ fun MapScreen(app: HikerAtlasApp, onSheetOpen: (Boolean) -> Unit = {}) {
                 if (sheet.settledValue != Stop.Full) {
                     RoundButton(Icons.Filled.Search, "Search") { searching = true }
                     Spacer(Modifier.width(8.dp))
+                    RoundButton(Icons.Filled.Layers, "Map layers") { layersOpen = true }
+                    Spacer(Modifier.width(8.dp))
                     RoundButton(Icons.Filled.MyLocation, "Show my location", locate)
                 }
             }
@@ -269,7 +277,8 @@ fun MapScreen(app: HikerAtlasApp, onSheetOpen: (Boolean) -> Unit = {}) {
                         Text("Search hikes, parks, peaks, trails", color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
-                Box(Modifier.align(Alignment.End).padding(top = 10.dp)) {
+                Column(Modifier.align(Alignment.End).padding(top = 10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    RoundButton(Icons.Filled.Layers, "Map layers") { layersOpen = true }
                     RoundButton(Icons.Filled.MyLocation, "Show my location", locate)
                 }
             }
@@ -297,6 +306,24 @@ fun MapScreen(app: HikerAtlasApp, onSheetOpen: (Boolean) -> Unit = {}) {
                 body = { PanelBody(model) { p -> controller?.showHover(p) } },
             )
         }
+    }
+
+    if (layersOpen) {
+        LayersSheet(
+            choice = layerChoice,
+            onChange = { c ->
+                layerChoice = c
+                c.save(context)
+                mapLayers?.apply(c)
+            },
+            onOpenOsm = {
+                controller?.map?.cameraPosition?.let { cam ->
+                    val t = cam.target ?: return@let
+                    openUrl(context, osmUrl(t.longitude, t.latitude, cam.zoom))
+                }
+            },
+            onDismiss = { layersOpen = false },
+        )
     }
 
     if (searching) {

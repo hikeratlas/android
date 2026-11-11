@@ -1,7 +1,11 @@
 package com.hikeratlas.android
 
 import android.app.Application
+import com.hikeratlas.android.contours.ContourServer
+import com.hikeratlas.android.elevation.DemServer
+import com.hikeratlas.android.elevation.DemTiles
 import com.hikeratlas.android.elevation.ElevationProfiler
+import com.hikeratlas.android.imagery.ImageryServer
 import com.hikeratlas.android.elevation.MapterhornSource
 import com.hikeratlas.android.elevation.NlDemSource
 import com.hikeratlas.android.pmtiles.TileServer
@@ -21,7 +25,10 @@ class HikerAtlasApp : Application() {
         private set
 
     val routes by lazy { RoutesRepository(http) }
-    val profiler by lazy { ElevationProfiler(listOf(NlDemSource(http), MapterhornSource(http))) }
+    /** Terrain: nl-dem over Newfoundland first, then Mapterhorn. */
+    private val demSources by lazy { listOf(NlDemSource(http), MapterhornSource(http)) }
+    val dem by lazy { DemTiles(demSources) }
+    val profiler by lazy { ElevationProfiler(demSources) }
     val search by lazy { SearchApi(http) }
     val recentSearches by lazy { RecentSearches(this) }
 
@@ -42,7 +49,14 @@ class HikerAtlasApp : Application() {
         MapLibre.getInstance(this)
         // MapLibre's own requests (tiles, glyphs, sprites) go through this
         // client, so TileServer can answer the rewritten pmtiles sources.
-        HttpRequestUtil.setOkHttpClient(http.newBuilder().addInterceptor(TileServer).build())
+        HttpRequestUtil.setOkHttpClient(
+            http.newBuilder()
+                .addInterceptor(TileServer)
+                .addInterceptor(DemServer(dem, demSources))
+                .addInterceptor(ContourServer(dem))
+                .addInterceptor(ImageryServer(assets, http))
+                .build(),
+        )
         // Room for a few areas' tiles, so going back somewhere is quick.
         OfflineManager.getInstance(this).setMaximumAmbientCacheSize(AMBIENT_CACHE_BYTES, null)
     }
