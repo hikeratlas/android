@@ -55,6 +55,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.text.withStyle
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import java.text.Normalizer
 import java.util.Locale
@@ -86,6 +87,9 @@ fun SearchScreen(
         try {
             results = api.search(query.trim(), nearLat, nearLon)
             error = null
+        } catch (e: CancellationException) {
+            // A newer query took over (typing on): not a failure.
+            throw e
         } catch (e: Exception) {
             error = "Search isn't available right now."
         }
