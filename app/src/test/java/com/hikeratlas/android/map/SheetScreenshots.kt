@@ -148,7 +148,7 @@ class SheetScreenshots {
                     if (m != null && container > 0) {
                         MapSheet(
                             state = sheet, containerPx = container, peekPx = header, onHeaderHeight = { header = it },
-                            halfAndFull = true,
+                            halfAndFull = (m.panel as? Panel.Detail)?.let(::hasDetailBody) ?: true,
                             header = { PanelHeader(m, full = sheet.settledValue == Stop.Full) },
                             body = { PanelBody(m) {} },
                         )
@@ -173,13 +173,19 @@ class SheetScreenshots {
         (modelState.value?.panel as? Panel.Detail)?.profile is ProfileState.Ready
     }
 
+    // Blackcomb Peak: a scramble, so it has a warning below its peek.
     @Test
-    fun hikeSheetHalf() = shootSheet("sheet-hike-half", { openRoute("2226817", "2226817/day/5") }, Stop.Half) {
+    fun scrambleSheetPeek() = shootSheet("sheet-scramble-peek", { openRoute("2226817", "2226817/day/6") }, Stop.Peek) {
         (modelState.value?.panel as? Panel.Detail)?.profile is ProfileState.Ready
     }
 
     @Test
-    fun hikeSheetFull() = shootSheet("sheet-hike-full", { openRoute("2226817", "2226817/day/5") }, Stop.Full) {
+    fun scrambleSheetHalf() = shootSheet("sheet-scramble-half", { openRoute("2226817", "2226817/day/6") }, Stop.Half) {
+        (modelState.value?.panel as? Panel.Detail)?.profile is ProfileState.Ready
+    }
+
+    @Test
+    fun baseCampSheetHalf() = shootSheet("sheet-basecamp-half", { openRoute("2226817", "2226817/base/1") }, Stop.Half) {
         (modelState.value?.panel as? Panel.Detail)?.profile is ProfileState.Ready
     }
 
