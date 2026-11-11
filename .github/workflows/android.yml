@@ -59,3 +59,38 @@ jobs:
         with:
           name: reports
           path: app/build/reports/
+
+  # The newest main build, for anyone to download without signing in: the
+  # website's "Get the Android app" links to releases/latest. One release,
+  # tagged "latest", moved to each push to main and its APK replaced. A full
+  # release (not a pre-release): GitHub's releases/latest skips those.
+  release:
+    needs: build
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    # One at a time, so an older push can't overwrite a newer one's APK.
+    concurrency:
+      group: release-latest
+      cancel-in-progress: false
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: app-debug
+      - name: Publish the latest APK
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          mv app-debug.apk hiker-atlas.apk
+          notes="The newest build of main, from ${GITHUB_SHA::7}: a debug build, signed with the shared debug key, so it installs over earlier ones. Download hiker-atlas.apk on your phone and open it to install."
+          # Point the tag at this commit (made on first use).
+          gh api -X PATCH "repos/$GH_REPO/git/refs/tags/latest" -f sha="$GITHUB_SHA" -F force=true >/dev/null 2>&1 \
+            || gh api -X POST "repos/$GH_REPO/git/refs" -f ref=refs/tags/latest -f sha="$GITHUB_SHA" >/dev/null
+          if gh release view latest >/dev/null 2>&1; then
+            gh release edit latest --title "Latest build" --notes "$notes" --latest
+          else
+            gh release create latest --title "Latest build" --notes "$notes" --latest --verify-tag
+          fi
+          gh release upload latest hiker-atlas.apk --clobber
