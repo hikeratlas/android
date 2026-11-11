@@ -82,6 +82,9 @@ class SheetScreenshots {
                     """{"bundle":"b.bin","parks":{"2226817":[0,${bundle.size}]},"paths":{"2226817":"canada/british-columbia/garibaldi-provincial-park"}}""",
                 ).build()
                 "/b.bin" -> MockResponse.Builder().body(Buffer().write(bundle)).build()
+                "/regions.json" -> MockResponse.Builder().body(
+                    """{"countries":[{"name":"Canada","states":[{"name":"British Columbia","areas":[{"id":"2226817","name":"Garibaldi Provincial Park"}]}]}]}""",
+                ).build()
                 else -> MockResponse.Builder().code(404).build()
             }
         }
@@ -183,6 +186,14 @@ class SheetScreenshots {
     fun parkSheetPeek() = shootSheet("sheet-park-peek", { openPark("2226817", "Garibaldi PP") }, Stop.Peek) {
         modelState.value?.panel is Panel.RouteList
     }
+
+    @Test
+    fun trailSheet() = shootSheet(
+        "sheet-trail",
+        // No box: no ways to read here, so just its hikes.
+        { openTrail("Black Tusk Trail", 2.4, "Garibaldi PP", "British Columbia", null) },
+        Stop.Full,
+    ) { (modelState.value?.panel as? Panel.Trail)?.loading == false }
 
     @Test
     fun park() {

@@ -133,6 +133,25 @@ fun PanelHeader(model: PanelModel, full: Boolean) {
                     )
                 }
             }
+            is Panel.Trail -> {
+                TitleRow(p.name, full, model::close)
+                Column(Modifier.padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(p.subtitle, style = MaterialTheme.typography.bodyMedium, color = MUTED)
+                    val m = { x: Double -> "${metres(x)} m" }
+                    val prof = p.profile
+                    val range = p.range
+                    when {
+                        prof != null && range != null -> Text(
+                            "↑ ${m(prof.gain)} · ↓ ${m(prof.loss)} " +
+                                (p.along?.let { "along ${km(it / 1000)} km of it" } ?: "end to end") +
+                                " · high ${m(range.second)} · low ${m(range.first)}",
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                        range != null -> Text("High ${m(range.second)} · low ${m(range.first)}", style = MaterialTheme.typography.bodyMedium)
+                        p.loading -> LinearProgressIndicator(Modifier.fillMaxWidth().padding(vertical = 8.dp))
+                    }
+                }
+            }
             is Panel.Detail -> {
                 val r = p.selected.route
                 TitleRow(p.selected.title, full, model::close)
@@ -189,7 +208,37 @@ fun PanelBody(model: PanelModel, onScrub: (DoubleArray?) -> Unit) {
             }
         }
         is Panel.Detail -> DetailBody(p, model, onScrub)
+        is Panel.Trail -> TrailBody(p, model, onScrub)
         else -> {}
+    }
+}
+
+/** A trail's elevation, and the park's curated hikes that walk it. */
+@Composable
+private fun TrailBody(t: Panel.Trail, model: PanelModel, onScrub: (DoubleArray?) -> Unit) {
+    Column(Modifier.padding(horizontal = 20.dp).padding(bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        val prof = t.profile
+        when {
+            prof != null -> ElevationChart(prof, emptyList(), onScrub = { i -> onScrub(i?.let { prof.coords[it] }) })
+            t.loading -> Box(Modifier.fillMaxWidth().height(110.dp), contentAlignment = Alignment.CenterStart) {
+                Text("Measuring elevation…", color = MUTED)
+            }
+            t.tooLong -> Text("Too long to measure here.", color = MUTED, style = MaterialTheme.typography.bodySmall)
+        }
+        val hikes = t.hikes
+        if (!hikes.isNullOrEmpty()) {
+            Column {
+                Text("Hikes on this trail", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                for (h in hikes) LinkRow(h.title, h.meta) { model.openRoute(h.park, h.id) }
+            }
+        } else if (!t.loading && hikes != null) {
+            Column {
+                Text("No curated hikes use this trail yet.", color = MUTED)
+                if (t.parkId != null) {
+                    LinkRow("Hikes in ${t.parkName ?: "the park"}", null) { model.openPark(t.parkId, t.parkName ?: "") }
+                }
+            }
+        }
     }
 }
 

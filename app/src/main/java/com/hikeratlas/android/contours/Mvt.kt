@@ -4,17 +4,17 @@ import java.io.ByteArrayOutputStream
 
 /**
  * A minimal Mapbox Vector Tile writer: one layer of line strings with
- * integer properties, which is all contours need.
+ * integer or string properties, which is all contours (and tests) need.
  */
 class MvtLayer(private val name: String, private val extent: Int = 4096) {
     private class Feature(val props: List<Pair<Int, Int>>, val lines: List<IntArray>)
 
     private val keys = LinkedHashMap<String, Int>()
-    private val values = LinkedHashMap<Long, Int>()
+    private val values = LinkedHashMap<Any, Int>()
     private val features = ArrayList<Feature>()
 
     /** Adds a feature of one or more lines, each [x0, y0, x1, y1, ...] in tile units. */
-    fun add(props: Map<String, Long>, lines: List<IntArray>) {
+    fun add(props: Map<String, Any>, lines: List<IntArray>) {
         val kept = lines.filter { it.size >= 4 }
         if (kept.isEmpty()) return
         val tags = props.map { (k, v) ->
@@ -39,8 +39,12 @@ class MvtLayer(private val name: String, private val extent: Int = 4096) {
         for (k in keys.keys) layer.bytesField(3, k.toByteArray())
         for (v in values.keys) {
             val value = Pb()
-            // sint_value: zigzag-encoded
-            value.varintField(6, (v shl 1) xor (v shr 63))
+            when (v) {
+                is String -> value.bytesField(1, v.toByteArray())
+                // sint_value: zigzag-encoded
+                is Long -> value.varintField(6, (v shl 1) xor (v shr 63))
+                else -> error("unsupported property value $v")
+            }
             layer.bytesField(4, value.bytes())
         }
         layer.varintField(5, extent.toLong())

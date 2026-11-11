@@ -64,5 +64,7 @@ class StyleLoader(private val client: OkHttpClient, private val cacheDir: File) 
     companion object {
         const val TILES_ROOT = "https://public.hikeratlas.com"
         const val STYLE_URL = "$TILES_ROOT/style.json"
+        /** The basemap archive the style's main source reads, for trails' ways. */
+        const val BASEMAP_URL = "$TILES_ROOT/north-america.pmtiles"
     }
 }
