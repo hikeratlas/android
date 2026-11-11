@@ -16,6 +16,20 @@ android {
         versionName = "0.1.0"
     }
 
+    signingConfigs {
+        // One debug key for every machine (CI's runners, anyone's checkout),
+        // so a debug build from anywhere installs over another: Android only
+        // updates an app with an APK signed by the same key, and each machine
+        // otherwise makes its own. Debug builds only: a release key would be
+        // a secret, kept out of the repo.
+        getByName("debug") {
+            storeFile = file("debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = true

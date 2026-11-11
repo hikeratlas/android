@@ -27,6 +27,13 @@ jobs:
           HIKERATLAS_LIVE: "1"
       - name: Build
         run: ./gradlew assembleDebug
+      # Signed with the repo's debug key (app/debug.keystore), so it installs
+      # over any other debug build, as phones already have.
+      - name: Check the debug key
+        run: |
+          apksigner="$(ls -d "$ANDROID_HOME"/build-tools/*/ | sort -V | tail -1)apksigner"
+          "$apksigner" verify --print-certs app/build/outputs/apk/debug/app-debug.apk | tee /dev/stderr \
+            | grep -q "SHA-256 digest: d44aece1e41acc0599fe7be8f5db7d3f8e0b30c244888851123896ed21213053"
       - uses: actions/upload-artifact@v7
         with:
           name: app-debug
