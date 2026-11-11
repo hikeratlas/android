@@ -18,6 +18,13 @@ import org.json.JSONObject
  *   their layers.
  */
 object StyleRewriter {
+    /**
+     * Bump when the rewriting changes, so a style saved by an older build
+     * (see StyleLoader) isn't used: it would lack what the change adds.
+     * 2: contours and terrain from the app's own servers.
+     */
+    const val VERSION = 2
+
     /** What [rewrite] needs to know about an archive. */
     data class TileSource(val template: String, val minZoom: Int, val maxZoom: Int)
 
