@@ -255,12 +255,20 @@ private fun FeaturedCards(
     val muted = MaterialTheme.colorScheme.onSurfaceVariant
     Column(verticalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.padding(bottom = 8.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                if (c.near && asked == null) "A park near you" else "Featured park",
-                style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f),
-            )
-            TextButton(onClick = { asked = c.index - 1 }) { Text("‹ ${c.parks[(c.index - 1 + c.parks.size) % c.parks.size].short}") }
-            TextButton(onClick = { asked = c.index + 1 }) { Text("${c.parks[(c.index + 1) % c.parks.size].short} ›") }
+            Text("Featured park", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+            // Another showcase park: a list to pick from (a row of names doesn't fit a phone).
+            var open by remember { mutableStateOf(false) }
+            Box {
+                TextButton(onClick = { open = true }) { Text("${c.parks[c.index].short} ▾") }
+                androidx.compose.material3.DropdownMenu(open, onDismissRequest = { open = false }) {
+                    c.parks.forEachIndexed { i, p ->
+                        androidx.compose.material3.DropdownMenuItem(
+                            text = { Text(p.short, fontWeight = if (i == c.index) FontWeight.Bold else null) },
+                            onClick = { open = false; asked = i },
+                        )
+                    }
+                }
+            }
         }
         // The park.
         Column(

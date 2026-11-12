@@ -101,12 +101,18 @@ class ExploreScreenTest {
                 )
             }
         }
-        compose.waitUntil(5_000) { runCatching { compose.onNodeWithText("A park near you").assertExists() }.isSuccess }
+        compose.waitUntil(5_000) { runCatching { compose.onNodeWithText("Featured park").assertExists() }.isSuccess }
         compose.onNodeWithText("Garibaldi Provincial Park").assertExists()
         compose.onNodeWithText("British Columbia · 1 day hike").assertExists()
         compose.onNodeWithText("Garibaldi Lake").performClick()
         assertEquals(listOf("2226817/day/0"), hikesOpened)
         compose.onNodeWithText("Or browse by place").assertExists()
         assertEquals(listOf<Int?>(null), asked)
+
+        // Another park, picked from a list.
+        compose.onNodeWithText("${parks[0].short} ▾").performClick()
+        compose.onNodeWithText(parks.last().short).performClick()
+        compose.waitUntil(5_000) { asked.size == 2 }
+        assertEquals(listOf<Int?>(null, parks.lastIndex), asked)
     }
 }
