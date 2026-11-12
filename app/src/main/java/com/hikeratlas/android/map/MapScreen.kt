@@ -364,6 +364,17 @@ fun MapScreen(
             OfflineStore.HIKE -> model.openRoute(t.ref.substringBefore('/'), t.ref, fit = true, hint = HikeHint(t.name, null))
         }
     }
+    // A park's day hikes on the map while its list shows them: the filters' in magenta, the rest grey.
+    val parkList = panel as? Panel.RouteList
+    LaunchedEffect(parkList?.doc, parkList?.reports, model.filters, model.parkTab, style) {
+        val c = controller ?: return@LaunchedEffect
+        val doc = parkList?.doc
+        if (doc == null || model.parkTab != ParkTab.Day || com.hikeratlas.android.routes.isSmall(doc)) {
+            c.showParkRoutes(emptyList())
+        } else {
+            c.showParkRoutes(parkHikesOf(doc, parkList.reports).map { it.route.line to com.hikeratlas.android.routes.matches(it, model.filters) })
+        }
+    }
     // A newly opened panel starts at its lowest height: the map stays in view.
     LaunchedEffect(panel::class, (panel as? Panel.Detail)?.selected?.id, (panel as? Panel.RouteList)?.heading) {
         if (open && sheet.anchors.hasPositionFor(Stop.Peek)) sheet.animateTo(Stop.Peek)

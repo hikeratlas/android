@@ -165,4 +165,31 @@ class ParkHikesTest {
         assertTrue(g.contains("""<trkpt lat="49.900000" lon="-123.100000"/>"""))
         assertTrue(g.contains("""<trkpt lat="49.950000" lon="-123.050000"/>"""))
     }
+
+    @Test
+    fun nearbyParksWithMoreHikes() {
+        val regions = Regions(
+            listOf(
+                Regions.Country(
+                    "Canada",
+                    states = listOf(
+                        Regions.State(
+                            "BC",
+                            areas = listOf(
+                                Regions.Area("1", "Small", bbox = listOf(-123.0, 49.0, -122.9, 49.1), ids = listOf("1", "1b"), hikes = 2),
+                                Regions.Area("2", "Near", bbox = listOf(-123.0, 49.2, -122.9, 49.3), hikes = 5),
+                                Regions.Area("3", "Too few", bbox = listOf(-123.0, 49.1, -122.9, 49.2), hikes = 2),
+                                Regions.Area("4", "Far", bbox = listOf(-120.0, 49.0, -119.9, 49.1), hikes = 40),
+                                Regions.Area("5", "No box", hikes = 9),
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+        )
+        val near = nearbyParks(regions, "1b")
+        assertEquals(listOf("Near", "Far"), near.map { it.name })
+        assertEquals(22, near[0].km)
+        assertEquals(emptyList<NearbyPark>(), nearbyParks(regions, "999"))
+    }
 }

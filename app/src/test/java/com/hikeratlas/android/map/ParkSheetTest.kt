@@ -107,6 +107,9 @@ class ParkSheetTest {
         compose.onNodeWithText("multi-day trip").assertExists()
         compose.onNodeWithText("15 hikes, best first").assertExists()
 
+        // Where to start: a big park's picks.
+        compose.onNodeWithText("Start here").assertExists()
+
         // A card: its numbers, and its trip reports counted.
         compose.onNodeWithText("2 reports").assertExists()
 
@@ -138,5 +141,60 @@ class ParkSheetTest {
         assertEquals(null, thumbPoints(listOf(listOf(0.0, 0.0)), 56f, 6f))
         assertEquals("By the road", quickStop(0.0, "Road's end"))
         assertEquals("0.8 km there and back from Lot 3", quickStop(0.4, "Lot 3 Trailhead"))
+    }
+
+    /** A park with few hikes: a summary, every hike in full, "do them all", and parks nearby with more. */
+    @Test
+    fun aSmallParksCompactSheet() {
+        val park = gz(
+            """{"park":{"id":"9","name":"Little Park"},"day_hikes":[
+                 {"from":"Lot trailhead","dest":"Pond","kind":"loop","route":{"km":2.0,"gain":20,"max_ele":120,"min_ele":100,"line":[[-123.0,49.0],[-123.01,49.01]]}},
+                 {"from":"Lot trailhead","dest":"Falls","kind":"loop","route":{"km":1.5,"gain":30,"max_ele":130,"line":[[-123.0,49.0],[-123.0,49.01]]}}]}""".toByteArray(),
+        )
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse = when (request.url.encodedPath) {
+                "/index.json" -> MockResponse.Builder().body("""{"bundle":"b.bin","parks":{"9":[0,${park.size}]}}""").build()
+                "/regions.json" -> MockResponse.Builder().body(
+                    """{"countries":[{"name":"Canada","slug":"canada","states":[{"name":"BC","slug":"bc","areas":[
+                        {"id":"9","name":"Little Park","bbox":[-123.1,48.9,-122.9,49.1],"hikes":2},
+                        {"id":"10","name":"Big Park","bbox":[-123.1,49.1,-122.9,49.3],"hikes":12}]}]}]}""",
+                ).build()
+                "/b.bin" -> MockResponse.Builder().body(Buffer().write(park)).build()
+                else -> MockResponse.Builder().code(404).build()
+            }
+        }
+        server.start()
+        val repo = RoutesRepository(OkHttpClient.Builder().proxy(java.net.Proxy.NO_PROXY).build(), server.url("/").toString().trimEnd('/'))
+        kotlinx.coroutines.runBlocking { repo.index() }
+        val model = mutableStateOf<PanelModel?>(null)
+        val flat = object : ElevationProfiler.DemSource {
+            override val minZoom = 0
+            override val maxZoom = 14
+            override fun tile(z: Int, x: Int, y: Int) = FloatArray(512 * 512) { 1000f }
+        }
+        compose.setContent {
+            val scope = rememberCoroutineScope()
+            LaunchedEffect(Unit) {
+                model.value = PanelModel(scope, repo, ElevationProfiler(listOf(flat))) { _, _ -> }.apply { openPark("9", "Little Park") }
+            }
+            HikerAtlasTheme {
+                model.value?.let { m ->
+                    Box(Modifier.width(390.dp).verticalScroll(rememberScrollState())) {
+                        androidx.compose.foundation.layout.Column {
+                            PanelHeader(m, full = true)
+                            PanelBody(m) {}
+                        }
+                    }
+                }
+            }
+        }
+        compose.waitUntil(10_000) { (model.value?.panel as? Panel.RouteList)?.doc != null }
+        compose.onNodeWithText("Two short, nearly flat loops, each under an hour.").assertExists()
+        compose.onNodeWithText("Do them all").assertExists()
+        compose.onNodeWithText("3.5 km and about 55 minutes of walking in all.").assertExists()
+        compose.onNodeWithText("More hiking nearby").assertExists()
+        assertEquals(0, compose.onAllNodesWithText("Find a hike").fetchSemanticsNodes().size)
+        compose.onNodeWithText("Big Park").performClick()
+        compose.waitUntil(10_000) { (model.value?.panel as? Panel.Failed)?.heading == "Big Park" || (model.value?.panel as? Panel.RouteList)?.heading == "Big Park" }
     }
 }

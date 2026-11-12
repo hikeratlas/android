@@ -192,6 +192,8 @@ data class Regions(val countries: List<Country> = emptyList()) {
         val bbox: List<Double>? = null,
         /** Every park id the area covers (its main [id] among them): some areas join several OSM parks. */
         val ids: List<String> = emptyList(),
+        /** Its curated hikes. */
+        val hikes: Int = 0,
     ) {
         fun covers(parkId: String) = id == parkId || parkId in ids
     }
