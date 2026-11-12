@@ -92,4 +92,22 @@ class OfflineUiTest {
         compose.onAllNodes(hasText("Delete") and hasClickAction()).onLast().performClick()
         assertEquals(1L, deleted)
     }
+
+    @Test
+    fun anAreaFromAnOlderMapOffersUpdate() {
+        var updated: Long? = null
+        compose.setContent {
+            HikerAtlasTheme {
+                LazyColumn {
+                    offlineAreasSection(
+                        listOf(area(OfflineStore.READY, bytes = 37_400_000)), true, {}, {}, {},
+                        updateAvailable = { true }, onUpdate = { updated = it },
+                    )
+                }
+            }
+        }
+        compose.onNodeWithText("37 MB · Map updated since").assertIsDisplayed()
+        compose.onNodeWithText("Update").performClick()
+        assertEquals(1L, updated)
+    }
 }

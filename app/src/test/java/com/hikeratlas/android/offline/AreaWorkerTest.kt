@@ -43,6 +43,8 @@ class AreaWorkerTest {
     private val app get() = ApplicationProvider.getApplicationContext<OfflineTestApp>()
     private val server = MockWebServer()
     private lateinit var store: OfflineStore
+    /** The archives' builds, as HEAD requests would say. */
+    private var build = OfflineAreas.Build("\"b1\"", "\"r1\"")
 
     // A park: a small box near Squamish, one day hike across it.
     private val box = listOf(-123.06, 49.95, -123.0, 49.99)
@@ -75,7 +77,7 @@ class AreaWorkerTest {
         val basemap = Pmtiles(archive("basemap")) { null }
         val routesArchive = Pmtiles(archive("routes")) { null }
         val routes = RoutesRepository(OkHttpClient.Builder().proxy(java.net.Proxy.NO_PROXY).build(), server.url("/").toString().trimEnd('/'))
-        app.offlineAreas = OfflineAreas(app, store, routes, { basemap }, { routesArchive }, { z, x, y -> "dem $z/$x/$y".toByteArray() })
+        app.offlineAreas = OfflineAreas(app, store, routes, { basemap }, { routesArchive }, { z, x, y -> "dem $z/$x/$y".toByteArray() }, { build })
     }
 
     @After
@@ -119,5 +121,52 @@ class AreaWorkerTest {
         // A second download doesn't bring another overview.
         areas.download(OfflineAreas.Target(OfflineStore.HIKE, "1/day/0", "B from A"))
         assertEquals(1, store.areas().count { it.kind == OfflineStore.OVERVIEW })
+    }
+
+    @Test
+    fun anAreaFromAnOlderBuildOffersAnUpdate() = runBlocking {
+        val areas = app.offlineAreas
+        val area = store.area(OfflineStore.PARK, "1", "Test Park")
+        TestListenableWorkerBuilder<AreaWorker>(app).setInputData(workDataOf(AreaWorker.AREA to area.id)).build().doWork()
+        assertEquals(build.key, store.areaById(area.id)!!.build)
+        areas.checkUpdates()
+        assertEquals(false, areas.updateAvailable(store.areaById(area.id)!!))
+
+        // The routes archive is rebuilt: the park's out of date, the overview (basemap only) isn't.
+        val overview = store.area(OfflineStore.OVERVIEW, "", "Overview").id
+        store.finishArea(overview)
+        store.setAreaBuild(overview, build.key)
+        build = build.copy(routes = "\"r2\"")
+        areas.checkUpdates()
+        assertTrue(areas.updateAvailable(store.areaById(area.id)!!))
+        assertEquals(false, areas.updateAvailable(store.areaById(overview)!!))
+
+        // Updated: downloaded again from the new build.
+        val again = TestListenableWorkerBuilder<AreaWorker>(app)
+            .setInputData(workDataOf(AreaWorker.AREA to area.id, AreaWorker.REFRESH to true)).build()
+        assertEquals(ListenableWorker.Result.success(), again.doWork())
+        assertEquals(false, areas.updateAvailable(store.areaById(area.id)!!))
+    }
+
+    @Test
+    fun areasFromBeforeBuildsWereKeptAreTakenAsCurrent() = runBlocking {
+        val id = store.area(OfflineStore.PARK, "1", "Test Park").id
+        store.finishArea(id)
+        assertEquals(null, store.areaById(id)!!.build)
+        app.offlineAreas.checkUpdates()
+        assertEquals(build.key, store.areaById(id)!!.build)
+        assertEquals(false, app.offlineAreas.updateAvailable(store.areaById(id)!!))
+    }
+
+    @Test
+    fun deletingAllKeepsTheSmallSharedFiles() = runBlocking {
+        val area = store.area(OfflineStore.PARK, "1", "Test Park")
+        TestListenableWorkerBuilder<AreaWorker>(app).setInputData(workDataOf(AreaWorker.AREA to area.id)).build().doWork()
+        store.putResource("https://x/index.json", ByteArray(10))
+        app.offlineAreas.deleteAll()
+        assertEquals(emptyList<OfflineStore.Area>(), store.areas())
+        assertEquals(null, store.tile("https://x/basemap.pmtiles", 0, 0, 0))
+        assertNotNull(store.resource("https://x/index.json"))
+        assertEquals(10L, app.offlineAreas.bytes())
     }
 }

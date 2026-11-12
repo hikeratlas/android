@@ -39,7 +39,74 @@ class OfflineAreas(
     private val routesArchive: () -> Pmtiles,
     /** A terrain tile from Mapterhorn itself: null where it has none. */
     private val dem: (Int, Int, Int) -> ByteArray?,
+    /** The archives' current builds (their ETags, from HEAD requests). */
+    private val currentBuild: suspend () -> Build,
 ) {
+    /** Which build of each archive an area's tiles came from. */
+    data class Build(val basemap: String, val routes: String) {
+        val key get() = "$basemap|$routes"
+
+        companion object {
+            fun parse(key: String?): Build? = key?.split('|')?.takeIf { it.size == 2 }?.let { Build(it[0], it[1]) }
+        }
+    }
+
+    /** The archives' builds when last checked: null until then, or if it couldn't be. */
+    var latest by mutableStateOf<Build?>(null)
+        private set
+
+    /** Whether [a] was downloaded from an older build than [latest] (the overview: of the basemap). */
+    fun updateAvailable(a: OfflineStore.Area): Boolean {
+        val now = latest ?: return false
+        val was = Build.parse(a.build) ?: return false
+        if (!a.ready) return false
+        return was.basemap != now.basemap || (a.kind != OfflineStore.OVERVIEW && was.routes != now.routes)
+    }
+
+    /**
+     * Checks the archives' builds, so areas from an older one offer Update.
+     * Areas from before builds were kept are taken to be current: they were
+     * downloaded recently.
+     */
+    suspend fun checkUpdates() {
+        val now = try { currentBuild() } catch (e: IOException) { return }
+        withContext(Dispatchers.IO) {
+            for (a in store.areas()) if (a.ready && a.build == null) store.setAreaBuild(a.id, now.key)
+        }
+        latest = now
+        refresh()
+    }
+
+    /** The builds now, for recording with a download (null if they can't be got). */
+    suspend fun buildNow(): Build? = try { currentBuild() } catch (e: IOException) { null }
+
+    /** Downloads [id]'s map and routes again, from the current build. */
+    suspend fun update(id: Long) {
+        withContext(Dispatchers.IO) {
+            store.setAreaState(id, OfflineStore.QUEUED)
+            enqueue(id, ExistingWorkPolicy.REPLACE, refresh = true)
+        }
+        refresh()
+    }
+
+    /** Deletes every offline area (the fonts, icons and routes index stay: they're small). */
+    suspend fun deleteAll() {
+        WorkManager.getInstance(context).cancelAllWorkByTag(TAG)
+        withContext(Dispatchers.IO) {
+            for (a in store.areas()) store.deleteArea(a.id)
+            vacuum()
+        }
+        refresh()
+    }
+
+    private fun vacuum() {
+        // Gives the disk back; skipped if a download's writing.
+        try { store.vacuum() } catch (e: android.database.sqlite.SQLiteException) { }
+    }
+
+    /** Bytes kept for offline use: areas' tiles and files, and the small files kept with them. */
+    suspend fun bytes(): Long = withContext(Dispatchers.IO) { store.bytes() }
+
     /** What can be downloaded: a park (by its id) or a hike (by its route id). */
     data class Target(val kind: String, val ref: String, val name: String)
 
@@ -116,17 +183,20 @@ class OfflineAreas(
 
     suspend fun delete(id: Long) {
         WorkManager.getInstance(context).cancelUniqueWork(workName(id))
-        withContext(Dispatchers.IO) { store.deleteArea(id) }
+        withContext(Dispatchers.IO) {
+            store.deleteArea(id)
+            vacuum()
+        }
         refresh()
     }
 
     /** The area for [t], if it's downloaded or on its way. */
     fun areaFor(t: Target) = areas.firstOrNull { it.kind == t.kind && it.ref == t.ref }
 
-    private fun enqueue(id: Long, policy: ExistingWorkPolicy = ExistingWorkPolicy.KEEP) {
+    private fun enqueue(id: Long, policy: ExistingWorkPolicy = ExistingWorkPolicy.KEEP, refresh: Boolean = false) {
         val request = OneTimeWorkRequestBuilder<AreaWorker>()
             .setConstraints(Constraints.Builder().setRequiredNetworkType(if (wifiOnly) NetworkType.UNMETERED else NetworkType.CONNECTED).build())
-            .setInputData(workDataOf(AreaWorker.AREA to id))
+            .setInputData(workDataOf(AreaWorker.AREA to id, AreaWorker.REFRESH to refresh))
             .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 30, TimeUnit.SECONDS)
             .addTag(TAG)
             .build()

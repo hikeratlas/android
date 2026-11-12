@@ -28,7 +28,9 @@ class AreaWorker(context: Context, params: WorkerParameters) : CoroutineWorker(c
         val id = inputData.getLong(AREA, -1)
         val store = areas.store
         val area = store.areaById(id) ?: return Result.success() // deleted meanwhile
-        if (area.ready) return Result.success()
+        val refresh = inputData.getBoolean(REFRESH, false)
+        // Already downloaded (a duplicate run), unless it's an update.
+        if (area.ready && !refresh) return Result.success()
         var finished = false
         try {
             try {
@@ -39,8 +41,10 @@ class AreaWorker(context: Context, params: WorkerParameters) : CoroutineWorker(c
             store.setAreaState(id, OfflineStore.DOWNLOADING)
             areas.refresh()
             val target = OfflineAreas.Target(area.kind, area.ref, area.name)
+            // The builds it's downloaded from, so a newer one can offer an update.
+            val build = areas.buildNow()
             areas.keepParkData(area)
-            areas.downloader().download(id, areas.plan(target)) { done, total ->
+            areas.downloader().download(id, areas.plan(target), refetchVector = refresh) { done, total ->
                 store.setAreaProgress(id, done, total)
                 setProgress(workDataOf(DONE to done, TOTAL to total))
                 val now = System.currentTimeMillis()
@@ -51,6 +55,7 @@ class AreaWorker(context: Context, params: WorkerParameters) : CoroutineWorker(c
                 }
             }
             store.finishArea(id)
+            if (build != null) store.setAreaBuild(id, build.key)
             finished = true
             return Result.success()
         } catch (e: CancellationException) {
@@ -91,6 +96,8 @@ class AreaWorker(context: Context, params: WorkerParameters) : CoroutineWorker(c
 
     companion object {
         const val AREA = "area"
+        /** An update: the map and routes fetched again even where kept. */
+        const val REFRESH = "refresh"
         const val DONE = "done"
         const val TOTAL = "total"
         private const val CHANNEL = "offline"

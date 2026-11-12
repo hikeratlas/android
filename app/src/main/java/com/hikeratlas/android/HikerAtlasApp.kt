@@ -54,8 +54,20 @@ class HikerAtlasApp : Application(), RecorderHost, OfflineHost {
             basemap = { TileServer.register(HttpRangeSource(StyleLoader.BASEMAP_URL, http)).first },
             routesArchive = { TileServer.register(HttpRangeSource(StyleLoader.ROUTES_URL, http)).first },
             dem = { z, x, y -> MapterhornSource(http).fetch(z, x, y) },
+            currentBuild = {
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    OfflineAreas.Build(etag(StyleLoader.BASEMAP_URL), etag(StyleLoader.ROUTES_URL))
+                }
+            },
         )
     }
+
+    /** An archive's ETag, which changes when it's rebuilt. */
+    private fun etag(url: String): String =
+        http.newCall(okhttp3.Request.Builder().url(url).head().build()).execute().use { r ->
+            if (!r.isSuccessful) throw java.io.IOException("HTTP ${r.code} for $url")
+            r.header("ETag") ?: throw java.io.IOException("No ETag for $url")
+        }
 
     override fun onCreate() {
         super.onCreate()

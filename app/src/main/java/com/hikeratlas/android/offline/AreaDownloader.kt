@@ -51,8 +51,18 @@ class AreaDownloader(
         bytes
     }
 
-    /** Downloads [plan]'s tiles for [area], reporting tiles done of all. */
-    suspend fun download(area: Long, plan: AreaPlan, progress: suspend (done: Int, total: Int) -> Unit = { _, _ -> }) =
+    /**
+     * Downloads [plan]'s tiles for [area], reporting tiles done of all. With
+     * [refetchVector] (an update to a new build), the basemap and routes
+     * tiles are fetched even if kept, replacing them; terrain doesn't change
+     * with our builds, so kept terrain still isn't.
+     */
+    suspend fun download(
+        area: Long,
+        plan: AreaPlan,
+        refetchVector: Boolean = false,
+        progress: suspend (done: Int, total: Int) -> Unit = { _, _ -> },
+    ) =
         withContext(Dispatchers.IO) {
             val jobs = jobs(plan)
             val total = jobs.sumOf { it.coords.size }
@@ -60,7 +70,7 @@ class AreaDownloader(
             progress(0, total)
             for (j in jobs) {
                 for (chunk in j.coords.chunked(CHUNK)) {
-                    val kept = store.tiles(j.source, j.z, chunk).keys
+                    val kept = if (refetchVector && j.archive != null) emptySet() else store.tiles(j.source, j.z, chunk).keys
                     if (kept.isNotEmpty()) store.useTiles(area, j.source, j.z, kept)
                     val missing = chunk.filter { it !in kept }
                     if (missing.isNotEmpty()) {
