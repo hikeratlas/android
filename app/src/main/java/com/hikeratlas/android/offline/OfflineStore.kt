@@ -315,6 +315,8 @@ class OfflineStore(context: Context, name: String? = "offline.db") :
 
         const val QUEUED = "queued"
         const val DOWNLOADING = "downloading"
+        /** A network error: WorkManager tries again soon (error says what went wrong). */
+        const val RETRYING = "retrying"
         const val READY = "ready"
         const val FAILED = "failed"
     }

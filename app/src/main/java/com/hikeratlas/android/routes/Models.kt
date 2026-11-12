@@ -123,5 +123,14 @@ data class Regions(val countries: List<Country> = emptyList()) {
     data class State(val name: String, val slug: String = "", val bbox: List<Double>? = null, val areas: List<Area> = emptyList())
 
     @Serializable
-    data class Area(val id: String, val name: String, val slug: String = "", val bbox: List<Double>? = null)
+    data class Area(
+        val id: String,
+        val name: String,
+        val slug: String = "",
+        val bbox: List<Double>? = null,
+        /** Every park id the area covers (its main [id] among them): some areas join several OSM parks. */
+        val ids: List<String> = emptyList(),
+    ) {
+        fun covers(parkId: String) = id == parkId || parkId in ids
+    }
 }

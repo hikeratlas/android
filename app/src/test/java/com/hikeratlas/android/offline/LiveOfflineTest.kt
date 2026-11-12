@@ -76,4 +76,16 @@ class LiveOfflineTest {
             assertTrue(trails.isNotEmpty())
         }
     }
+
+    /** Pacific Rim NPR's area joins three parks, each with the West Coast Trail: each finds its box (#23). */
+    @Test
+    fun everyIdOfAnAreaFindsIt() = runBlocking {
+        assumeTrue(System.getenv("HIKERATLAS_LIVE") == "1")
+        val areas = RoutesRepository(OkHttpClient()).regions().countries.flatMap { it.states }.flatMap { it.areas }
+        for (id in listOf("2017389", "2017391", "2100172")) {
+            val a = areas.single { it.covers(id) }
+            assertTrue(a.name, a.name.startsWith("Pacific Rim"))
+            assertTrue(a.bbox != null)
+        }
+    }
 }

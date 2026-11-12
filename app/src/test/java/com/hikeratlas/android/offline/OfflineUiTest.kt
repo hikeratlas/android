@@ -68,8 +68,15 @@ class OfflineUiTest {
     fun statusesReadPlainly() {
         assertEquals("37 MB", areaStatus(area(OfflineStore.READY, bytes = 37_400_000), true))
         assertEquals("Downloading · 45%", areaStatus(area(OfflineStore.DOWNLOADING, 450, 1000), true))
-        assertEquals("Waiting for Wi-Fi", areaStatus(area(OfflineStore.QUEUED), true))
-        assertEquals("Waiting to download", areaStatus(area(OfflineStore.QUEUED), false))
+        // Waiting: says why.
+        assertEquals("Waiting for Wi-Fi", areaStatus(area(OfflineStore.QUEUED), true, Network.OTHER))
+        assertEquals(
+            "Waiting for Wi-Fi: this Wi-Fi is set as metered (or turn off Wi-Fi only)",
+            areaStatus(area(OfflineStore.QUEUED), true, Network.METERED_WIFI),
+        )
+        assertEquals("Waiting to start", areaStatus(area(OfflineStore.QUEUED), true, Network.UNMETERED))
+        assertEquals("Waiting to start", areaStatus(area(OfflineStore.QUEUED), false, Network.OTHER))
+        assertEquals("Trying again soon: HTTP 500", areaStatus(area(OfflineStore.RETRYING, error = "HTTP 500"), true))
         assertEquals("Couldn't download: HTTP 500", areaStatus(area(OfflineStore.FAILED, error = "HTTP 500"), true))
         assertEquals("0.4 MB", megabytes(400_000))
     }
