@@ -1,5 +1,6 @@
 package com.hikeratlas.android.routes
 
+import com.hikeratlas.android.pmtiles.Offline
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -26,7 +27,7 @@ class RoutesRepository(
 
     suspend fun index(): BundleIndex = mutex.withLock {
         index ?: withContext(Dispatchers.IO) {
-            JSON.decodeFromString(BundleIndex.serializer(), get("$root/index.json", null).decodeToString())
+            JSON.decodeFromString(BundleIndex.serializer(), kept("$root/index.json").decodeToString())
         }.also { index = it }
     }
 
@@ -34,7 +35,7 @@ class RoutesRepository(
 
     suspend fun regions(): Regions = mutex.withLock {
         regions ?: withContext(Dispatchers.IO) {
-            JSON.decodeFromString(Regions.serializer(), get("$root/regions.json", null).decodeToString())
+            JSON.decodeFromString(Regions.serializer(), kept("$root/regions.json").decodeToString())
         }.also { regions = it }
     }
 
@@ -60,11 +61,14 @@ class RoutesRepository(
     /** The park's routes, or null if it has none. */
     suspend fun park(parkId: String): ParkDoc? {
         mutex.withLock { parks[parkId] }?.let { return it }
-        val idx = index()
-        val (offset, length) = idx.parks[parkId] ?: return null
-        val doc = withContext(Dispatchers.IO) {
-            val bytes = get("$root/${idx.bundle}", offset until offset + length)
-            JSON.decodeFromString(ParkDoc.serializer(), GZIPInputStream(bytes.inputStream()).readBytes().decodeToString())
+        // Downloaded with an offline area: the routes its tiles were drawn from.
+        val stored = withContext(Dispatchers.IO) { Offline.resources?.resource(parkKey(parkId)) }
+        val doc = if (stored != null) {
+            decodePark(stored)
+        } else {
+            val idx = index()
+            val (offset, length) = idx.parks[parkId] ?: return null
+            withContext(Dispatchers.IO) { decodePark(get("$root/${idx.bundle}", offset until offset + length)) }
         }
         mutex.withLock { parks[parkId] = doc }
         return doc
@@ -72,6 +76,25 @@ class RoutesRepository(
 
     /** Forgets the index and parks, e.g. after a rebuild moved the bundle. */
     suspend fun refresh() = mutex.withLock { index = null; regions = null; parks.clear() }
+
+    /** The park's gzipped JSON in the offline store. */
+    fun parkKey(parkId: String) = "$root/parks/$parkId.json.gz"
+
+    private fun decodePark(gz: ByteArray) =
+        JSON.decodeFromString(ParkDoc.serializer(), GZIPInputStream(gz.inputStream()).readBytes().decodeToString())
+
+    /**
+     * A small file that's kept on the phone each time it's fetched, so it's
+     * there offline: fetched if it can be, else the copy kept last time.
+     */
+    private fun kept(url: String): ByteArray {
+        val store = Offline.resources
+        return try {
+            get(url, null).also { store?.putResource(url, it) }
+        } catch (e: IOException) {
+            store?.resource(url) ?: throw e
+        }
+    }
 
     private fun get(url: String, range: LongRange?): ByteArray {
         val req = Request.Builder().url(url)

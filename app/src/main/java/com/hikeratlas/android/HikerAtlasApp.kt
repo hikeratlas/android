@@ -9,6 +9,9 @@ import com.hikeratlas.android.imagery.ImageryServer
 import com.hikeratlas.android.elevation.MapterhornSource
 import com.hikeratlas.android.elevation.NlDemSource
 import com.hikeratlas.android.pmtiles.TileServer
+import com.hikeratlas.android.pmtiles.Offline
+import com.hikeratlas.android.offline.OfflineStore
+import com.hikeratlas.android.offline.ResourceCache
 import com.hikeratlas.android.routes.RoutesRepository
 import com.hikeratlas.android.search.RecentSearches
 import com.hikeratlas.android.search.SearchApi
@@ -39,8 +42,13 @@ class HikerAtlasApp : Application(), RecorderHost {
     override val recorder by lazy { TrackRecorder(tracks, profiler) }
     val library by lazy { TrackLibrary(tracks, profiler, regions = { routes.regions() }) }
 
+    /** What's kept for offline use: areas' tiles, routes data, fonts and icons. */
+    val offline by lazy { OfflineStore(this) }
+
     override fun onCreate() {
         super.onCreate()
+        Offline.tiles = offline
+        Offline.resources = offline
         // OkHttp allows 5 requests at a time per host by default. Map tiles
         // all go to one host (TileServer's), so that throttled loading: 24
         // fetched a 6x6 block of tiles about 3x faster than 5 did.
@@ -58,6 +66,7 @@ class HikerAtlasApp : Application(), RecorderHost {
         // client, so TileServer can answer the rewritten pmtiles sources.
         HttpRequestUtil.setOkHttpClient(
             http.newBuilder()
+                .addInterceptor(ResourceCache(ResourceCache.MAP_RESOURCES))
                 .addInterceptor(TileServer)
                 .addInterceptor(DemServer(dem, demSources))
                 .addInterceptor(ContourServer(dem))

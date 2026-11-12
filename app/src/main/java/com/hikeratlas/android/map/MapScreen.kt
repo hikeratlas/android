@@ -247,7 +247,8 @@ fun MapScreen(
     LaunchedEffect(controller, attempt) {
         val c = controller ?: return@LaunchedEffect
         styleError = null
-        val loader = StyleLoader(app.http, context.cacheDir)
+        // In files, not the cache Android may clear: the map starts offline from it.
+        val loader = StyleLoader(app.http, context.filesDir)
         fun apply(json: String) = c.map.setStyle(Style.Builder().fromJson(json)) { s ->
             c.onStyleLoaded(s)
             mapLayers = MapLayers(s).also { it.apply(layerChoice) }

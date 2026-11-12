@@ -15,9 +15,10 @@ import java.io.IOException
 /**
  * Fetches the basemap style and readies it for MapLibre Native.
  *
- * The last style is kept in [cacheDir], so the map can start drawing at once
- * from it (its tile URLs depend only on the archives' URLs) while a fresh
- * copy is fetched for next time.
+ * The last style is kept in [cacheDir] (the app's files, so it's there
+ * offline), so the map can start drawing at once from it (its tile URLs
+ * depend only on the archives' URLs) while a fresh copy is fetched for next
+ * time.
  */
 class StyleLoader(private val client: OkHttpClient, private val cacheDir: File) {
     // Named for the rewriting's version: an older build's copy is ignored.
