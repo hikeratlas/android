@@ -98,4 +98,30 @@ class SearchScreenTest {
         assertEquals(0, compose.onAllNodesWithText("No matches for \u201czzqx\u201d").fetchSemanticsNodes().size)
         compose.waitUntil(5_000) { compose.onAllNodesWithText("No matches for \u201czzqx\u201d").fetchSemanticsNodes().isNotEmpty() }
     }
+
+    /** Search out of reach: the downloaded parks and hikes instead, saying so. */
+    @Test
+    fun offlineSearchesTheDownloadedAreas() {
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest) = MockResponse.Builder().code(500).build()
+        }
+        server.start()
+        val api = SearchApi(OkHttpClient.Builder().proxy(java.net.Proxy.NO_PROXY).build(), server.url("/").toString())
+        val lake = SearchItem("hike", "Garibaldi Lake", "2226817/day/0", 49.93, -123.03, hike = "day", km = 18.0)
+        compose.setContent {
+            SearchScreen(
+                api, RecentSearches(ApplicationProvider.getApplicationContext()), null, null, onPick = {}, onClose = {},
+                offline = { q, _, _ -> if (q == "garibaldi") listOf(lake) else emptyList() },
+            )
+        }
+        compose.onNode(hasSetTextAction()).performTextInput("garibaldi")
+        compose.waitUntil(10_000) { compose.onAllNodesWithText("Offline: searching your downloaded parks and hikes").fetchSemanticsNodes().isNotEmpty() }
+        compose.onAllNodesWithText("Day hike · 18 km").fetchSemanticsNodes().single()
+        assertEquals(0, compose.onAllNodesWithText("Search isn't available right now.").fetchSemanticsNodes().size)
+
+        compose.onNode(hasSetTextAction()).performTextInput("x")
+        compose.waitUntil(10_000) {
+            compose.onAllNodesWithText("No downloaded park or hike matches \u201cgaribaldix\u201d").fetchSemanticsNodes().isNotEmpty()
+        }
+    }
 }

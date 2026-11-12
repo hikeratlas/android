@@ -57,8 +57,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.text.withStyle
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
-import java.text.Normalizer
-import java.util.Locale
 
 /**
  * Full-screen search, over the map. Results are near [nearLat]/[nearLon] (the
@@ -72,6 +70,8 @@ fun SearchScreen(
     nearLon: Double?,
     onPick: (SearchItem) -> Unit,
     onClose: () -> Unit,
+    /** When search can't be reached (offline): the downloaded parks and hikes instead. */
+    offline: (suspend (String, Double?, Double?) -> List<SearchItem>)? = null,
 ) {
     var query by rememberSaveable { mutableStateOf("") }
     var results by remember { mutableStateOf<List<SearchItem>>(emptyList()) }
@@ -79,24 +79,36 @@ fun SearchScreen(
     // The query [results] are for: "No matches" only once its search is back,
     // not while a newer one's out.
     var answered by remember { mutableStateOf<String?>(null) }
+    // Whether [results] came from the downloaded areas, search being out of reach.
+    var local by remember { mutableStateOf(false) }
     val recent = remember { recents.load() }
     val focus = remember { FocusRequester() }
 
     BackHandler(onBack = onClose)
     LaunchedEffect(Unit) { focus.requestFocus() }
     LaunchedEffect(query) {
-        if (query.isBlank()) { results = emptyList(); error = null; answered = null; return@LaunchedEffect }
+        if (query.isBlank()) { results = emptyList(); error = null; answered = null; local = false; return@LaunchedEffect }
         delay(200) // wait for a pause in typing
+        val q = query.trim()
         try {
-            val q = query.trim()
             results = api.search(q, nearLat, nearLon)
             answered = q
             error = null
+            local = false
         } catch (e: CancellationException) {
             // A newer query took over (typing on): not a failure.
             throw e
         } catch (e: Exception) {
-            error = "Search isn't available right now."
+            try {
+                results = offline?.invoke(q, nearLat, nearLon) ?: throw e
+                answered = q
+                error = null
+                local = true
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                error = "Search isn't available right now."
+            }
         }
     }
 
@@ -128,11 +140,21 @@ fun SearchScreen(
         }
         HorizontalDivider()
         error?.let { Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(16.dp)) }
+        if (!showingRecent && error == null && local) {
+            Text(
+                "Offline: searching your downloaded parks and hikes",
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 12.dp),
+            )
+        }
         if (!showingRecent && error == null && results.isEmpty() && answered == query.trim()) {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text("No matches for \u201c${query.trim()}\u201d", style = MaterialTheme.typography.bodyLarge)
                 Text(
-                    "Try a hike, park, peak or trail's name, or a town near it.",
+                    if (local) "No downloaded park or hike matches \u201c${query.trim()}\u201d" else "No matches for \u201c${query.trim()}\u201d",
+                    style = MaterialTheme.typography.bodyLarge,
+                )
+                Text(
+                    if (local) "Peaks, trails and places need a connection." else "Try a hike, park, peak or trail's name, or a town near it.",
                     style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
@@ -183,8 +205,6 @@ private fun KindIcon(kind: String?) {
         Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(22.dp))
     }
 }
-
-private fun fold(s: String) = Normalizer.normalize(s, Normalizer.Form.NFD).replace(Regex("\\p{M}"), "").lowercase(Locale.ROOT)
 
 /** The name with each word's start that a query word begins in bold, as search matches them. */
 private fun highlight(name: String, query: String): AnnotatedString {
