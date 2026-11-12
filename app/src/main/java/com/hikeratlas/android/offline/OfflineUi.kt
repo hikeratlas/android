@@ -7,9 +7,11 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CloudOff
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Downloading
@@ -24,6 +26,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -122,6 +125,45 @@ fun DownloadDialog(
         confirmButton = { TextButton(onClick = onConfirm, enabled = size != null) { Text("Download") } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
+}
+
+/** Whether the phone has a network with internet now, kept up to date. */
+@Composable
+fun rememberOnline(): Boolean {
+    val context = LocalContext.current
+    val cm = remember { context.getSystemService(android.net.ConnectivityManager::class.java) }
+    fun now() = cm?.getNetworkCapabilities(cm.activeNetwork)?.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET) == true
+    var online by remember { mutableStateOf(now()) }
+    DisposableEffect(cm) {
+        val main = android.os.Handler(android.os.Looper.getMainLooper())
+        val callback = object : android.net.ConnectivityManager.NetworkCallback() {
+            override fun onAvailable(network: android.net.Network) { main.post { online = now() } }
+            override fun onLost(network: android.net.Network) { main.post { online = now() } }
+            override fun onCapabilitiesChanged(network: android.net.Network, caps: android.net.NetworkCapabilities) { main.post { online = now() } }
+        }
+        cm?.registerDefaultNetworkCallback(callback)
+        onDispose { cm?.unregisterNetworkCallback(callback) }
+    }
+    return online
+}
+
+/** Says the map's offline: what it shows is what's downloaded. */
+@Composable
+fun OfflineChip(modifier: Modifier = Modifier) {
+    androidx.compose.material3.Surface(
+        shape = androidx.compose.foundation.shape.RoundedCornerShape(16.dp),
+        color = MaterialTheme.colorScheme.inverseSurface,
+        shadowElevation = 4.dp,
+        modifier = modifier,
+    ) {
+        Row(Modifier.padding(horizontal = 12.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(
+                Icons.Filled.CloudOff, contentDescription = null, tint = MaterialTheme.colorScheme.inverseOnSurface,
+                modifier = Modifier.padding(end = 6.dp).size(16.dp),
+            )
+            Text("Offline · downloaded areas", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.inverseOnSurface)
+        }
+    }
 }
 
 /** The network now, as far as a waiting download cares. */
