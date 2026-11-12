@@ -14,6 +14,14 @@ android {
         targetSdk = 37
         versionCode = 1
         versionName = "0.1.0"
+        // The commit built, for the You page: its hash and date ("" outside git).
+        val commit = try {
+            providers.exec { commandLine("git", "log", "-1", "--format=%H %cs") }.standardOutput.asText.get().trim().split(" ")
+        } catch (e: Exception) {
+            emptyList()
+        }
+        buildConfigField("String", "COMMIT", "\"${commit.getOrElse(0) { "" }}\"")
+        buildConfigField("String", "COMMIT_DATE", "\"${commit.getOrElse(1) { "" }}\"")
     }
 
     signingConfigs {
