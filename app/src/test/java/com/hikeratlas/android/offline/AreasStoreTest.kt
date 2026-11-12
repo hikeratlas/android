@@ -64,4 +64,25 @@ class AreasStoreTest {
             assertEquals(1, s.areas().size)
         }
     }
+
+    /**
+     * A download's progress says it's downloading: a stopped run's clean-up
+     * landing after the next run began left it "queued" (the Saved list said
+     * "Waiting to start") while the download went on, its notification moving.
+     */
+    @Test
+    fun progressSaysItsDownloadingWhateverWasWrittenBefore() {
+        OfflineStore(ApplicationProvider.getApplicationContext(), name = null).use { s ->
+            val a = s.area(OfflineStore.PARK, "1", "Garibaldi").id
+            s.setAreaState(a, OfflineStore.DOWNLOADING)
+            // The old run's clean-up, late.
+            s.setAreaState(a, OfflineStore.QUEUED)
+            s.setAreaProgress(a, 120, 800)
+            val now = s.areaById(a)!!
+            assertEquals(OfflineStore.DOWNLOADING, now.state)
+            assertEquals(120, now.done)
+            assertEquals(800, now.total)
+            assertEquals("Downloading · 15%", areaStatus(now, wifiOnly = true))
+        }
+    }
 }
