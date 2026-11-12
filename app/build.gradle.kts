@@ -74,6 +74,7 @@ dependencies {
     implementation(libs.maplibre)
     implementation(libs.okhttp)
     implementation(libs.kotlinx.serialization.json)
+    implementation(libs.androidx.work.runtime)
     // The Android build of zstd-jni ships the native libraries for each ABI.
     implementation("${libs.zstd.get()}@aar")
 
@@ -89,4 +90,5 @@ dependencies {
     testImplementation(libs.zstd)
     // android.jar's org.json is stubbed out in unit tests.
     testImplementation(libs.json)
+    testImplementation(libs.androidx.work.testing)
 }

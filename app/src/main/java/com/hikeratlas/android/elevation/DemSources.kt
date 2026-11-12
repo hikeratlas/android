@@ -30,6 +30,11 @@ class MapterhornSource(private val client: OkHttpClient) : ElevationProfiler.Dem
     override fun raw(z: Int, x: Int, y: Int): ByteArray? {
         // Kept on the phone (an offline area's): no request.
         Offline.tiles?.tile(KEY, z, x, y)?.let { return it.data }
+        return fetch(z, x, y)
+    }
+
+    /** From Mapterhorn itself (not the phone's copy): null past its coverage. */
+    fun fetch(z: Int, x: Int, y: Int): ByteArray? {
         val req = Request.Builder().url("https://tiles.mapterhorn.com/$z/$x/$y.webp").build()
         client.newCall(req).execute().use { r ->
             if (r.code == 404) return null

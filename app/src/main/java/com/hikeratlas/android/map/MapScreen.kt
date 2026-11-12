@@ -58,6 +58,9 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Dp
 import android.net.Uri
+import com.hikeratlas.android.offline.OfflineAreas
+import com.hikeratlas.android.offline.OfflineActions
+import com.hikeratlas.android.offline.DownloadDialog
 import com.hikeratlas.android.track.TrackSummarySheet
 import com.hikeratlas.android.track.TrackPanel
 import com.hikeratlas.android.track.gpxShareIntent
@@ -366,6 +369,12 @@ fun MapScreen(
         RecordingService.start(context)
         locate()
     }
+    // Downloading a park or hike for offline use: asked from its sheet,
+    // with the size, then queued.
+    val offline = app.offlineAreas
+    var downloading by remember { mutableStateOf<OfflineAreas.Target?>(null) }
+    val offlineActions = remember(offline) { OfflineActions(areaFor = { offline.areaFor(it) }, onDownload = { downloading = it }) }
+
     // Just stopped: its summary, to save, resume or discard. And a saved
     // track from the Saved tab, on the map.
     var summary by remember { mutableStateOf<TrackLibrary.Detail?>(null) }
@@ -527,10 +536,25 @@ fun MapScreen(
                 onHeaderHeight = { headerPx = it },
                 // A hike with nothing below its peek stays at the peek.
                 halfAndFull = panel is Panel.RouteList || panel is Panel.Trail || (panel is Panel.Detail && hasDetailBody(panel)),
-                header = { PanelHeader(model, full = sheet.settledValue == Stop.Full) { p -> controller?.showHover(p) } },
+                header = {
+                    PanelHeader(model, full = sheet.settledValue == Stop.Full, onScrub = { p -> controller?.showHover(p) }, offline = offlineActions)
+                },
                 body = { PanelBody(model) { p -> controller?.showHover(p) } },
             )
         }
+    }
+
+    downloading?.let { t ->
+        DownloadDialog(
+            t, offline.wifiOnly,
+            estimate = { offline.estimate(t) },
+            onConfirm = {
+                downloading = null
+                scope.launch { offline.download(t) }
+                Toast.makeText(context, "Downloading ${t.name}: see Saved", Toast.LENGTH_SHORT).show()
+            },
+            onDismiss = { downloading = null },
+        )
     }
 
     summary?.let { d ->

@@ -77,6 +77,13 @@ class RoutesRepository(
     /** Forgets the index and parks, e.g. after a rebuild moved the bundle. */
     suspend fun refresh() = mutex.withLock { index = null; regions = null; parks.clear() }
 
+    /** The park's routes as the bundle has them (gzipped JSON), for keeping offline; null if it has none. */
+    suspend fun parkBytes(parkId: String): ByteArray? {
+        val idx = index()
+        val (offset, length) = idx.parks[parkId] ?: return null
+        return withContext(Dispatchers.IO) { get("$root/${idx.bundle}", offset until offset + length) }
+    }
+
     /** The park's gzipped JSON in the offline store. */
     fun parkKey(parkId: String) = "$root/parks/$parkId.json.gz"
 

@@ -1,0 +1,123 @@
+package com.hikeratlas.android.offline
+
+import android.app.Application
+import androidx.test.core.app.ApplicationProvider
+import androidx.work.ListenableWorker
+import androidx.work.NetworkType
+import androidx.work.WorkManager
+import androidx.work.testing.TestListenableWorkerBuilder
+import androidx.work.testing.WorkManagerTestInitHelper
+import androidx.work.workDataOf
+import com.hikeratlas.android.elevation.MapterhornSource
+import com.hikeratlas.android.pmtiles.BytesSource
+import com.hikeratlas.android.pmtiles.Compression
+import com.hikeratlas.android.pmtiles.Pmtiles
+import com.hikeratlas.android.pmtiles.TestArchive
+import com.hikeratlas.android.pmtiles.TileId
+import com.hikeratlas.android.routes.RoutesRepository
+import kotlinx.coroutines.runBlocking
+import mockwebserver3.Dispatcher
+import mockwebserver3.MockResponse
+import mockwebserver3.MockWebServer
+import mockwebserver3.RecordedRequest
+import okhttp3.OkHttpClient
+import okio.Buffer
+import org.junit.After
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertTrue
+import org.junit.Before
+import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
+
+/** An app with offline areas of its own, over test archives and a local server. */
+class OfflineTestApp : Application(), OfflineHost {
+    override lateinit var offlineAreas: OfflineAreas
+}
+
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [35], application = OfflineTestApp::class)
+class AreaWorkerTest {
+    private val app get() = ApplicationProvider.getApplicationContext<OfflineTestApp>()
+    private val server = MockWebServer()
+    private lateinit var store: OfflineStore
+
+    // A park: a small box near Squamish, one day hike across it.
+    private val box = listOf(-123.06, 49.95, -123.0, 49.99)
+    private val park = """{"park":{"id":"1","name":"Test Park"},"day_hikes":[{"from":"A","dest":"B","kind":"day",
+        "route":{"km":3.0,"gain":100.0,"line":[[-123.05,49.96],[-123.02,49.97],[-123.01,49.98]]}}]}"""
+
+    private fun archive(name: String): BytesSource {
+        val tiles = (0..2).flatMap { z -> (0 until (1 shl z)).flatMap { x -> (0 until (1 shl z)).map { y -> Triple(z, x, y) } } }
+            .associate { (z, x, y) -> TileId.fromZxy(z, x, y) to TestArchive.gzip("$name $z/$x/$y".toByteArray()) }
+        return BytesSource(TestArchive.build(tiles, Compression.GZIP, 0, 2), key = "https://x/$name.pmtiles")
+    }
+
+    @Before
+    fun setUp() {
+        WorkManagerTestInitHelper.initializeTestWorkManager(app)
+        val gz = TestArchive.gzip(park.toByteArray())
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse = when (request.url.encodedPath) {
+                "/regions.json" -> MockResponse.Builder().body(
+                    """{"countries":[{"name":"Canada","slug":"canada","states":[{"name":"BC","slug":"bc","areas":[
+                        {"id":"1","name":"Test Park","slug":"test-park","bbox":[${box.joinToString(",")}]}]}]}]}""",
+                ).build()
+                "/index.json" -> MockResponse.Builder().body("""{"bundle":"b.bin","parks":{"1":[0,${gz.size}]}}""").build()
+                "/b.bin" -> MockResponse.Builder().code(206).body(Buffer().write(gz)).build()
+                else -> MockResponse.Builder().code(404).build()
+            }
+        }
+        server.start()
+        store = OfflineStore(app, name = null)
+        val basemap = Pmtiles(archive("basemap")) { null }
+        val routesArchive = Pmtiles(archive("routes")) { null }
+        val routes = RoutesRepository(OkHttpClient.Builder().proxy(java.net.Proxy.NO_PROXY).build(), server.url("/").toString().trimEnd('/'))
+        app.offlineAreas = OfflineAreas(app, store, routes, { basemap }, { routesArchive }, { z, x, y -> "dem $z/$x/$y".toByteArray() })
+    }
+
+    @After
+    fun tearDown() {
+        store.close()
+        server.close()
+    }
+
+    @Test
+    fun aParkDownloadsItsTilesAndRoutes() = runBlocking {
+        val area = store.area(OfflineStore.PARK, "1", "Test Park")
+        val worker = TestListenableWorkerBuilder<AreaWorker>(app).setInputData(workDataOf(AreaWorker.AREA to area.id)).build()
+        assertEquals(ListenableWorker.Result.success(), worker.doWork())
+
+        val done = store.areaById(area.id)!!
+        assertTrue(done.ready)
+        assertEquals(done.total, done.done)
+        assertTrue(done.bytes > 0)
+        // The basemap and routes overlay, the terrain over the park, and the park's routes JSON.
+        assertNotNull(store.tile("https://x/basemap.pmtiles", 2, 0, 1))
+        assertNotNull(store.tile("https://x/routes.pmtiles", 0, 0, 0))
+        val (x, y) = TileCover.tile(-123.03, 49.97, 12)
+        assertNotNull(store.tile(MapterhornSource.KEY, 12, x, y))
+        assertNotNull(store.resource(app.offlineAreas.let { server.url("/parks/1.json.gz").toString() }))
+    }
+
+    @Test
+    fun downloadsWaitForWifiAndBringTheOverviewTheFirstTime() = runBlocking {
+        val areas = app.offlineAreas
+        areas.download(OfflineAreas.Target(OfflineStore.PARK, "1", "Test Park"))
+        assertEquals(listOf(OfflineStore.PARK, OfflineStore.OVERVIEW).sorted(), store.areas().map { it.kind }.sorted())
+        val wm = WorkManager.getInstance(app)
+        val parkWork = { wm.getWorkInfosForUniqueWork(OfflineAreas.workName(store.findArea(OfflineStore.PARK, "1")!!.id)).get().single() }
+        assertEquals(NetworkType.UNMETERED, parkWork().constraints.requiredNetworkType)
+
+        // Wi-Fi only off: what's waiting goes on any network.
+        areas.wifiOnly = false
+        assertEquals(NetworkType.CONNECTED, parkWork().constraints.requiredNetworkType)
+        areas.wifiOnly = true
+
+        // A second download doesn't bring another overview.
+        areas.download(OfflineAreas.Target(OfflineStore.HIKE, "1/day/0", "B from A"))
+        assertEquals(1, store.areas().count { it.kind == OfflineStore.OVERVIEW })
+    }
+}
