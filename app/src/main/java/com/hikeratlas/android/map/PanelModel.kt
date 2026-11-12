@@ -7,6 +7,9 @@ import com.hikeratlas.android.elevation.ElevationProfiler
 import com.hikeratlas.android.pmtiles.Pmtiles
 import com.hikeratlas.android.routes.RouteReports
 import com.hikeratlas.android.routes.Sort
+import com.hikeratlas.android.routes.NearbyPark
+import com.hikeratlas.android.routes.isSmall
+import com.hikeratlas.android.routes.nearbyParks
 import com.hikeratlas.android.routes.Filters
 import com.hikeratlas.android.routes.reportsKey
 import com.hikeratlas.android.routes.BundleIndex
@@ -69,6 +72,8 @@ sealed interface Panel {
         val reports: Map<String, RouteReports>? = null,
         /** Where the park is: its country and state, for the sheet's crumbs. */
         val crumbs: List<Crumb> = emptyList(),
+        /** For a small park: the parks nearest it with more hikes. */
+        val nearby: List<NearbyPark> = emptyList(),
     ) : Panel
 
     /** An OSM trail picked in search: its length, elevation, and the park's hikes that use it. */
@@ -191,6 +196,11 @@ class PanelModel(
                 Panel.RouteList(
                     doc.park?.name ?: name, items, parkAbout, parkId, parkUrl(idx, parkId),
                     doc = doc, crumbs = crumbsFor(idx.paths[parkId]),
+                    nearby = if (isSmall(doc)) {
+                        try { nearbyParks(routes.regions(), parkId) } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) { emptyList() }
+                    } else {
+                        emptyList()
+                    },
                 )
             }
         }

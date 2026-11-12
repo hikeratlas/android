@@ -287,3 +287,18 @@ $pts
 </gpx>
 """
 }
+
+/** A park near another, for a small park's "More hiking nearby". */
+data class NearbyPark(val id: String, val name: String, val hikes: Int, val km: Int)
+
+/** The parks nearest [id] with at least [min] hikes, by the distance between their boxes' centres. */
+fun nearbyParks(regions: Regions, id: String, min: Int = 3, n: Int = 3): List<NearbyPark> {
+    val areas = regions.countries.flatMap { c -> c.states.flatMap { it.areas } }
+    val me = areas.firstOrNull { it.covers(id) } ?: return emptyList()
+    val box = me.bbox ?: return emptyList()
+    fun mid(b: List<Double>) = listOf((b[0] + b[2]) / 2, (b[1] + b[3]) / 2)
+    val m = mid(box)
+    return areas.filter { it !== me && it.bbox != null && it.hikes >= min && it.id != me.id }
+        .map { a -> NearbyPark(a.id, a.name, a.hikes, Math.round(com.hikeratlas.android.elevation.ElevationProfiler.haversine(m, mid(a.bbox!!)) / 1000).toInt()) }
+        .sortedBy { it.km }.take(n)
+}

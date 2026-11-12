@@ -69,6 +69,23 @@ class MapController(val map: MapLibreMap, private val density: Float) {
                 ),
             )
         }
+        // A park's day hikes while its sheet is open: those its filters leave
+        // in magenta, the others grey; under the selected route.
+        s.addSource(GeoJsonSource(PARK))
+        val on = Expression.get("on")
+        s.addLayer(
+            LineLayer("$PARK-casing", PARK).withFilter(Expression.eq(on, Expression.literal(true))).withProperties(
+                lineColor("#ffffff"), lineWidth(4.5f), lineCap(Property.LINE_CAP_ROUND), lineJoin(Property.LINE_JOIN_ROUND),
+            ),
+        )
+        s.addLayer(
+            LineLayer(PARK, PARK).withProperties(
+                lineColor(Expression.switchCase(on, Expression.color(ROUTE_COLOR.toColorInt()), Expression.color("#a8a29e".toColorInt()))),
+                lineWidth(Expression.switchCase(on, Expression.literal(2.5f), Expression.literal(1.5f))),
+                lineOpacity(Expression.switchCase(on, Expression.literal(0.9f), Expression.literal(0.6f))),
+                lineCap(Property.LINE_CAP_ROUND), lineJoin(Property.LINE_JOIN_ROUND),
+            ),
+        )
         s.addSource(GeoJsonSource(SEL))
         s.addSource(GeoJsonSource(HOVER))
         s.addLayer(
@@ -224,6 +241,19 @@ class MapController(val map: MapLibreMap, private val density: Float) {
         }
     }
 
+    /** A park's day hikes, each with whether the sheet's filters leave it in; none clears them. */
+    fun showParkRoutes(routes: List<Pair<List<List<Double>>, Boolean>>) {
+        val src = style?.getSourceAs<GeoJsonSource>(PARK) ?: return
+        src.setGeoJson(
+            FeatureCollection.fromFeatures(
+                // The ones left out first, so the others draw over them.
+                routes.filter { it.first.size >= 2 }.sortedBy { it.second }.map { (line, on) ->
+                    Feature.fromGeometry(LineString.fromLngLats(line.map { Point.fromLngLat(it[0], it[1]) })).apply { addBooleanProperty("on", on) }
+                },
+            ),
+        )
+    }
+
     /** Numbers what the selected route passes, where it is: (n, [lon, lat]); none clears them. */
     fun showAlong(points: List<Pair<Int, List<Double>>>) {
         val src = style?.getSourceAs<GeoJsonSource>(ALONG) ?: return
@@ -328,6 +358,7 @@ class MapController(val map: MapLibreMap, private val density: Float) {
         private const val SEL = "curated-sel"
         private const val HOVER = "curated-hover"
         private const val ALONG = "curated-along"
+        private const val PARK = "curated-park"
         const val ALONG_COLOR = "#a21caf"
     }
 }

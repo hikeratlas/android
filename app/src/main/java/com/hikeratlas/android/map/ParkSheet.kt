@@ -49,7 +49,10 @@ import com.hikeratlas.android.routes.RouteReports
 import com.hikeratlas.android.routes.Sort
 import com.hikeratlas.android.routes.TimeBand
 import com.hikeratlas.android.routes.km
+import com.hikeratlas.android.routes.isSmall
 import com.hikeratlas.android.routes.matches
+import com.hikeratlas.android.routes.picks
+import com.hikeratlas.android.routes.summary
 import com.hikeratlas.android.routes.metres
 import com.hikeratlas.android.routes.parkHikes
 import com.hikeratlas.android.routes.sorted
@@ -127,6 +130,10 @@ fun CrumbsRow(crumbs: List<Crumb>, onCrumb: (Crumb) -> Unit, actions: @Composabl
 @Composable
 fun ParkBody(p: Panel.RouteList, doc: ParkDoc, model: PanelModel) {
     val park = p.parkId ?: doc.park?.id ?: ""
+    if (isSmall(doc)) {
+        SmallPark(p, doc, model, park)
+        return
+    }
     Column(Modifier.padding(horizontal = 20.dp).padding(top = 8.dp, bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         when (model.parkTab) {
             ParkTab.Day -> DayHikes(p, doc, model, park)
@@ -169,6 +176,119 @@ fun ParkBody(p: Panel.RouteList, doc: ParkDoc, model: PanelModel) {
     }
 }
 
+/**
+ * A park with few day hikes: a summary from its numbers, every hike in full
+ * with its trip reports, "do them all" when they're short, its quick stops,
+ * and the parks nearest it with more hikes.
+ */
+@Composable
+private fun SmallPark(p: Panel.RouteList, doc: ParkDoc, model: PanelModel, park: String) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val hikes = remember(doc, p.reports) { parkHikesOf(doc, p.reports) }
+    Column(Modifier.padding(horizontal = 20.dp).padding(top = 8.dp, bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        if (hikes.isNotEmpty()) {
+            val total = hikes.sumOf { it.route.km }
+            val climb = hikes.maxOf { it.route.gain }
+            val reps = hikes.sumOf { it.reports }
+            Column(
+                Modifier.fillMaxWidth().background(Color(0xFFF7F4EC), RoundedCornerShape(16.dp)).padding(14.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Text(summary(hikes), style = MaterialTheme.typography.bodyLarge)
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    for ((v, l) in listOf(
+                        hikes.size.toString() to if (hikes.size == 1) "day hike" else "day hikes",
+                        "${km(total)} km" to "of trail in all",
+                        "≤ ${metres(climb)} m" to "of climbing",
+                        reps.toString() to if (reps == 1) "trip report" else "trip reports",
+                    )) {
+                        Column(Modifier.weight(1f).background(Color.White, RoundedCornerShape(12.dp)).padding(8.dp)) {
+                            Text(v, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, color = GREEN, maxLines = 1)
+                            Text(l, style = MaterialTheme.typography.labelSmall, color = MUTED)
+                        }
+                    }
+                }
+            }
+        }
+        hikes.forEachIndexed { i, h ->
+            Column(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(16.dp))
+                    .clickable { model.openRoute(park, h.id, hint = HikeHint(h.title, null)) }.padding(14.dp),
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Box(Modifier.size(28.dp).background(GREEN, androidx.compose.foundation.shape.CircleShape), contentAlignment = Alignment.Center) {
+                        Text((i + 1).toString(), color = Color.White, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelLarge)
+                    }
+                    RouteThumb(h.route.line, 48.dp)
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Text(h.title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                        Text(cardStats(h), style = MaterialTheme.typography.bodySmall)
+                        Text(
+                            "from ${h.from}" + (h.route.min_ele?.takeIf { it > 0 }?.let { " · ${metres(it)}–${metres(h.route.max_ele)} m" } ?: ""),
+                            style = MaterialTheme.typography.labelSmall, color = MUTED,
+                        )
+                    }
+                    DifficultyPill(h.diff)
+                }
+                val key = doc.day_hikes.getOrNull(i)?.key ?: h.id
+                for (r in p.reports?.get(key)?.reports.orEmpty().take(3)) {
+                    Text(
+                        "${r.title.ifEmpty { r.site }} · ${r.site.removePrefix("www.")}",
+                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.padding(start = 40.dp, top = 6.dp).clickable { openUrl(context, r.url) },
+                    )
+                }
+            }
+        }
+        val walk = hikes.sumOf { it.route.km / 4 + it.route.gain / 600 }
+        if (hikes.size >= 2 && walk <= 3.5) {
+            val total = hikes.sumOf { it.route.km }
+            val time = if (walk < 1) "${(walk * 60 / 5).roundToInt() * 5} minutes" else "${(walk * 2).roundToInt() / 2.0} hours".replace(".0 ", " ")
+            Row(
+                Modifier.fillMaxWidth().border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(16.dp)).padding(14.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box(Modifier.size(40.dp).background(THUMB_BG, RoundedCornerShape(12.dp)), contentAlignment = Alignment.Center) {
+                    Text(hikes.size.toString(), fontWeight = FontWeight.Bold, color = Color(0xFF3F6212))
+                }
+                Column {
+                    Text("Do them all", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                    Text(
+                        "${km(total)} km and about $time of walking in all" +
+                            if (hikes.map { it.from }.toSet().size > 1) ", plus getting between trailheads." else ".",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+            }
+        }
+        if (doc.stops.isNotEmpty()) {
+            Others(
+                "Quick stops", "A short walk from the car to a view.",
+                doc.stops.mapIndexed { i, s ->
+                    Other("", s.dest, quickStop(s.route.one_way_km ?: (s.route.km / 2), s.from)) {
+                        model.openRoute(park, "$park/stop/$i", hint = HikeHint(s.dest, null))
+                    }
+                },
+            )
+        }
+        if (p.nearby.isNotEmpty()) {
+            Column {
+                Text("More hiking nearby", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                for (n in p.nearby) {
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
+                    Row(Modifier.fillMaxWidth().clickable { model.openPark(n.id, n.name) }.padding(vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text(n.name, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.primary)
+                            Text("${n.hikes} ${if (n.hikes == 1) "hike" else "hikes"} · ${n.km} km away", style = MaterialTheme.typography.bodySmall, color = MUTED)
+                        }
+                        Text("›", color = MUTED)
+                    }
+                }
+            }
+        }
+    }
+}
+
 /** "By the road", "0.8 km there and back from Lot 3". */
 internal fun quickStop(oneWayKm: Double, from: String): String {
     val end = from == "Road's end"
@@ -184,6 +304,26 @@ private fun DayHikes(p: Panel.RouteList, doc: ParkDoc, model: PanelModel, park: 
     val f = model.filters
     val shown = sorted(hikes.filter { matches(it, f) }, model.sort)
     fun count(pred: (ParkHike) -> Boolean) = hikes.count(pred)
+
+    val top = picks(hikes)
+    if (top.isNotEmpty()) {
+        Text("Start here", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            for ((tag, h) in top) {
+                Column(
+                    Modifier.width(136.dp).clip(RoundedCornerShape(16.dp))
+                        .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(16.dp))
+                        .clickable { model.openRoute(park, h.id, hint = HikeHint(h.title, null)) }.padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    Text(tag.uppercase(), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.SemiBold, color = Color(0xFF3F6212))
+                    RouteThumb(h.route.line, 56.dp, Modifier.fillMaxWidth())
+                    Text(h.title, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    Text("${km(h.route.km)} km · ↑ ${metres(h.route.gain)} m", style = MaterialTheme.typography.labelSmall, color = MUTED)
+                }
+            }
+        }
+    }
 
     Row(verticalAlignment = Alignment.CenterVertically) {
         Text("Find a hike", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
