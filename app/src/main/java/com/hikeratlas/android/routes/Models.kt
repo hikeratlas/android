@@ -145,7 +145,13 @@ data class BundleIndex(
     val paths: Map<String, String> = emptyMap(),
     /** Trip reports and other pages about the routes (hikeratlas/cc-crawler); missing in older builds. */
     val reports: ReportsIndex? = null,
+    /** Each state's park cards, "<country>/<state>" -> [offset, length] in the bundle; missing in older builds. */
+    val cards: Map<String, List<Long>> = emptyMap(),
 )
+
+/** A park's card in its state's list (basemap's hike-paths.py): its best hike, what its hikes pass, its outline (SVG, 100×100). */
+@Serializable
+data class StateCard(val top: String? = null, val tags: List<String> = emptyList(), val outline: String? = null)
 
 /** The reports bundle: each park's pages gzipped, at [offset, length]. */
 @Serializable
@@ -179,10 +185,16 @@ data class RouteReports(val reports: List<ReportPage> = emptyList(), val about: 
 data class Regions(val countries: List<Country> = emptyList()) {
     // Slugs as in the website's URLs; bbox is [west, south, east, north].
     @Serializable
-    data class Country(val name: String, val slug: String = "", val bbox: List<Double>? = null, val states: List<State> = emptyList())
+    data class Country(
+        val name: String, val slug: String = "", val bbox: List<Double>? = null, val states: List<State> = emptyList(),
+        val hikes: Int = 0, val parks: Int = 0,
+    )
 
     @Serializable
-    data class State(val name: String, val slug: String = "", val bbox: List<Double>? = null, val areas: List<Area> = emptyList())
+    data class State(
+        val name: String, val slug: String = "", val bbox: List<Double>? = null, val areas: List<Area> = emptyList(),
+        val hikes: Int = 0, val parks: Int = 0,
+    )
 
     @Serializable
     data class Area(

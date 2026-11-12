@@ -99,6 +99,17 @@ class RoutesRepository(
         return out
     }
 
+    /** A state's park cards by area id ("<country>/<state>"), from the bundle; empty where the build has none. */
+    suspend fun stateCards(key: String): Map<String, StateCard> {
+        val idx = index()
+        val (offset, length) = idx.cards[key] ?: return emptyMap()
+        val gz = withContext(Dispatchers.IO) { get("$root/${idx.bundle}", offset until offset + length) }
+        return JSON.decodeFromString(
+            kotlinx.serialization.builtins.MapSerializer(String.serializer(), StateCard.serializer()),
+            GZIPInputStream(gz.inputStream()).readBytes().decodeToString(),
+        )
+    }
+
     /** Forgets the index and parks, e.g. after a rebuild moved the bundle. */
     suspend fun refresh() = mutex.withLock { index = null; regions = null; parks.clear(); reports.clear() }
 

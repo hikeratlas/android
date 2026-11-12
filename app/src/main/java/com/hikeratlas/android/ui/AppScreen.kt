@@ -7,8 +7,10 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Explore
 import androidx.compose.material.icons.filled.Map
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.outlined.Explore
 import androidx.compose.material.icons.outlined.Map
 import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material3.Icon
@@ -45,6 +47,8 @@ import com.hikeratlas.android.map.MapScreen
 
 private enum class Tab(val label: String, val selected: ImageVector, val unselected: ImageVector) {
     Map("Map", Icons.Filled.Map, Icons.Outlined.Map),
+    // Hikes by place: countries, states, parks.
+    Explore("Explore", Icons.Filled.Explore, Icons.Outlined.Explore),
     // Recorded tracks (and later offline areas): shown once it has something in it.
     Saved("Saved", Icons.Filled.Bookmark, Icons.Outlined.BookmarkBorder),
     You("You", Icons.Filled.Person, Icons.Outlined.Person),
@@ -64,6 +68,8 @@ fun AppScreen(app: HikerAtlasApp, link: Uri? = null, onLinkHandled: () -> Unit =
     var viewTrack by rememberSaveable { mutableStateOf<Long?>(null) }
     // An offline area to open on the map (from the Saved tab), until it's opened.
     var openArea by remember { mutableStateOf<OfflineAreas.Target?>(null) }
+    // Where Explore is, by slugs: kept as one string, so it survives rotation.
+    var explore by rememberSaveable { mutableStateOf("") }
     val offline = app.offlineAreas
     // Offline areas' state: often while any is on its way, now and then otherwise.
     LaunchedEffect(Unit) {
@@ -94,6 +100,10 @@ fun AppScreen(app: HikerAtlasApp, link: Uri? = null, onLinkHandled: () -> Unit =
             link = link, onLinkHandled = onLinkHandled,
             viewTrack = viewTrack.takeIf { tab == Tab.Map }, onViewClosed = { viewTrack = null },
             openArea = openArea.takeIf { tab == Tab.Map }, onAreaOpened = { openArea = null },
+            onCrumb = { c ->
+                explore = c.path.joinToString("/")
+                tab = Tab.Explore
+            },
         )
         if (tab == Tab.Saved) {
             Surface(Modifier.fillMaxSize().padding(bottom = barHeight)) {
@@ -117,6 +127,21 @@ fun AppScreen(app: HikerAtlasApp, link: Uri? = null, onLinkHandled: () -> Unit =
                                 tab = Tab.Map
                             },
                         )
+                    },
+                )
+            }
+        }
+        if (tab == Tab.Explore) {
+            Box(Modifier.fillMaxSize().padding(bottom = barHeight)) {
+                ExploreScreen(
+                    regions = { app.routes.regions() },
+                    cards = { app.routes.stateCards(it) },
+                    path = explore.split('/').filter { it.isNotEmpty() },
+                    onPath = { explore = it.joinToString("/") },
+                    onPark = { id, name ->
+                        viewTrack = null
+                        openArea = OfflineAreas.Target(com.hikeratlas.android.offline.OfflineStore.PARK, id, name)
+                        tab = Tab.Map
                     },
                 )
             }

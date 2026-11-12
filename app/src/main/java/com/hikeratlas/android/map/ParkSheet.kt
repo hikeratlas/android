@@ -118,7 +118,7 @@ fun CrumbsRow(crumbs: List<Crumb>, onCrumb: (Crumb) -> Unit, actions: @Composabl
                 if (i > 0) Text(" › ", style = MaterialTheme.typography.labelMedium, color = MUTED)
                 Text(
                     c.name, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.clickable(enabled = c.bbox != null) { onCrumb(c) }.heightIn(min = 40.dp).padding(vertical = 10.dp),
+                    modifier = Modifier.clickable { onCrumb(c) }.heightIn(min = 40.dp).padding(vertical = 10.dp),
                 )
             }
         }

@@ -106,8 +106,8 @@ sealed interface Panel {
     ) : Panel
 }
 
-/** A country or state above a park, and its box. */
-data class Crumb(val name: String, val bbox: List<Double>?)
+/** A country or state above a park, its box, and its slugs ("canada", "canada/british-columbia"). */
+data class Crumb(val name: String, val bbox: List<Double>?, val path: List<String> = emptyList())
 
 /** A park sheet's tabs. */
 enum class ParkTab { Day, Camps, Multi, Stops }
@@ -229,7 +229,10 @@ class PanelModel(
         val regions = try { routes.regions() } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) { return emptyList() }
         val country = regions.countries.firstOrNull { it.slug == parts.getOrNull(0) } ?: return emptyList()
         val state = country.states.firstOrNull { it.slug == parts.getOrNull(1) }
-        return listOfNotNull(Crumb(country.name, country.bbox), state?.let { Crumb(it.name, it.bbox) })
+        return listOfNotNull(
+            Crumb(country.name, country.bbox, listOf(country.slug)),
+            state?.let { Crumb(it.name, it.bbox, listOf(country.slug, it.slug)) },
+        )
     }
 
     /**

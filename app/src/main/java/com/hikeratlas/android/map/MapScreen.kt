@@ -121,6 +121,8 @@ fun MapScreen(
     /** An offline area to open (from the Saved tab): its park's or hike's sheet, until [onAreaOpened]. */
     openArea: OfflineAreas.Target? = null,
     onAreaOpened: () -> Unit = {},
+    /** A park's country or state, tapped in its sheet's crumbs: none moves the map to it. */
+    onCrumb: ((Crumb) -> Unit)? = null,
 ) {
     val context = LocalContext.current
     val density = LocalDensity.current.density
@@ -594,8 +596,10 @@ fun MapScreen(
                 header = {
                     PanelHeader(
                         model, full = sheet.settledValue == Stop.Full, onScrub = { p -> controller?.showHover(p) }, offline = offlineActions,
-                        // Until Explore lists a state's parks: the map moves to it.
-                        onCrumb = { c -> c.bbox?.let { b -> model.close(); controller?.fitBox(b[0], b[1], b[2], b[3], 0) } },
+                        // Explore lists its parks; without it, the map moves to it.
+                        onCrumb = { c ->
+                            if (onCrumb != null) onCrumb(c) else c.bbox?.let { b -> model.close(); controller?.fitBox(b[0], b[1], b[2], b[3], 0) }
+                        },
                     )
                 },
                 body = { PanelBody(model) { p -> controller?.showHover(p) } },
