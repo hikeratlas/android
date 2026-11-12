@@ -28,6 +28,9 @@ class AreaPlanTest {
         assertTrue(p.dem[14]!!.size < TileCover.box(garibaldi, 14).size / 10)
         assertTrue(p.dem[14]!!.containsAll(TileCover.corridor(listOf(tusk), 14, 0.0)))
         assertTrue(p.withRoutes)
+        // And along its trails, once its map tiles are kept: within its box, at the fine zooms.
+        assertEquals(13..14, p.alongTrails!!.zooms)
+        assertEquals(garibaldi, p.alongTrails!!.box)
     }
 
     @Test
@@ -49,6 +52,7 @@ class AreaPlanTest {
         assertTrue(p.vector[14]!!.size <= TileCover.box(box, 14).size)
         assertTrue(p.vector[14]!!.containsAll(TileCover.corridor(listOf(tusk), 14, 0.0)))
         assertEquals((0..14).toSet(), p.dem.keys)
+        assertEquals(null, p.alongTrails)
     }
 
     @Test
