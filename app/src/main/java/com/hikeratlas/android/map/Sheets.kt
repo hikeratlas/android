@@ -51,7 +51,28 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.hikeratlas.android.routes.Difficulty
+import com.hikeratlas.android.routes.Route
 import com.hikeratlas.android.routes.RouteItem
+import com.hikeratlas.android.routes.SAC_WORDS
+import com.hikeratlas.android.routes.TERRAIN_COLORS
+import com.hikeratlas.android.routes.TERRAIN_OTHER_STRIPE
+import com.hikeratlas.android.routes.WORLDCOVER_URL
+import com.hikeratlas.android.routes.alongOf
+import com.hikeratlas.android.routes.difficulty
+import com.hikeratlas.android.routes.hours
+import com.hikeratlas.android.routes.kindName
+import com.hikeratlas.android.routes.listWords
+import com.hikeratlas.android.routes.routeGpx
+import com.hikeratlas.android.routes.timeLabel
+import com.hikeratlas.android.routes.whyWords
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.drawscope.clipRect
+import kotlin.math.roundToInt
 import com.hikeratlas.android.routes.km
 import com.hikeratlas.android.routes.metres
 import java.net.URI
@@ -108,6 +129,8 @@ fun PanelHeader(
                     // doesn't change height when it arrives.
                     Column(Modifier.padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         Text(p.hike.meta ?: "", style = MaterialTheme.typography.bodyMedium, color = MUTED, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        // Where the numbers and difficulty will be.
+                        Text("", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.heightIn(min = 20.dp))
                         Box(Modifier.fillMaxWidth().height(CHART_HEIGHT), contentAlignment = Alignment.Center) {
                             LinearProgressIndicator(Modifier.fillMaxWidth())
                         }
@@ -195,13 +218,17 @@ fun PanelHeader(
                     }
                 })
                 Column(Modifier.padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    val type = if (full) p.selected.label else p.selected.label.substringBefore(" · ")
                     Text(
-                        "$type · ${km(r.km)} km · ↑ ${metres(r.gain)} m · high ${metres(r.max_ele)} m" + if (r.scramble) " · scramble" else "",
-                        style = MaterialTheme.typography.bodyMedium, color = MUTED,
-                        // Two lines at most: a scramble's note can need the second.
-                        maxLines = if (full) 3 else 2, overflow = TextOverflow.Ellipsis,
+                        p.selected.label, style = MaterialTheme.typography.bodyMedium, color = MUTED,
+                        maxLines = if (full) 3 else 1, overflow = TextOverflow.Ellipsis,
                     )
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        DifficultyPill(difficulty(r))
+                        Text(
+                            "${km(r.km)} km · ↑ ${metres(r.gain)} m · ${timeLabel(hours(r), r).removePrefix("about ").let { if (it.endsWith("min")) "~$it" else it }}",
+                            style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                        )
+                    }
                     // The same height loading or not, so the peek doesn't jump.
                     Box(Modifier.fillMaxWidth().height(CHART_HEIGHT), contentAlignment = Alignment.CenterStart) {
                         when (val prof = p.profile) {
@@ -212,6 +239,7 @@ fun PanelHeader(
                                 r.stopovers.map { Mark(it.km * 1000, it.name) },
                                 onScrub = { i -> onScrub(i?.let { prof.profile.coords[it] }) },
                                 height = CHART_HEIGHT,
+                                pins = alongOf(r).mapNotNull { f -> f.km?.let { Pin(it * 1000, f.n) } },
                             )
                         }
                     }
@@ -224,8 +252,9 @@ fun PanelHeader(
 /** The hike chart's height in the sheet's peek: the route stays in view above it. */
 private val CHART_HEIGHT = 96.dp
 
-/** Whether a hike has anything below its peek: a scramble warning, or a base camp's hikes. */
-fun hasDetailBody(d: Panel.Detail) = d.selected.route.scramble || d.selected.base != null
+/** Whether a hike has anything below its peek: it always has its numbers, terrain and actions now. */
+@Suppress("UNUSED_PARAMETER")
+fun hasDetailBody(d: Panel.Detail) = true
 
 /** The rest of the sheet: lists, the elevation chart, details. Scrolls. */
 @Composable
@@ -242,7 +271,7 @@ fun PanelBody(model: PanelModel, onScrub: (DoubleArray?) -> Unit) {
                 for (item in shown) RouteRow(item) { model.openRoute(item.park, item.id, hint = HikeHint(item.title, item.meta)) }
             }
         }
-        is Panel.Detail -> DetailBody(p, model)
+        is Panel.Detail -> DetailBody(p, model, onScrub)
         is Panel.Trail -> TrailBody(p, model, onScrub)
         else -> {}
     }
@@ -305,9 +334,16 @@ private fun RouteRow(item: RouteItem, onClick: () -> Unit) {
 }
 
 @Composable
-private fun DetailBody(d: Panel.Detail, model: PanelModel) {
+private fun DetailBody(d: Panel.Detail, model: PanelModel, onScrub: (DoubleArray?) -> Unit) {
+    val context = LocalContext.current
     val r = d.selected.route
-    Column(Modifier.padding(horizontal = 20.dp).padding(top = 4.dp, bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    val title = d.selected.title
+    Column(Modifier.padding(horizontal = 20.dp).padding(top = 4.dp, bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+        StatTiles(r, d.selected.kind)
+        val sac = r.max_sac ?: 0
+        if (sac > 0) {
+            Text(SAC_WORDS[sac] ?: "SAC T$sac", style = MaterialTheme.typography.bodySmall)
+        }
         if (r.scramble) {
             Text(
                 "Includes scrambling (SAC T4, alpine hiking): expect to use your hands on rock, exposed sections, and possibly snow. Some sections may need route-finding.",
@@ -318,22 +354,210 @@ private fun DetailBody(d: Panel.Detail, model: PanelModel) {
                     .padding(10.dp),
             )
         }
+        if (r.stopovers.isNotEmpty()) {
+            Section("Campsites") {
+                for (c in r.stopovers) {
+                    ListRow(c.name, "km ${km(c.km)}") { onScrub(doubleArrayOf(c.at[0], c.at[1])) }
+                }
+            }
+        }
+        val feats = alongOf(r)
+        if (feats.isNotEmpty()) {
+            Section("Along the way") {
+                for (f in feats) {
+                    ListRow(
+                        f.name, kindName(f.kind) + (f.km?.let { " · km ${km(it)}" } ?: ""),
+                        number = f.n.takeIf { f.km != null },
+                    ) { f.at?.let { onScrub(doubleArrayOf(it[0], it[1])) } }
+                }
+            }
+        }
+        val terrain = r.terrain.filter { it.second >= 0.03 }
+        if (terrain.isNotEmpty()) {
+            Section("Terrain") {
+                TerrainBar(r.terrain, Modifier.fillMaxWidth().height(10.dp))
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp), modifier = Modifier.padding(top = 8.dp)) {
+                    for ((k, share) in terrain) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            TerrainSwatch(k, Modifier.size(10.dp))
+                            Text(" $k ${(share * 100).roundToInt()}%", style = MaterialTheme.typography.bodySmall)
+                        }
+                    }
+                }
+                Text(
+                    "From OpenStreetMap, and ESA WorldCover 2021 (CC BY 4.0) where it has none.",
+                    style = MaterialTheme.typography.labelSmall, color = MUTED,
+                    modifier = Modifier.padding(top = 6.dp).clickable { openUrl(context, WORLDCOVER_URL) },
+                )
+            }
+        }
+        val words = whyWords(d.selected.why, r)
+        if (words.isNotEmpty() || r.via.isNotEmpty()) {
+            Section("Why it made the list") {
+                if (words.isNotEmpty()) {
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        for (w in words) {
+                            Text(
+                                w, style = MaterialTheme.typography.bodySmall, color = Color(0xFF14532D),
+                                modifier = Modifier.background(Color(0xFFF0FDF4), RoundedCornerShape(50)).padding(horizontal = 12.dp, vertical = 4.dp),
+                            )
+                        }
+                    }
+                }
+                if (r.via.isNotEmpty()) {
+                    Text(
+                        "Follows ${listWords(r.via.take(6))}${if (r.via.size > 6) " and more" else ""}.",
+                        style = MaterialTheme.typography.bodySmall, color = MUTED, modifier = Modifier.padding(top = 6.dp),
+                    )
+                }
+            }
+        }
         d.selected.base?.let { b ->
             val park = d.selected.park
             val i = d.selected.baseIndex
             Column {
                 Text("From ${b.camp}:", color = MUTED, style = MaterialTheme.typography.bodyMedium)
                 b.hikes.forEachIndexed { j, h ->
-                    val title = h.name?.takeIf { it.isNotEmpty() } ?: h.dest
+                    val t = h.name?.takeIf { it.isNotEmpty() } ?: h.dest
                     val meta = "${km(h.route.km)} km · ↑ ${metres(h.route.gain)} m" + if (h.route.scramble) " · scramble" else ""
-                    LinkRow(title, meta) { model.openRoute(park, "$park/base/$i/$j", hint = HikeHint(title, meta)) }
+                    LinkRow(t, meta) { model.openRoute(park, "$park/base/$i/$j", hint = HikeHint(t, meta)) }
                 }
                 LinkRow("The walk in", null) { model.openRoute(park, "$park/base/$i") }
+            }
+        }
+        // The way there, the route for a GPS app, and a link to it.
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            val start = r.line.firstOrNull()
+            Button(onClick = { start?.let { directions(context, it[1], it[0], title) } }, enabled = start != null, modifier = Modifier.weight(1f)) {
+                Text("Directions to the trailhead", maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+            OutlinedButton(onClick = { shareGpx(context, title, r.line) }, enabled = r.line.size >= 2) { Text("GPX") }
+            if (d.shareUrl != null) OutlinedButton(onClick = { share(context, title, d.shareUrl) }) { Text("Share") }
+        }
+    }
+}
+
+/** Distance (and shape), climb, walking time and high point, two to a row. */
+@Composable
+private fun StatTiles(r: Route, kind: String) {
+    val shape = when (kind) {
+        "loop" -> "loop"
+        "out-and-back" -> "there and back"
+        "point-to-point" -> "point to point"
+        else -> "one way"
+    }
+    val tiles = listOf(
+        "${km(r.km)} km" to shape,
+        "↑ ${metres(r.gain)} m" to "climbing",
+        timeLabel(hours(r), r).replace(Regex("^about "), "~") to "walking time",
+        "${metres(r.max_ele)} m" to "high point",
+    )
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        for (row in tiles.chunked(2)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                for ((v, l) in row) {
+                    Column(
+                        Modifier.weight(1f).border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(12.dp))
+                            .padding(horizontal = 10.dp, vertical = 8.dp),
+                    ) {
+                        Text(v, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                        Text(l, style = MaterialTheme.typography.labelSmall, color = MUTED)
+                    }
+                }
             }
         }
     }
 }
 
+@Composable
+private fun Section(title: String, content: @Composable () -> Unit) {
+    Column {
+        Text(title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 4.dp))
+        content()
+    }
+}
+
+/** A row in a sheet's list: a name, a note on the right, and a number where it's pinned on the chart. */
+@Composable
+private fun ListRow(name: String, note: String, number: Int? = null, onClick: () -> Unit) {
+    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
+    Row(
+        Modifier.fillMaxWidth().clickable(onClick = onClick).heightIn(min = 40.dp).padding(vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        if (number != null) {
+            Box(Modifier.size(24.dp).background(PIN, CircleShape), contentAlignment = Alignment.Center) {
+                Text(number.toString(), color = Color.White, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+            }
+        }
+        Text(name, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+        Text(note, style = MaterialTheme.typography.bodySmall, color = MUTED)
+    }
+}
+
+private val PIN = Color(0xFFA21CAF)
+
+/** "Easy", "Moderate", "Hard", "Scramble", coloured as the website's. */
+@Composable
+fun DifficultyPill(d: Difficulty) {
+    val (bg, fg) = when (d) {
+        Difficulty.Easy -> Color(0xFFECFDF5) to Color(0xFF065F46)
+        Difficulty.Moderate -> Color(0xFFFEF3C7) to Color(0xFF78350F)
+        Difficulty.Hard -> Color(0xFFFFEDD5) to Color(0xFF9A3412)
+        Difficulty.Scramble -> Color(0xFFFEE2E2) to Color(0xFF7F1D1D)
+    }
+    Text(
+        d.label, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.SemiBold, color = fg,
+        modifier = Modifier.background(bg, RoundedCornerShape(50)).padding(horizontal = 8.dp, vertical = 2.dp),
+    )
+}
+
+/** A route's land cover as one bar, each kind its share; the unknown share striped. */
+@Composable
+fun TerrainBar(terrain: List<Pair<String, Double>>, modifier: Modifier = Modifier) {
+    androidx.compose.foundation.Canvas(modifier.clip(RoundedCornerShape(50))) {
+        val total = terrain.sumOf { it.second }.takeIf { it > 0 } ?: return@Canvas
+        var x = 0f
+        for ((k, share) in terrain) {
+            val w = (share / total * size.width).toFloat()
+            drawTerrain(k, androidx.compose.ui.geometry.Offset(x, 0f), androidx.compose.ui.geometry.Size(w, size.height))
+            x += w
+        }
+    }
+}
+
+@Composable
+private fun TerrainSwatch(kind: String, modifier: Modifier = Modifier) {
+    androidx.compose.foundation.Canvas(modifier.clip(RoundedCornerShape(2.dp))) {
+        drawTerrain(kind, androidx.compose.ui.geometry.Offset.Zero, size)
+    }
+}
+
+private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawTerrain(
+    kind: String, at: androidx.compose.ui.geometry.Offset, sz: androidx.compose.ui.geometry.Size,
+) {
+    val base = Color(TERRAIN_COLORS[kind] ?: 0xFFD6D3D1)
+    drawRect(base, at, sz)
+    if (kind == "other") {
+        // Diagonal stripes: unknown, not a kind of ground.
+        val step = 6.dp.toPx()
+        clipRect(at.x, at.y, at.x + sz.width, at.y + sz.height) {
+            var sx = at.x - sz.height
+            while (sx < at.x + sz.width) {
+                drawLine(Color(TERRAIN_OTHER_STRIPE), androidx.compose.ui.geometry.Offset(sx, at.y + sz.height), androidx.compose.ui.geometry.Offset(sx + sz.height, at.y), strokeWidth = 3.dp.toPx())
+                sx += step
+            }
+        }
+    }
+}
+
+/** Shares a curated route as GPX, through Android's share sheet. */
+private fun shareGpx(context: Context, title: String, line: List<List<Double>>) {
+    val dir = java.io.File(context.cacheDir, "gpx").apply { mkdirs() }
+    dir.listFiles()?.forEach { it.delete() }
+    val file = java.io.File(dir, com.hikeratlas.android.track.Gpx.fileName(title)).apply { writeText(routeGpx(title, line)) }
+    context.startActivity(com.hikeratlas.android.track.gpxShareIntent(context, file, title))
+}
 
 @Composable
 private fun LinkRow(title: String, meta: String?, onClick: () -> Unit) {

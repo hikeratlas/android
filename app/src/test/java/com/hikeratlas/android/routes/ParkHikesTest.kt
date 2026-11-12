@@ -49,7 +49,9 @@ class ParkHikesTest {
             ParkDoc.serializer(),
             """{"park":{"id":"1","name":"Grouse Mountain"},"day_hikes":[{"from":"Grind trailhead","dest":"Grouse Mountain","kind":"one-way","return_by":"Blue Grouse Gondola","route":{"km":2.9,"gain":850}}]}""",
         )
-        assertEquals("Day hike · one way, Blue Grouse Gondola down", lookup(doc, "1/day/0")!!.label)
+        // Titled by its destination alone, the only route there: the label says where it starts.
+        assertEquals("Grouse Mountain", lookup(doc, "1/day/0")!!.title)
+        assertEquals("Day hike from Grind · one way, Blue Grouse Gondola down", lookup(doc, "1/day/0")!!.label)
         assertEquals("one way, Blue Grouse Gondola down", parkHikes(doc).single().shape)
     }
 
@@ -134,5 +136,33 @@ class ParkHikesTest {
         assertEquals("Lakes, a waterfall and a summit", featureWords(r))
         val why = listOf("popularity" to 0.5, "feature_kinds" to 1.2, "loop" to 0.5, "lc_variety" to 0.9, "dest" to 3.0)
         assertEquals(listOf("Lakes, a waterfall and a summit", "Varied terrain", "A loop: no retracing your steps"), whyWords(why, r))
+    }
+
+    @Test
+    fun alongIsNumberedInOrderWithoutUnnamedOrRepeats() {
+        val r = Json { ignoreUnknownKeys = true }.decodeFromString(
+            Route.serializer(),
+            """{"km":10,"gain":700,"along":[["viewpoint","Barrier Viewpoint",5.9,[-123.08,49.94]],["lake","unnamed",6.0,[-123.0,49.9]],
+               ["lake","Barrier Lake",6.1,[-123.07,49.95]],["lake","Barrier Lake",6.2,[-123.07,49.95]]],
+               "passes":[["peak",["Ignored"]]]}""",
+        )
+        assertEquals(
+            listOf(AlongFeature(1, "viewpoint", "Barrier Viewpoint", 5.9, listOf(-123.08, 49.94)), AlongFeature(2, "lake", "Barrier Lake", 6.1, listOf(-123.07, 49.95))),
+            alongOf(r),
+        )
+        // Builds before along: from passes, without places.
+        val old = Json { ignoreUnknownKeys = true }.decodeFromString(Route.serializer(), """{"km":1,"gain":1,"passes":[["lake",["A","unnamed","B"]],["peak",["A"]]]}""")
+        assertEquals(listOf(AlongFeature(1, "lake", "A"), AlongFeature(2, "lake", "B")), alongOf(old))
+        assertEquals("Viewpoint", kindName("viewpoint"))
+        assertEquals("hot spring", kindName("hot_spring"))
+        assertEquals("A, B and C", listWords(listOf("A", "B", "C")))
+    }
+
+    @Test
+    fun aRouteAsGpx() {
+        val g = routeGpx("Lake & Peak", listOf(listOf(-123.1, 49.9), listOf(-123.05, 49.95)))
+        assertTrue(g.contains("<name>Lake &amp; Peak</name>"))
+        assertTrue(g.contains("""<trkpt lat="49.900000" lon="-123.100000"/>"""))
+        assertTrue(g.contains("""<trkpt lat="49.950000" lon="-123.050000"/>"""))
     }
 }
