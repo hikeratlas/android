@@ -1,6 +1,7 @@
 package com.hikeratlas.android.offline
 
 import android.widget.Toast
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -163,6 +164,8 @@ fun LazyListScope.offlineAreasSection(
     /** Whether an area's from an older build of the map, and offers Update. */
     updateAvailable: (OfflineStore.Area) -> Boolean = { false },
     onUpdate: (Long) -> Unit = {},
+    /** Opens a park's or hike's area on the map, in its sheet. */
+    onOpen: (OfflineAreas.Target) -> Unit = {},
 ) {
     if (areas.isEmpty()) return
     item(key = "offline-header") {
@@ -176,7 +179,7 @@ fun LazyListScope.offlineAreasSection(
         val context = LocalContext.current
         // Asked afresh as the list refreshes (it does each second while one waits).
         val network = if (a.state == OfflineStore.QUEUED) currentNetwork(context) else Network.OTHER
-        AreaRow(a, wifiOnly, network, updateAvailable(a), onRetry, onUpdate, onDelete)
+        AreaRow(a, wifiOnly, network, updateAvailable(a), onRetry, onUpdate, onDelete, onOpen)
     }
 }
 
@@ -189,10 +192,17 @@ private fun AreaRow(
     onRetry: (Long) -> Unit,
     onUpdate: (Long) -> Unit,
     onDelete: (Long) -> Unit,
+    onOpen: (OfflineAreas.Target) -> Unit,
 ) {
     var deleting by remember { mutableStateOf(false) }
+    // A park or hike opens on the map; the overview has nothing to open.
+    val target = OfflineAreas.Target(a.kind, a.ref, a.name).takeIf { a.kind == OfflineStore.PARK || a.kind == OfflineStore.HIKE }
     HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
-    Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).padding(start = 20.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+    Row(
+        Modifier.fillMaxWidth().then(if (target != null) Modifier.clickable { onOpen(target) } else Modifier)
+            .heightIn(min = 56.dp).padding(start = 20.dp, end = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
         Column(Modifier.weight(1f).padding(vertical = 8.dp)) {
             Text(a.name, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
             Text(

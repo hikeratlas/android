@@ -41,7 +41,8 @@ class ElevationProfiler(private val sources: List<DemSource>) {
         val length get() = distances.last()
     }
 
-    private class Grid(val z: Int, val x: Int, val y: Int, val h: FloatArray)
+    /** A tile's elevations; a stand-in (a coarser tile, as a finer one failed) is used only [until] then. */
+    private class Grid(val z: Int, val x: Int, val y: Int, val h: FloatArray, val until: Long = Long.MAX_VALUE)
 
     private val grids = HashMap<Long, Grid>()
 
@@ -86,24 +87,39 @@ class ElevationProfiler(private val sources: List<DemSource>) {
     /**
      * The grid for a DEM_Z tile: the first source's, at the deepest zoom it
      * has up to DEM_Z, falling back to ancestors where a tile is missing.
+     *
+     * A tile that can't be fetched (offline, say, past what an offline area
+     * kept) falls back to an ancestor too, so a profile still comes from
+     * what's on the phone. That stand-in is kept a minute, then the finer
+     * tile is tried again.
      */
     private fun grid(x: Int, y: Int): Grid {
         val key = (x.toLong() shl 32) or y.toLong()
-        synchronized(grids) { grids[key] }?.let { return it }
+        synchronized(grids) { grids[key] }?.let { if (it.until > System.currentTimeMillis()) return it }
+        var failed: java.io.IOException? = null
         for (s in sources) {
             for (z in min(DEM_Z, s.maxZoom) downTo s.minZoom) {
                 val shift = DEM_Z - z
-                val h = s.tile(z, x shr shift, y shr shift) ?: continue
-                val g = Grid(z, x shr shift, y shr shift, h)
+                val h = try {
+                    s.tile(z, x shr shift, y shr shift)
+                } catch (e: java.io.IOException) {
+                    failed = failed ?: e
+                    null
+                } ?: continue
+                val until = if (failed == null) Long.MAX_VALUE else System.currentTimeMillis() + STAND_IN_MS
+                val g = Grid(z, x shr shift, y shr shift, h, until)
                 synchronized(grids) { grids[key] = g }
                 return g
             }
         }
-        throw java.io.IOException("no DEM tile for $DEM_Z/$x/$y")
+        throw failed ?: java.io.IOException("no DEM tile for $DEM_Z/$x/$y")
     }
 
     companion object {
         const val DEM_Z = 14 // ~5 m pixels at 512 px: finer than the 10 m step
+
+        /** How long a coarser stand-in for a tile that failed is used before trying the tile again. */
+        private const val STAND_IN_MS = 60_000L
 
         /** Threads for fetching a profile's tiles at once (network-bound, so more than the cores). */
         private val FETCHERS = java.util.concurrent.Executors.newFixedThreadPool(8) { r ->
