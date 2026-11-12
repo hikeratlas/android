@@ -88,4 +88,31 @@ class LiveOfflineTest {
             assertTrue(a.bbox != null)
         }
     }
+
+    /**
+     * The routes overlay is clustered (basemap#292): a park's routes tiles
+     * come in a few merged reads, as the basemap's do (#17).
+     */
+    @Test
+    fun aParksRoutesTilesComeInAFewReads() = runBlocking {
+        assumeTrue(System.getenv("HIKERATLAS_LIVE") == "1")
+        val http = OkHttpClient()
+        val areas = RoutesRepository(http).regions().countries.flatMap { it.states }.flatMap { it.areas }
+        for (slug in listOf("garibaldi-provincial-park", "banff-national-park")) {
+            val a = areas.first { it.slug == slug }
+            val plan = AreaPlan.park(a.bbox!!, emptyList())
+            for (url in listOf(StyleLoader.BASEMAP_URL, StyleLoader.ROUTES_URL)) {
+                val src = Counting(HttpRangeSource(url, http))
+                val archive = Pmtiles(src) { null }
+                var tiles = 0
+                var bytes = 0L
+                for ((z, c) in plan.vector.toSortedMap()) {
+                    archive.rawTiles(z, c.toList()).values.forEach { tiles++; bytes += it.data.size }
+                }
+                println("$slug ${url.substringAfterLast('/')}: ${plan.vectorCount} planned, $tiles tiles (${megabytes(bytes)}) in ${src.reads} reads")
+                // Each zoom's tiles in a few reads (and the directories'), not one a tile.
+                if (url == StyleLoader.ROUTES_URL) assertTrue("${src.reads} reads for $tiles tiles", src.reads.get() < 60)
+            }
+        }
+    }
 }
