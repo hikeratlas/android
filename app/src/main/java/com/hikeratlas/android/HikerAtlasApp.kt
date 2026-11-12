@@ -11,6 +11,7 @@ import com.hikeratlas.android.elevation.NlDemSource
 import com.hikeratlas.android.pmtiles.TileServer
 import com.hikeratlas.android.pmtiles.Offline
 import com.hikeratlas.android.offline.OfflineStore
+import com.hikeratlas.android.offline.MapConnectivity
 import com.hikeratlas.android.offline.OfflineAreas
 import com.hikeratlas.android.offline.OfflineHost
 import com.hikeratlas.android.pmtiles.HttpRangeSource
@@ -86,6 +87,8 @@ class HikerAtlasApp : Application(), RecorderHost, OfflineHost {
             .readTimeout(30, TimeUnit.SECONDS)
             .build()
         MapLibre.getInstance(this)
+        // Offline areas answer MapLibre's requests with no network too.
+        MapConnectivity.install(this)
         // MapLibre's own requests (tiles, glyphs, sprites) go through this
         // client, so TileServer can answer the rewritten pmtiles sources.
         HttpRequestUtil.setOkHttpClient(
