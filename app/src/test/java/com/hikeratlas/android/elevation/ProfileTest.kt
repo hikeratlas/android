@@ -138,4 +138,49 @@ class ProfileTest {
         assertEquals(0f, e[0], 0f)
         assertEquals(100.5f, e[1], 0f)
     }
+
+    /**
+     * A 200 km track (a flight) crossed ~125 z14 tiles, each kept for good as
+     * a 1 MB grid: recording ran out of memory, and so did opening it. A long
+     * line now reads coarser tiles, and only so many are kept.
+     */
+    @Test
+    fun aLongTrackReadsFewTilesAndKeepsFewer() {
+        val fetched = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+        val dem = object : ElevationProfiler.DemSource {
+            override val minZoom = 0
+            override val maxZoom = 14
+            override fun tile(z: Int, x: Int, y: Int): FloatArray {
+                fetched += "$z/$x/$y"
+                return FloatArray(ElevationProfiler.SIZE * ElevationProfiler.SIZE) { 500f + (x % 3) * 100f }
+            }
+        }
+        val prof = profiler(dem)
+        // Vancouver to near Kamloops: ~200 km east, as the crow (or plane) flies.
+        val line = (0..400).map { listOf(-123.1 + it * 0.007, 49.3 + it * 0.0015) }
+        val p = prof.profile(line)
+        assertTrue("${p.length} m", p.length > 190_000)
+        assertTrue("read ${fetched.size} tiles", fetched.size <= ElevationProfiler.MAX_TILES)
+        assertTrue("kept ${prof.cachedGrids()}", prof.cachedGrids() <= ElevationProfiler.MAX_CACHED)
+        // Not 20,000 samples: a few thousand at most.
+        assertTrue("${p.distances.size} samples", p.distances.size <= ElevationProfiler.MAX_SAMPLES + 2)
+
+        // And again, as recording does every 30 s: still bounded.
+        repeat(3) { prof.profile(line) }
+        assertTrue("kept ${prof.cachedGrids()}", prof.cachedGrids() <= ElevationProfiler.MAX_CACHED)
+    }
+
+    @Test
+    fun aHikeStillReadsTheFinestTiles() {
+        val zooms = java.util.concurrent.ConcurrentHashMap.newKeySet<Int>()
+        val dem = object : ElevationProfiler.DemSource {
+            override val minZoom = 0
+            override val maxZoom = 14
+            override fun tile(z: Int, x: Int, y: Int): FloatArray { zooms += z; return FloatArray(512 * 512) { 100f } }
+        }
+        val p = profiler(dem).profile(listOf(listOf(-123.0, 50.0), listOf(-122.9, 50.05)))
+        assertEquals(setOf(14), zooms)
+        // A 10 m step, as before.
+        assertEquals(10.0, p.distances[1], 1e-9)
+    }
 }

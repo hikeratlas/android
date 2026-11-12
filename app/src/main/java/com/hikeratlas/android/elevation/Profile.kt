@@ -44,7 +44,13 @@ class ElevationProfiler(private val sources: List<DemSource>) {
     /** A tile's elevations; a stand-in (a coarser tile, as a finer one failed) is used only [until] then. */
     private class Grid(val z: Int, val x: Int, val y: Int, val h: FloatArray, val until: Long = Long.MAX_VALUE)
 
-    private val grids = HashMap<Long, Grid>()
+    // Least recently used first out: each grid is 1 MB.
+    private val grids = object : LinkedHashMap<Long, Grid>(MAX_CACHED, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Long, Grid>) = size > MAX_CACHED
+    }
+
+    /** How many tiles' grids are kept now. */
+    fun cachedGrids(): Int = synchronized(grids) { grids.size }
 
     /**
      * Samples every [step] metres. Climbs and descents count only once they
@@ -52,14 +58,28 @@ class ElevationProfiler(private val sources: List<DemSource>) {
      */
     fun profile(line: List<List<Double>>, step: Double = 10.0, threshold: Double = 10.0): Profile {
         require(line.size >= 2) { "a line needs two points" }
-        val samples = resample(line, step)
-        // Fetch the tiles the samples fall in all at once: one round trip's
-        // wait, not one each as the samples come to them.
-        val tiles = samples.map { (_, p) -> lngLatToTile(p[0], p[1], DEM_Z).let { (tx, ty) -> floor(tx).toInt() to floor(ty).toInt() } }.distinct()
-        if (tiles.size > 1) {
-            FETCHERS.invokeAll(tiles.map { (x, y) -> java.util.concurrent.Callable { runCatching { grid(x, y) } } })
+        // A long line (a flight, a long trip) is sampled further apart, so it
+        // isn't tens of thousands of samples.
+        var length = 0.0
+        for (i in 1 until line.size) length += haversine(line[i - 1], line[i])
+        val samples = resample(line, maxOf(step, length / MAX_SAMPLES))
+        // The finest zoom whose tiles along it number at most MAX_TILES: a
+        // hike reads z14; 200 km reads z11 or so, still ~40 m pixels. Each
+        // tile is a 1 MB grid, and a 200 km line was ~170 of them at z14.
+        var z = DEM_Z
+        var tiles = tilesAt(samples, z)
+        while (tiles.size > MAX_TILES && z > MIN_Z) {
+            z--
+            tiles = tilesAt(samples, z)
         }
-        val elevations = DoubleArray(samples.size) { elevationAt(samples[it].second) }
+        // Fetch them all at once (one round trip's wait, not one each), and
+        // hold them while measuring: the shared cache may let them go.
+        val held = java.util.concurrent.ConcurrentHashMap<Long, Grid>()
+        if (tiles.size > 1) {
+            FETCHERS.invokeAll(tiles.map { (x, y) -> java.util.concurrent.Callable { runCatching { held[key(z, x, y)] = grid(z, x, y) } } })
+        }
+        val gridAt = { x: Int, y: Int -> held.getOrPut(key(z, x, y)) { grid(z, x, y) } }
+        val elevations = DoubleArray(samples.size) { elevationAt(samples[it].second, z, gridAt) }
         var gain = 0.0
         var loss = 0.0
         var ref = elevations[0]
@@ -69,10 +89,17 @@ class ElevationProfiler(private val sources: List<DemSource>) {
         return Profile(DoubleArray(samples.size) { samples[it].first }, elevations, samples.map { it.second }, gain, loss)
     }
 
-    fun elevationAt(p: DoubleArray): Double {
-        val (tx, ty) = lngLatToTile(p[0], p[1], DEM_Z)
-        val g = grid(floor(tx).toInt(), floor(ty).toInt())
-        val scale = (1 shl (DEM_Z - g.z)).toDouble()
+    private fun tilesAt(samples: List<Pair<Double, DoubleArray>>, z: Int) =
+        samples.map { (_, p) -> lngLatToTile(p[0], p[1], z).let { (tx, ty) -> floor(tx).toInt() to floor(ty).toInt() } }.distinct()
+
+    private fun key(z: Int, x: Int, y: Int) = (z.toLong() shl 58) or (x.toLong() shl 29) or y.toLong()
+
+    fun elevationAt(p: DoubleArray): Double = elevationAt(p, DEM_Z) { x, y -> grid(DEM_Z, x, y) }
+
+    private fun elevationAt(p: DoubleArray, zoom: Int, gridAt: (Int, Int) -> Grid): Double {
+        val (tx, ty) = lngLatToTile(p[0], p[1], zoom)
+        val g = gridAt(floor(tx).toInt(), floor(ty).toInt())
+        val scale = (1 shl (zoom - g.z)).toDouble()
         // Pixel coordinates within the grid's tile, between pixel centres.
         val fx = (tx / scale - g.x) * SIZE - 0.5
         val fy = (ty / scale - g.y) * SIZE - 0.5
@@ -85,21 +112,22 @@ class ElevationProfiler(private val sources: List<DemSource>) {
     }
 
     /**
-     * The grid for a DEM_Z tile: the first source's, at the deepest zoom it
-     * has up to DEM_Z, falling back to ancestors where a tile is missing.
+     * The grid for a tile at [zoom] (DEM_Z for a hike): the first source's, at
+     * the deepest zoom it has up to it, falling back to ancestors where a tile
+     * is missing.
      *
      * A tile that can't be fetched (offline, say, past what an offline area
      * kept) falls back to an ancestor too, so a profile still comes from
      * what's on the phone. That stand-in is kept a minute, then the finer
      * tile is tried again.
      */
-    private fun grid(x: Int, y: Int): Grid {
-        val key = (x.toLong() shl 32) or y.toLong()
+    private fun grid(zoom: Int, x: Int, y: Int): Grid {
+        val key = key(zoom, x, y)
         synchronized(grids) { grids[key] }?.let { if (it.until > System.currentTimeMillis()) return it }
         var failed: java.io.IOException? = null
         for (s in sources) {
-            for (z in min(DEM_Z, s.maxZoom) downTo s.minZoom) {
-                val shift = DEM_Z - z
+            for (z in min(zoom, s.maxZoom) downTo s.minZoom) {
+                val shift = zoom - z
                 val h = try {
                     s.tile(z, x shr shift, y shr shift)
                 } catch (e: java.io.IOException) {
@@ -112,11 +140,23 @@ class ElevationProfiler(private val sources: List<DemSource>) {
                 return g
             }
         }
-        throw failed ?: java.io.IOException("no DEM tile for $DEM_Z/$x/$y")
+        throw failed ?: java.io.IOException("no DEM tile for $zoom/$x/$y")
     }
 
     companion object {
         const val DEM_Z = 14 // ~5 m pixels at 512 px: finer than the 10 m step
+
+        /** At most this many tiles a profile: a longer line reads coarser ones. */
+        const val MAX_TILES = 24
+
+        /** The coarsest zoom a long line is read at. */
+        const val MIN_Z = 8
+
+        /** At most this many tiles' grids kept (1 MB each). */
+        const val MAX_CACHED = 32
+
+        /** At most this many samples a profile: a longer line is sampled further apart. */
+        const val MAX_SAMPLES = 4000
 
         /** How long a coarser stand-in for a tile that failed is used before trying the tile again. */
         private const val STAND_IN_MS = 60_000L
