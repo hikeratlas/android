@@ -82,4 +82,20 @@ class SearchScreenTest {
         compose.onNode(hasSetTextAction()).performTextInput("tusk")
         compose.waitUntil(10_000) { compose.onAllNodesWithText("Search isn't available right now.").fetchSemanticsNodes().isNotEmpty() }
     }
+
+    /** A search with no results says so (#21), but not before it's back. */
+    @Test
+    fun noResultsSaysSo() {
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest) = MockResponse.Builder().body("[]").headersDelay(500, TimeUnit.MILLISECONDS).build()
+        }
+        server.start()
+        val api = SearchApi(OkHttpClient.Builder().proxy(java.net.Proxy.NO_PROXY).build(), server.url("/").toString())
+        compose.setContent { SearchScreen(api, RecentSearches(ApplicationProvider.getApplicationContext()), null, null, onPick = {}, onClose = {}) }
+        compose.onNode(hasSetTextAction()).performTextInput("zzqx")
+        // Out: not yet.
+        compose.waitUntil(5_000) { server.requestCount >= 1 }
+        assertEquals(0, compose.onAllNodesWithText("No matches for \u201czzqx\u201d").fetchSemanticsNodes().size)
+        compose.waitUntil(5_000) { compose.onAllNodesWithText("No matches for \u201czzqx\u201d").fetchSemanticsNodes().isNotEmpty() }
+    }
 }
