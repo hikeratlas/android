@@ -16,6 +16,7 @@ import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Text
 import com.hikeratlas.android.track.SavedScreen
+import com.hikeratlas.android.offline.MapLibreCache
 import androidx.compose.runtime.rememberCoroutineScope
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
@@ -70,6 +71,10 @@ fun AppScreen(app: HikerAtlasApp, link: Uri? = null, onLinkHandled: () -> Unit =
     }
     val scope = rememberCoroutineScope()
     var wifiOnly by remember { mutableStateOf(offline.wifiOnly) }
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val mapCache = remember { MapLibreCache(context.applicationContext) }
+    // Areas from an older build of the map offer Update.
+    LaunchedEffect(Unit) { offline.checkUpdates() }
     val tabs = Tab.entries.filter { it != Tab.Saved || library.tracks.isNotEmpty() || offline.areas.isNotEmpty() || tab == Tab.Saved }
     // A sheet on the map needs the room: the tabs step aside while it's open.
     var sheetOpen by remember { mutableStateOf(false) }
@@ -99,13 +104,27 @@ fun AppScreen(app: HikerAtlasApp, link: Uri? = null, onLinkHandled: () -> Unit =
                             offline.areas, wifiOnly,
                             onWifiOnly = { wifiOnly = it; offline.wifiOnly = it },
                             onRetry = { id -> scope.launch { offline.retry(id) } },
+                            updateAvailable = { offline.updateAvailable(it) },
+                            onUpdate = { id -> scope.launch { offline.update(id) } },
                             onDelete = { id -> scope.launch { offline.delete(id) } },
                         )
                     },
                 )
             }
         }
-        if (tab == Tab.You) Box(Modifier.fillMaxSize().padding(bottom = barHeight)) { YouScreen() }
+        if (tab == Tab.You) {
+            Box(Modifier.fillMaxSize().padding(bottom = barHeight)) {
+                YouScreen(
+                    StorageActions(
+                        areaCount = { offline.areas.size },
+                        offlineBytes = { offline.bytes() },
+                        mapCacheBytes = { mapCache.bytes() },
+                        deleteAll = { offline.deleteAll() },
+                        clearMapCache = { mapCache.clear() },
+                    ),
+                )
+            }
+        }
         AnimatedVisibility(
             visible = tabsShown,
             enter = slideInVertically { it },

@@ -47,10 +47,12 @@ class OfflineStore(context: Context, name: String? = "offline.db") :
             )""",
         )
         addAreas(db)
+        db.execSQL("ALTER TABLE areas ADD COLUMN build TEXT")
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
         if (oldVersion < 2) addAreas(db)
+        if (oldVersion < 3) db.execSQL("ALTER TABLE areas ADD COLUMN build TEXT")
     }
 
     override fun onConfigure(db: SQLiteDatabase) = db.setForeignKeyConstraintsEnabled(true)
@@ -106,6 +108,8 @@ class OfflineStore(context: Context, name: String? = "offline.db") :
         val total: Int,
         val bytes: Long,
         val error: String?,
+        /** The archives' builds its tiles came from ([OfflineAreas.Build.key]); null before it's known. */
+        val build: String? = null,
     ) {
         val ready get() = state == READY
     }
@@ -204,6 +208,15 @@ class OfflineStore(context: Context, name: String? = "offline.db") :
         )
     }
 
+    fun setAreaBuild(id: Long, build: String) {
+        writableDatabase.update("areas", ContentValues().apply { put("build", build) }, "id = ?", arrayOf(id.toString()))
+    }
+
+    /** Gives the disk back after deleting (SQLite otherwise keeps the freed pages). */
+    fun vacuum() {
+        writableDatabase.execSQL("VACUUM")
+    }
+
     /** Deletes an area, and the tiles and files no other area uses. */
     fun deleteArea(area: Long) {
         val db = writableDatabase
@@ -234,6 +247,7 @@ class OfflineStore(context: Context, name: String? = "offline.db") :
             getLong(col("id")), getString(col("kind")), getString(col("ref")), getString(col("name")), getLong(col("created")),
             getString(col("state")), getInt(col("done")), getInt(col("total")), getLong(col("bytes")),
             col("error").let { if (isNull(it)) null else getString(it) },
+            col("build").let { if (isNull(it)) null else getString(it) },
         )
     }
 
@@ -293,7 +307,7 @@ class OfflineStore(context: Context, name: String? = "offline.db") :
     ).use { c -> if (c.moveToFirst()) c.getLong(0) else 0 }
 
     companion object {
-        private const val VERSION = 2
+        private const val VERSION = 3
 
         const val PARK = "park"
         const val HIKE = "hike"

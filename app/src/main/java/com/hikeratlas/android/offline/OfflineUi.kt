@@ -138,6 +138,9 @@ fun LazyListScope.offlineAreasSection(
     onWifiOnly: (Boolean) -> Unit,
     onRetry: (Long) -> Unit,
     onDelete: (Long) -> Unit,
+    /** Whether an area's from an older build of the map, and offers Update. */
+    updateAvailable: (OfflineStore.Area) -> Boolean = { false },
+    onUpdate: (Long) -> Unit = {},
 ) {
     if (areas.isEmpty()) return
     item(key = "offline-header") {
@@ -147,18 +150,25 @@ fun LazyListScope.offlineAreasSection(
             Switch(wifiOnly, onWifiOnly, modifier = Modifier.padding(start = 8.dp))
         }
     }
-    items(areas, key = { "area-${it.id}" }) { a -> AreaRow(a, wifiOnly, onRetry, onDelete) }
+    items(areas, key = { "area-${it.id}" }) { a -> AreaRow(a, wifiOnly, updateAvailable(a), onRetry, onUpdate, onDelete) }
 }
 
 @Composable
-private fun AreaRow(a: OfflineStore.Area, wifiOnly: Boolean, onRetry: (Long) -> Unit, onDelete: (Long) -> Unit) {
+private fun AreaRow(
+    a: OfflineStore.Area,
+    wifiOnly: Boolean,
+    outdated: Boolean,
+    onRetry: (Long) -> Unit,
+    onUpdate: (Long) -> Unit,
+    onDelete: (Long) -> Unit,
+) {
     var deleting by remember { mutableStateOf(false) }
     HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
     Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).padding(start = 20.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f).padding(vertical = 8.dp)) {
             Text(a.name, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
             Text(
-                areaStatus(a, wifiOnly), style = MaterialTheme.typography.bodySmall,
+                areaStatus(a, wifiOnly) + if (outdated) " · Map updated since" else "", style = MaterialTheme.typography.bodySmall,
                 color = if (a.state == OfflineStore.FAILED) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
             )
             if (a.state == OfflineStore.DOWNLOADING && a.total > 0) {
@@ -166,6 +176,7 @@ private fun AreaRow(a: OfflineStore.Area, wifiOnly: Boolean, onRetry: (Long) -> 
             }
         }
         if (a.state == OfflineStore.FAILED) TextButton(onClick = { onRetry(a.id) }) { Text("Retry") }
+        if (outdated) TextButton(onClick = { onUpdate(a.id) }) { Text("Update") }
         IconButton(onClick = { deleting = true }) { Icon(Icons.Filled.Delete, contentDescription = "Delete ${a.name}") }
     }
     if (deleting) {

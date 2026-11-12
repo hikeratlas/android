@@ -99,4 +99,17 @@ class AreaDownloaderTest {
         downloader.download(store.area(OfflineStore.PARK, "1", "T").id, plan)
         assertEquals(1 * AreaDownloader.DEM_TILE_BYTES, downloader.estimate(plan))
     }
+
+    /** An update to a new build fetches the map again, but not the terrain (it doesn't change with our builds). */
+    @Test
+    fun anUpdateRefetchesTheMapNotTheTerrain() = runBlocking {
+        val area = store.area(OfflineStore.PARK, "1", "T").id
+        downloader.download(area, plan)
+        val reads = basemapSrc.reads + routesSrc.reads
+        val demRequests = demCalls.size
+        downloader.download(area, plan, refetchVector = true)
+        assertTrue(basemapSrc.reads + routesSrc.reads > reads)
+        // Only the terrain tile it hasn't got is asked for.
+        assertEquals(listOf(Triple(2, 1, 0)), demCalls.drop(demRequests))
+    }
 }
