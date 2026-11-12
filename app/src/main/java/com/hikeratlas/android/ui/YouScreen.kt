@@ -14,7 +14,12 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.layout.size
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Icon
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -59,14 +64,10 @@ fun YouScreen(storage: StorageActions? = null) {
         Text("You", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 4.dp, top = 8.dp))
         if (storage != null) StorageCard(storage)
         Card("About") {
-            Item("Blog") { openUrl(context, "$SITE/blog") }
-            Item("Hiker Atlas on the web") { openUrl(context, SITE) }
+            Item("hikeratlas.com", external = true) { openUrl(context, SITE) }
             Item("Source code") { openUrl(context, "https://github.com/hikeratlas") }
             Item("Map credits", "OpenStreetMap contributors, Mapterhorn and others") { credits = true }
-            Row(Modifier.fillMaxWidth().heightIn(min = 52.dp).padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text("Version", modifier = Modifier.weight(1f))
-                Text(BuildConfig.VERSION_NAME, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
+            VersionRow(BuildConfig.COMMIT, BuildConfig.COMMIT_DATE) { openUrl(context, it) }
         }
     }
     if (credits) {
@@ -163,11 +164,52 @@ private fun Card(title: String, content: @Composable () -> Unit) {
     }
 }
 
+/** The open-in-browser icon, after a link that leaves the app. */
 @Composable
-private fun Item(title: String, subtitle: String? = null, onClick: () -> Unit) {
+private fun ExternalIcon() {
+    Icon(
+        Icons.AutoMirrored.Filled.OpenInNew, contentDescription = "Opens in browser",
+        tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(start = 8.dp).size(18.dp),
+    )
+}
+
+/**
+ * The build: its commit's date and short hash, the hash linking to the
+ * commit. [commit] is empty for a build made outside git.
+ */
+@Composable
+internal fun VersionRow(commit: String, date: String, open: (String) -> Unit) {
     HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
-    Column(Modifier.fillMaxWidth().clickable(onClick = onClick).heightIn(min = 52.dp).padding(horizontal = 16.dp, vertical = 10.dp)) {
-        Text(title, style = MaterialTheme.typography.bodyLarge)
-        if (subtitle != null) Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    Row(Modifier.fillMaxWidth().heightIn(min = 52.dp).padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text("Version", modifier = Modifier.weight(1f))
+        if (commit.isEmpty()) {
+            Text("Unknown", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        } else {
+            if (date.isNotEmpty()) Text("$date · ", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Row(
+                Modifier.clickable { open("$SOURCE/commit/$commit") }.heightIn(min = 48.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(commit.take(7), color = MaterialTheme.colorScheme.primary, fontFamily = FontFamily.Monospace)
+                ExternalIcon()
+            }
+        }
+    }
+}
+
+private const val SOURCE = "https://github.com/hikeratlas/android"
+
+@Composable
+private fun Item(title: String, subtitle: String? = null, external: Boolean = false, onClick: () -> Unit) {
+    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+    Row(
+        Modifier.fillMaxWidth().clickable(onClick = onClick).heightIn(min = 52.dp).padding(horizontal = 16.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f, fill = false)) {
+            Text(title, style = MaterialTheme.typography.bodyLarge)
+            if (subtitle != null) Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        if (external) ExternalIcon()
     }
 }
