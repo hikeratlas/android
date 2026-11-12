@@ -21,6 +21,9 @@ import kotlinx.coroutines.withContext
 import java.io.IOException
 import java.util.concurrent.TimeUnit
 
+/** An area can't be planned (not a network error): trying again won't help. */
+class CantPlan(message: String) : Exception(message)
+
 /** Whatever holds the app's [OfflineAreas] (the app; a test's own). */
 interface OfflineHost {
     val offlineAreas: OfflineAreas
@@ -137,13 +140,15 @@ class OfflineAreas(
             AreaPlan.overview(listOf(h.minLon, h.minLat, h.maxLon, h.maxLat))
         }
         OfflineStore.PARK -> {
+            // By any of the area's park ids: Pacific Rim NPR's area is three
+            // OSM parks, and the West Coast Trail's is one of the others.
             val box = routes.regions().countries.flatMap { it.states }.flatMap { it.areas }
-                .firstOrNull { it.id == t.ref }?.bbox ?: throw IOException("No box for park ${t.ref}")
+                .firstOrNull { it.covers(t.ref) }?.bbox ?: throw CantPlan("The map has no outline for ${t.name}.")
             AreaPlan.park(box, routes.park(t.ref)?.let(::routeLines).orEmpty())
         }
         OfflineStore.HIKE -> {
-            val doc = routes.park(t.ref.substringBefore('/')) ?: throw IOException("No park for ${t.ref}")
-            val line = lookup(doc, t.ref)?.route?.line ?: throw IOException("No hike ${t.ref}")
+            val doc = routes.park(t.ref.substringBefore('/')) ?: throw CantPlan("${t.name}'s park has no routes any more.")
+            val line = lookup(doc, t.ref)?.route?.line ?: throw CantPlan("${t.name} has changed since; try it from its sheet again.")
             AreaPlan.hike(line)
         }
         else -> throw IllegalArgumentException(t.kind)

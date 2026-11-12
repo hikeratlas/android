@@ -43,6 +43,8 @@ class AreaWorkerTest {
     private val app get() = ApplicationProvider.getApplicationContext<OfflineTestApp>()
     private val server = MockWebServer()
     private lateinit var store: OfflineStore
+    /** The routes index answers 500. */
+    @Volatile private var failing = false
     /** The archives' builds, as HEAD requests would say. */
     private var build = OfflineAreas.Build("\"b1\"", "\"r1\"")
 
@@ -65,9 +67,10 @@ class AreaWorkerTest {
             override fun dispatch(request: RecordedRequest): MockResponse = when (request.url.encodedPath) {
                 "/regions.json" -> MockResponse.Builder().body(
                     """{"countries":[{"name":"Canada","slug":"canada","states":[{"name":"BC","slug":"bc","areas":[
-                        {"id":"1","name":"Test Park","slug":"test-park","bbox":[${box.joinToString(",")}]}]}]}]}""",
+                        {"id":"1","name":"Test Park","slug":"test-park","ids":["1","5"],"bbox":[${box.joinToString(",")}]}]}]}]}""",
                 ).build()
-                "/index.json" -> MockResponse.Builder().body("""{"bundle":"b.bin","parks":{"1":[0,${gz.size}]}}""").build()
+                "/index.json" -> if (failing) MockResponse.Builder().code(500).build()
+                    else MockResponse.Builder().body("""{"bundle":"b.bin","parks":{"1":[0,${gz.size}],"5":[0,${gz.size}]}}""").build()
                 "/b.bin" -> MockResponse.Builder().code(206).body(Buffer().write(gz)).build()
                 else -> MockResponse.Builder().code(404).build()
             }
@@ -168,5 +171,36 @@ class AreaWorkerTest {
         assertEquals(null, store.tile("https://x/basemap.pmtiles", 0, 0, 0))
         assertNotNull(store.resource("https://x/index.json"))
         assertEquals(10L, app.offlineAreas.bytes())
+    }
+
+    /** Pacific Rim's area is three parks; its West Coast Trail is one of the others (#23). */
+    @Test
+    fun aParkIsFoundByAnyOfItsAreasIds() = runBlocking {
+        val area = store.area(OfflineStore.PARK, "5", "West Coast Trail unit")
+        val w = TestListenableWorkerBuilder<AreaWorker>(app).setInputData(workDataOf(AreaWorker.AREA to area.id)).build()
+        assertEquals(ListenableWorker.Result.success(), w.doWork())
+        assertTrue(store.areaById(area.id)!!.ready)
+    }
+
+    @Test
+    fun aParkThatCantBePlannedFailsAtOnceSayingWhy() = runBlocking {
+        val area = store.area(OfflineStore.PARK, "999", "Nowhere Park")
+        val w = TestListenableWorkerBuilder<AreaWorker>(app).setInputData(workDataOf(AreaWorker.AREA to area.id)).build()
+        assertEquals(ListenableWorker.Result.failure(), w.doWork())
+        val a = store.areaById(area.id)!!
+        assertEquals(OfflineStore.FAILED, a.state)
+        assertEquals("The map has no outline for Nowhere Park.", a.error)
+    }
+
+    /** A network error says it's trying again, and why: not "waiting for Wi-Fi" (#24). */
+    @Test
+    fun aNetworkErrorSaysItsRetrying() = runBlocking {
+        failing = true
+        val area = store.area(OfflineStore.HIKE, "1/day/0", "B from A")
+        val w = TestListenableWorkerBuilder<AreaWorker>(app).setInputData(workDataOf(AreaWorker.AREA to area.id)).build()
+        assertEquals(ListenableWorker.Result.retry(), w.doWork())
+        val a = store.areaById(area.id)!!
+        assertEquals(OfflineStore.RETRYING, a.state)
+        assertTrue(a.error!!, a.error!!.contains("500"))
     }
 }

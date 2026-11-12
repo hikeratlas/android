@@ -123,12 +123,34 @@ fun DownloadDialog(
     )
 }
 
-/** An area's state, as the Saved list says it. */
-fun areaStatus(a: OfflineStore.Area, wifiOnly: Boolean): String = when (a.state) {
+/** The network now, as far as a waiting download cares. */
+enum class Network { UNMETERED, METERED_WIFI, OTHER }
+
+/** The phone's network now (for why a download is waiting). */
+fun currentNetwork(context: android.content.Context): Network {
+    val cm = context.getSystemService(android.net.ConnectivityManager::class.java) ?: return Network.OTHER
+    val caps = cm.getNetworkCapabilities(cm.activeNetwork) ?: return Network.OTHER
+    return when {
+        caps.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_NOT_METERED) -> Network.UNMETERED
+        caps.hasTransport(android.net.NetworkCapabilities.TRANSPORT_WIFI) -> Network.METERED_WIFI
+        else -> Network.OTHER
+    }
+}
+
+/**
+ * An area's state, as the Saved list says it. A waiting download says why:
+ * on Wi-Fi only, a Wi-Fi network set as metered never counts as Wi-Fi.
+ */
+fun areaStatus(a: OfflineStore.Area, wifiOnly: Boolean, network: Network = Network.OTHER): String = when (a.state) {
     OfflineStore.READY -> megabytes(a.bytes)
     OfflineStore.DOWNLOADING -> if (a.total > 0) "Downloading · ${a.done * 100 / a.total}%" else "Downloading"
+    OfflineStore.RETRYING -> "Trying again soon" + (a.error?.let { ": $it" } ?: "")
     OfflineStore.FAILED -> "Couldn't download" + (a.error?.let { ": $it" } ?: "")
-    else -> if (wifiOnly) "Waiting for Wi-Fi" else "Waiting to download"
+    else -> when {
+        !wifiOnly || network == Network.UNMETERED -> "Waiting to start"
+        network == Network.METERED_WIFI -> "Waiting for Wi-Fi: this Wi-Fi is set as metered (or turn off Wi-Fi only)"
+        else -> "Waiting for Wi-Fi"
+    }
 }
 
 /** The Saved tab's offline areas: each with its size or progress, Retry and Delete; and Wi-Fi only. */
@@ -150,13 +172,19 @@ fun LazyListScope.offlineAreasSection(
             Switch(wifiOnly, onWifiOnly, modifier = Modifier.padding(start = 8.dp))
         }
     }
-    items(areas, key = { "area-${it.id}" }) { a -> AreaRow(a, wifiOnly, updateAvailable(a), onRetry, onUpdate, onDelete) }
+    items(areas, key = { "area-${it.id}" }) { a ->
+        val context = LocalContext.current
+        // Asked afresh as the list refreshes (it does each second while one waits).
+        val network = if (a.state == OfflineStore.QUEUED) currentNetwork(context) else Network.OTHER
+        AreaRow(a, wifiOnly, network, updateAvailable(a), onRetry, onUpdate, onDelete)
+    }
 }
 
 @Composable
 private fun AreaRow(
     a: OfflineStore.Area,
     wifiOnly: Boolean,
+    network: Network,
     outdated: Boolean,
     onRetry: (Long) -> Unit,
     onUpdate: (Long) -> Unit,
@@ -168,7 +196,7 @@ private fun AreaRow(
         Column(Modifier.weight(1f).padding(vertical = 8.dp)) {
             Text(a.name, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
             Text(
-                areaStatus(a, wifiOnly) + if (outdated) " · Map updated since" else "", style = MaterialTheme.typography.bodySmall,
+                areaStatus(a, wifiOnly, network) + if (outdated) " · Map updated since" else "", style = MaterialTheme.typography.bodySmall,
                 color = if (a.state == OfflineStore.FAILED) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
             )
             if (a.state == OfflineStore.DOWNLOADING && a.total > 0) {
