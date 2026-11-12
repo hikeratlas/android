@@ -119,6 +119,8 @@ fun PanelHeader(
     onScrub: (DoubleArray?) -> Unit = {},
     /** Downloading a park or hike for offline use, from its sheet; none where it's not offered. */
     offline: OfflineActions? = null,
+    /** A park's country or state, tapped in its crumbs. */
+    onCrumb: (Crumb) -> Unit = {},
 ) {
     val context = LocalContext.current
     Column(Modifier.fillMaxWidth().padding(bottom = 12.dp)) {
@@ -148,7 +150,27 @@ fun PanelHeader(
                     TextButton(onClick = p.retry) { Text("Try again") }
                 }
             }
-            is Panel.RouteList -> {
+            is Panel.RouteList -> if (p.doc != null) {
+                // A park: its crumbs and actions on one row, its name below at the sheet's width.
+                CrumbsRow(p.crumbs, onCrumb) {
+                    if (offline != null && p.parkId != null) {
+                        OfflineButton(OfflineAreas.Target(OfflineStore.PARK, p.parkId, p.heading), offline)
+                    }
+                    if (p.shareUrl != null) {
+                        IconButton(onClick = { share(context, p.heading, p.shareUrl) }) {
+                            Icon(Icons.Filled.Share, contentDescription = "Share")
+                        }
+                    }
+                    IconButton(onClick = model::close) { Icon(Icons.Filled.Close, contentDescription = "Close") }
+                }
+                Text(
+                    p.heading, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold,
+                    maxLines = if (full) 3 else 2, overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(horizontal = 20.dp),
+                )
+                Column(Modifier.padding(horizontal = 20.dp)) { AboutLine(p.about) }
+                Box(Modifier.padding(top = 6.dp)) { ParkTabs(p.doc, model) }
+            } else {
                 TitleRow(p.heading, full, model::close, actions = {
                     if (offline != null && p.parkId != null) {
                         OfflineButton(OfflineAreas.Target(OfflineStore.PARK, p.parkId, p.heading), offline)
@@ -262,7 +284,9 @@ fun hasDetailBody(d: Panel.Detail) = true
 @Composable
 fun PanelBody(model: PanelModel, onScrub: (DoubleArray?) -> Unit) {
     when (val p = model.panel) {
-        is Panel.RouteList -> {
+        is Panel.RouteList -> if (p.doc != null) {
+            ParkBody(p, p.doc, model)
+        } else {
             if (p.items.isEmpty()) {
                 Text("No curated hikes here yet.", color = MUTED, modifier = Modifier.padding(20.dp))
                 return

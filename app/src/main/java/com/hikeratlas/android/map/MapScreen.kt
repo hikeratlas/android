@@ -581,7 +581,11 @@ fun MapScreen(
                 // A hike with nothing below its peek stays at the peek.
                 halfAndFull = panel is Panel.RouteList || panel is Panel.Trail || (panel is Panel.Detail && hasDetailBody(panel)),
                 header = {
-                    PanelHeader(model, full = sheet.settledValue == Stop.Full, onScrub = { p -> controller?.showHover(p) }, offline = offlineActions)
+                    PanelHeader(
+                        model, full = sheet.settledValue == Stop.Full, onScrub = { p -> controller?.showHover(p) }, offline = offlineActions,
+                        // Until Explore lists a state's parks: the map moves to it.
+                        onCrumb = { c -> c.bbox?.let { b -> model.close(); controller?.fitBox(b[0], b[1], b[2], b[3], 0) } },
+                    )
                 },
                 body = { PanelBody(model) { p -> controller?.showHover(p) } },
             )

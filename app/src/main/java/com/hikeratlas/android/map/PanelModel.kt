@@ -6,6 +6,8 @@ import androidx.compose.runtime.setValue
 import com.hikeratlas.android.elevation.ElevationProfiler
 import com.hikeratlas.android.pmtiles.Pmtiles
 import com.hikeratlas.android.routes.RouteReports
+import com.hikeratlas.android.routes.Sort
+import com.hikeratlas.android.routes.Filters
 import com.hikeratlas.android.routes.reportsKey
 import com.hikeratlas.android.routes.BundleIndex
 import com.hikeratlas.android.routes.km
@@ -61,6 +63,12 @@ sealed interface Panel {
         /** Set when this is a park's list. */
         val parkId: String? = null,
         val shareUrl: String? = null,
+        /** A park's routes: its sheet (tabs, filters, cards) is drawn from them. */
+        val doc: ParkDoc? = null,
+        /** Its routes' trip reports, by route key, once loaded. */
+        val reports: Map<String, RouteReports>? = null,
+        /** Where the park is: its country and state, for the sheet's crumbs. */
+        val crumbs: List<Crumb> = emptyList(),
     ) : Panel
 
     /** An OSM trail picked in search: its length, elevation, and the park's hikes that use it. */
@@ -93,6 +101,12 @@ sealed interface Panel {
     ) : Panel
 }
 
+/** A country or state above a park, and its box. */
+data class Crumb(val name: String, val bbox: List<Double>?)
+
+/** A park sheet's tabs. */
+enum class ParkTab { Day, Camps, Multi, Stops }
+
 /** A hike's title and summary line, as known before its park's routes are loaded. */
 data class HikeHint(val title: String, val meta: String?)
 
@@ -121,6 +135,11 @@ class PanelModel(
 
     /** The section a park's list shows (its chips), shared by the sheet's header and body. */
     var section by mutableStateOf<String?>(null)
+
+    /** A park sheet's tab, filters and order: kept going to a hike and back, reset for another park. */
+    var parkTab by mutableStateOf(ParkTab.Day)
+    var filters by mutableStateOf(Filters())
+    var sort by mutableStateOf(Sort.Best)
 
     /** A route the map should fit into the space the sheet leaves, once it can. */
     var fitPending by mutableStateOf(false)
@@ -165,9 +184,42 @@ class PanelModel(
                 val parkAbout = ParkAbout.of(doc.park?.operator, doc.park?.website) ?: about
                 val items = itemsFromPark(doc)
                 section = items.firstOrNull()?.section
-                Panel.RouteList(doc.park?.name ?: name, items, parkAbout, parkId, parkUrl(idx(), parkId))
+                parkTab = ParkTab.Day
+                filters = Filters()
+                sort = Sort.Best
+                val idx = idx()
+                Panel.RouteList(
+                    doc.park?.name ?: name, items, parkAbout, parkId, parkUrl(idx, parkId),
+                    doc = doc, crumbs = crumbsFor(idx.paths[parkId]),
+                )
             }
         }
+        // Then its trip reports, for the cards' counts and the filter.
+        val loading = job
+        reportsJob?.cancel()
+        reportsJob = scope.launch {
+            loading?.join()
+            val list = panel as? Panel.RouteList ?: return@launch
+            val doc = list.doc ?: return@launch
+            val reps = try {
+                routes.parkReports(doc.park?.id ?: parkId)
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                return@launch
+            }
+            val now = panel as? Panel.RouteList
+            if (now?.parkId == list.parkId) panel = now!!.copy(reports = reps)
+        }
+    }
+
+    /** "<country>/<state>/<park>" as names and boxes, from the build's regions. */
+    private suspend fun crumbsFor(path: String?): List<Crumb> {
+        val parts = path?.split('/') ?: return emptyList()
+        val regions = try { routes.regions() } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) { return emptyList() }
+        val country = regions.countries.firstOrNull { it.slug == parts.getOrNull(0) } ?: return emptyList()
+        val state = country.states.firstOrNull { it.slug == parts.getOrNull(1) }
+        return listOfNotNull(Crumb(country.name, country.bbox), state?.let { Crumb(it.name, it.bbox) })
     }
 
     /**
