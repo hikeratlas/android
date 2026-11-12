@@ -241,3 +241,49 @@ fun whyWords(why: List<Pair<String, Double>>, r: Route): List<String> =
         .sortedByDescending { it.second }
         .map { (k, _) -> WHY_BARS.getValue(k).second(r) }
         .filter { it.isNotEmpty() }
+
+/** Something a route passes, numbered for the chart, the map and the list. */
+data class AlongFeature(val n: Int, val kind: String, val name: String, val km: Double? = null, val at: LngLat? = null)
+
+/**
+ * What a route passes: from [Route.alongs] (in order, with where), else its
+ * passes (builds before routes#170). Unnamed ones and repeats left out; at
+ * most 12.
+ */
+fun alongOf(r: Route): List<AlongFeature> {
+    val seen = HashSet<String>()
+    fun ok(n: String) = n.isNotEmpty() && !n.equals("unnamed", ignoreCase = true) && seen.add(n)
+    val alongs = r.alongs
+    val out = if (alongs.isNotEmpty()) {
+        alongs.filter { ok(it.name) }.map { AlongFeature(0, it.kind, it.name, it.km, it.at) }
+    } else {
+        passes(r).flatMap { (k, names) -> names.filter(::ok).map { AlongFeature(0, k, it) } }
+    }
+    return out.take(12).mapIndexed { i, f -> f.copy(n = i + 1) }
+}
+
+/** What a feature is, in a word. */
+val KIND_NAMES = mapOf(
+    "lake" to "Lake", "peak" to "Summit", "waterfall" to "Waterfall", "glacier" to "Glacier", "pass" to "Pass",
+    "viewpoint" to "Viewpoint", "hut" to "Hut", "cave" to "Cave", "arch" to "Arch", "spring" to "Spring",
+    "saddle" to "Saddle", "camp" to "Camp",
+)
+
+fun kindName(kind: String) = KIND_NAMES[kind] ?: kind.replace('_', ' ')
+
+/** "A, B and C". */
+fun listWords(xs: List<String>): String =
+    if (xs.size <= 1) xs.joinToString("") else xs.dropLast(1).joinToString(", ") + " and " + xs.last()
+
+/** A curated route as GPX, for a GPS or phone app (the website's gpx). */
+fun routeGpx(name: String, line: List<LngLat>): String {
+    fun esc(s: String) = s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\"", "&quot;")
+    val pts = line.joinToString("\n") { String.format(java.util.Locale.ROOT, "<trkpt lat=\"%.6f\" lon=\"%.6f\"/>", it[1], it[0]) }
+    return """<?xml version="1.0" encoding="UTF-8"?>
+<gpx version="1.1" creator="Hiker Atlas" xmlns="http://www.topografix.com/GPX/1/1">
+<trk><name>${esc(name)}</name><trkseg>
+$pts
+</trkseg></trk>
+</gpx>
+"""
+}

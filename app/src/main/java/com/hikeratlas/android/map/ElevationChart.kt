@@ -32,6 +32,9 @@ import com.hikeratlas.android.routes.metres
 /** A campsite (or other mark) along the route, at metres from its start. */
 data class Mark(val at: Double, val label: String)
 
+/** Something the route passes, numbered as in the sheet's list, at metres from its start. */
+data class Pin(val at: Double, val n: Int)
+
 private val LINE = Color(0xFFA21CAF)
 private val FILL = Color(0x1FC026D3)
 private val GRID = Color(0xFFE3E9E5)
@@ -49,6 +52,7 @@ fun ElevationChart(
     onScrub: (index: Int?) -> Unit,
     modifier: Modifier = Modifier,
     height: androidx.compose.ui.unit.Dp = 140.dp,
+    pins: List<Pin> = emptyList(),
 ) {
     val measurer = rememberTextMeasurer()
     var scrub by remember(profile) { mutableStateOf<Int?>(null) }
@@ -126,6 +130,24 @@ fun ElevationChart(
                 androidx.compose.ui.geometry.CornerRadius(3.dp.toPx()),
             )
             drawText(t, topLeft = at)
+        }
+
+        // What it passes: numbered pins on the line, as on the map.
+        val pinText = TextStyle(fontSize = 10.sp, color = Color.White, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
+        val r = 7.dp.toPx()
+        // Pins closer than a pin's width stack upward, so none hides another.
+        val placed = ArrayList<Offset>()
+        for (p in pins) {
+            val i = profile.distances.indexOfFirst { it >= p.at }.let { if (it < 0) profile.distances.size - 1 else it }
+            val px = x(p.at.coerceAtMost(length)).coerceIn(r, size.width - r)
+            var py = y(profile.elevations[i]).coerceIn(top + r, bottom - r)
+            while (placed.any { kotlin.math.abs(it.x - px) < 2 * r && kotlin.math.abs(it.y - py) < 2 * r }) py -= 2 * r + 1.dp.toPx()
+            py = py.coerceAtLeast(r)
+            placed += Offset(px, py)
+            drawCircle(Color.White, r + 1.5.dp.toPx(), Offset(px, py))
+            drawCircle(LINE, r, Offset(px, py))
+            val t = measurer.measure(p.n.toString(), pinText)
+            drawText(t, topLeft = Offset(px - t.size.width / 2f, py - t.size.height / 2f))
         }
 
         // The axes along the bottom, out of the line's way: 0 km, the

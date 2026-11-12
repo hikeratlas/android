@@ -81,6 +81,20 @@ class MapController(val map: MapLibreMap, private val density: Float) {
                 lineColor(ROUTE_COLOR), lineWidth(4f), lineCap(Property.LINE_CAP_ROUND), lineJoin(Property.LINE_JOIN_ROUND),
             ),
         )
+        // What the selected route passes, numbered as in its sheet.
+        s.addSource(GeoJsonSource(ALONG))
+        s.addLayer(
+            CircleLayer(ALONG, ALONG).withProperties(
+                circleRadius(9f), circleColor(ALONG_COLOR), circleStrokeColor("#ffffff"), circleStrokeWidth(2f),
+            ),
+        )
+        s.addLayer(
+            SymbolLayer("$ALONG-n", ALONG).withProperties(
+                textField(Expression.toString(Expression.get("n"))), textFont(arrayOf(LABEL_FONT)), textSize(11f),
+                textColor("#ffffff"), textAllowOverlap(true),
+                org.maplibre.android.style.layers.PropertyFactory.textIgnorePlacement(true),
+            ),
+        )
         s.addLayer(
             CircleLayer(HOVER, HOVER).withProperties(
                 circleRadius(6f), circleColor("#0b0b0b"), circleStrokeColor("#ffffff"), circleStrokeWidth(2.5f),
@@ -210,6 +224,16 @@ class MapController(val map: MapLibreMap, private val density: Float) {
         }
     }
 
+    /** Numbers what the selected route passes, where it is: (n, [lon, lat]); none clears them. */
+    fun showAlong(points: List<Pair<Int, List<Double>>>) {
+        val src = style?.getSourceAs<GeoJsonSource>(ALONG) ?: return
+        src.setGeoJson(
+            FeatureCollection.fromFeatures(
+                points.map { (n, at) -> Feature.fromGeometry(Point.fromLngLat(at[0], at[1])).apply { addNumberProperty("n", n) } },
+            ),
+        )
+    }
+
     /** Draws a trail's lines (all its ways) as the selection, or clears it. */
     fun showLines(lines: List<List<List<Double>>>?) {
         val src = style?.getSourceAs<GeoJsonSource>(SEL) ?: return
@@ -303,5 +327,7 @@ class MapController(val map: MapLibreMap, private val density: Float) {
         private const val VIEWED = "track-viewed"
         private const val SEL = "curated-sel"
         private const val HOVER = "curated-hover"
+        private const val ALONG = "curated-along"
+        const val ALONG_COLOR = "#a21caf"
     }
 }

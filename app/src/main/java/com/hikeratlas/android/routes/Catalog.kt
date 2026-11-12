@@ -51,6 +51,10 @@ data class Selected(
     /** For a base camp's walk in, and its day hikes: the camp. */
     val base: BaseCamp? = null,
     val baseIndex: Int? = null,
+    /** Its shape: loop, out-and-back, one-way or point-to-point (routes' kind). */
+    val kind: String = "",
+    /** Where a day hike goes, for its trip reports' "about" pages. */
+    val dest: String? = null,
 )
 
 fun lookup(doc: ParkDoc, id: String): Selected? {
@@ -65,25 +69,32 @@ fun lookup(doc: ParkDoc, id: String): Selected? {
     }
     return when (parts.getOrNull(1)) {
         "day" -> doc.day_hikes.getOrNull(i)?.let { h ->
-            Selected(id, park, named(h.name, "${h.dest} from ${h.from}"), "Day hike · ${shapeWords(h.kind, h.return_by)}", h.route, why(h))
+            // Titled as its page is: by its destination alone where that's
+            // unique in the park; then the subtitle says where it starts.
+            val short = h.name.isNullOrEmpty() && uniqueNames(doc)(h.dest)
+            Selected(
+                id, park, if (short) h.dest else named(h.name, "${h.dest} from ${h.from}"),
+                (if (short) "Day hike from ${trailhead(h.from)}" else "Day hike") + " · ${shapeWords(h.kind, h.return_by)}",
+                h.route, why(h), kind = h.kind, dest = h.dest,
+            )
         }
         "stop" -> doc.stops.getOrNull(i)?.let { h ->
-            Selected(id, park, h.dest, "Stop · ${walk(h)}", h.route, why(h))
+            Selected(id, park, h.dest, "Stop · ${walk(h)}", h.route, why(h), kind = h.kind, dest = h.dest)
         }
         "base" -> doc.base_camps.getOrNull(i)?.let { b ->
             if (j == null) {
-                Selected(id, park, b.camp, "Base camp · walk in from ${b.from}", b.approach, base = b, baseIndex = i)
+                Selected(id, park, b.camp, "Base camp · walk in from ${b.from}", b.approach, base = b, baseIndex = i, kind = "one-way", dest = b.camp)
             } else {
                 b.hikes.getOrNull(j)?.let { h ->
                     Selected(
                         id, park, named(h.name, "${h.dest} from ${b.camp}"),
-                        "Day hike from base camp · ${shapeWords(h.kind, h.return_by)}", h.route, why(h), b, i,
+                        "Day hike from base camp · ${shapeWords(h.kind, h.return_by)}", h.route, why(h), b, i, h.kind, h.dest,
                     )
                 }
             }
         }
         "multi" -> doc.point_to_points.getOrNull(i)?.let { t ->
-            Selected(id, park, named(t.name, "${t.from} to ${t.to}"), "Multi-day · point to point (needs a shuttle)", t.route)
+            Selected(id, park, named(t.name, "${t.from} to ${t.to}"), "Multi-day · point to point (needs a shuttle)", t.route, kind = t.kind)
         }
         else -> null
     }
@@ -154,14 +165,19 @@ fun slugify(s: String): String =
  * "<dest> from <start>" is slugged by its destination alone where nothing else
  * in the park goes there; repeats get -2, -3, ...
  */
-fun hikeSlugs(doc: ParkDoc): Map<String, String> {
-    val park = doc.park?.id ?: return emptyMap()
+/** Whether a name is the park's only route of that name: a day hike's destination, a camp, a trip. */
+fun uniqueNames(doc: ParkDoc): (String) -> Boolean {
     val seen = mutableMapOf<String, Int>()
     fun count(s: String) { seen.merge(s.lowercase(Locale.ROOT), 1, Int::plus) }
     doc.day_hikes.forEach { count(it.dest); it.name?.let(::count) }
     doc.base_camps.forEach { count(it.camp) }
     doc.point_to_points.forEach { count(named(it.name, "${it.from} to ${it.to}")) }
-    fun unique(s: String) = seen[s.lowercase(Locale.ROOT)] == 1
+    return { s -> seen[s.lowercase(Locale.ROOT)] == 1 }
+}
+
+fun hikeSlugs(doc: ParkDoc): Map<String, String> {
+    val park = doc.park?.id ?: return emptyMap()
+    val unique = uniqueNames(doc)
 
     val used = mutableMapOf<String, Int>()
     fun claim(base: String, into: MutableMap<String, Int> = used): String {

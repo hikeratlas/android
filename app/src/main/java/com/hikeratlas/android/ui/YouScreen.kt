@@ -66,7 +66,7 @@ fun YouScreen(storage: StorageActions? = null) {
         Card("About") {
             Item("hikeratlas.com", external = true) { openUrl(context, SITE) }
             Item("Source code") { openUrl(context, "https://github.com/hikeratlas") }
-            Item("Map credits", "OpenStreetMap contributors, Mapterhorn and others") { credits = true }
+            Item("Map credits", "OpenStreetMap contributors, Mapterhorn, ESA WorldCover and others") { credits = true }
             VersionRow(BuildConfig.COMMIT, BuildConfig.COMMIT_DATE) { openUrl(context, it) }
         }
     }
@@ -79,8 +79,10 @@ fun YouScreen(storage: StorageActions? = null) {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("Map data © OpenStreetMap contributors, under the Open Database License.")
                     Text("Elevation and hillshade: © Mapterhorn; Newfoundland: hikeratlas/nl-dem.")
+                    Text("Hikes' land cover: OpenStreetMap, and ESA WorldCover 2021 (CC BY 4.0) where it has none.")
                     TextButton(onClick = { openUrl(context, "https://www.openstreetmap.org/copyright") }) { Text("openstreetmap.org/copyright") }
                     TextButton(onClick = { openUrl(context, "https://mapterhorn.com/attribution") }) { Text("mapterhorn.com/attribution") }
+                    TextButton(onClick = { openUrl(context, "https://esa-worldcover.org/") }) { Text("esa-worldcover.org") }
                 }
             },
         )

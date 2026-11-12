@@ -156,6 +156,7 @@ fun MapScreen(
             val c = controller ?: return@PanelModel
             c.showHover(null)
             c.showRoute(sel?.route?.line)
+            c.showAlong(alongPins(sel?.route))
         }
     }
     val panel = model.panel
@@ -262,7 +263,10 @@ fun MapScreen(
             c.onStyleLoaded(s)
             mapLayers = MapLayers(s).also { it.apply(layerChoice) }
             // A new style drops what was drawn on the old one.
-            (model.panel as? Panel.Detail)?.let { c.showRoute(it.selected.route.line) }
+            (model.panel as? Panel.Detail)?.let {
+                c.showRoute(it.selected.route.line)
+                c.showAlong(alongPins(it.selected.route))
+            }
             c.showPlan(planner.points, planner.coords, planner.pending)
             style = s
         }
@@ -665,6 +669,10 @@ private fun RoundButton(icon: androidx.compose.ui.graphics.vector.ImageVector, l
         Box(contentAlignment = Alignment.Center) { Icon(icon, contentDescription = label) }
     }
 }
+
+/** What a route passes, numbered, where the build says where. */
+private fun alongPins(r: com.hikeratlas.android.routes.Route?): List<Pair<Int, List<Double>>> =
+    r?.let { com.hikeratlas.android.routes.alongOf(it) }.orEmpty().mapNotNull { f -> f.at?.let { f.n to it } }
 
 /** Moves to a search result, and opens its park or hike. */
 private fun onSearchPick(item: SearchItem, c: MapController?, model: PanelModel, sheetPx: Int) {
