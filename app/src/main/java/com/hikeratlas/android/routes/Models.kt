@@ -143,7 +143,36 @@ data class BundleIndex(
     val parks: Map<String, List<Long>>,
     /** park id -> "<country>/<state>/<park>" */
     val paths: Map<String, String> = emptyMap(),
+    /** Trip reports and other pages about the routes (hikeratlas/cc-crawler); missing in older builds. */
+    val reports: ReportsIndex? = null,
 )
+
+/** The reports bundle: each park's pages gzipped, at [offset, length]. */
+@Serializable
+data class ReportsIndex(val bundle: String, val parks: Map<String, List<Long>> = emptyMap())
+
+/**
+ * A page on another site about a route: a trip report or trail guide that
+ * follows it, or a page about its destination.
+ */
+@Serializable
+data class ReportPage(
+    val url: String,
+    val title: String = "",
+    val site: String = "",
+    /** From someone's own site (a blog), not an organisation's. */
+    val personal: Boolean = false,
+    /** trip_report or trail_guide. */
+    val type: String? = null,
+    /** YYYY, YYYY-MM or YYYY-MM-DD. */
+    val date: String? = null,
+    /** A photo from the page: a path next to the bundle, made a URL when read. */
+    val thumb: String? = null,
+)
+
+/** A route's pages: [reports] follow the route; [about] are about its destination. */
+@Serializable
+data class RouteReports(val reports: List<ReportPage> = emptyList(), val about: List<ReportPage> = emptyList())
 
 /** Every country, state and park with curated hikes (regions.json). */
 @Serializable

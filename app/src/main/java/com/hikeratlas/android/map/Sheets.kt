@@ -53,7 +53,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.hikeratlas.android.routes.Difficulty
 import com.hikeratlas.android.routes.Route
+import com.hikeratlas.android.routes.ReportPage
 import com.hikeratlas.android.routes.RouteItem
+import com.hikeratlas.android.routes.RouteReports
 import com.hikeratlas.android.routes.SAC_WORDS
 import com.hikeratlas.android.routes.TERRAIN_COLORS
 import com.hikeratlas.android.routes.TERRAIN_OTHER_STRIPE
@@ -425,6 +427,7 @@ private fun DetailBody(d: Panel.Detail, model: PanelModel, onScrub: (DoubleArray
                 LinkRow("The walk in", null) { model.openRoute(park, "$park/base/$i") }
             }
         }
+        d.reports?.let { ReportsSection(it, d.selected.dest) }
         // The way there, the route for a GPS app, and a link to it.
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
             val start = r.line.firstOrNull()
@@ -433,6 +436,65 @@ private fun DetailBody(d: Panel.Detail, model: PanelModel, onScrub: (DoubleArray
             }
             OutlinedButton(onClick = { shareGpx(context, title, r.line) }, enabled = r.line.size >= 2) { Text("GPX") }
             if (d.shareUrl != null) OutlinedButton(onClick = { share(context, title, d.shareUrl) }) { Text("Share") }
+        }
+    }
+}
+
+private val MONTHS = listOf("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
+
+/** "2018-08" -> "Aug 2018"; "2018" -> "2018". */
+internal fun reportDate(date: String?): String {
+    if (date.isNullOrEmpty()) return ""
+    val parts = date.split('-')
+    val m = parts.getOrNull(1)?.toIntOrNull()
+    return if (m != null && m in 1..12) "${MONTHS[m - 1]} ${parts[0]}" else parts[0]
+}
+
+/** "alltrails.com · Aug 2018 · trip report". */
+internal fun reportMeta(p: ReportPage): String = listOf(
+    p.site.removePrefix("www."), reportDate(p.date),
+    when (p.type) { "trail_guide" -> "trail guide"; "trip_report" -> "trip report"; else -> "" },
+).filter { it.isNotEmpty() }.joinToString(" · ")
+
+/**
+ * Pages on other sites about the route: trip reports and guides that follow
+ * it, then, folded, pages about its destination. Each links out.
+ */
+@Composable
+private fun ReportsSection(r: RouteReports, dest: String?) {
+    if (r.reports.isEmpty() && r.about.isEmpty()) return
+    val context = LocalContext.current
+    var aboutOpen by remember(r) { mutableStateOf(r.reports.isEmpty()) }
+    @Composable
+    fun Pages(pages: List<ReportPage>) {
+        Column(verticalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.padding(top = 4.dp)) {
+            for (p in pages) {
+                Row(
+                    Modifier.fillMaxWidth().border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(12.dp))
+                        .clip(RoundedCornerShape(12.dp)).clickable { openUrl(context, p.url) }.padding(horizontal = 12.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    p.thumb?.let { RemoteThumb(it, Modifier.size(width = 72.dp, height = 54.dp).clip(RoundedCornerShape(8.dp))) }
+                    Column(Modifier.weight(1f)) {
+                        Text(p.title.ifEmpty { p.site }, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.primary, maxLines = 3, overflow = TextOverflow.Ellipsis)
+                        Text(reportMeta(p), style = MaterialTheme.typography.bodySmall, color = MUTED)
+                    }
+                }
+            }
+        }
+    }
+    Column {
+        if (r.reports.isNotEmpty()) {
+            Text("Trip reports and guides", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+            Pages(r.reports)
+        }
+        if (r.about.isNotEmpty()) {
+            Text(
+                "${if (aboutOpen) "▾" else "▸"} ${dest?.let { "More about $it" } ?: "More pages"} (${r.about.size})",
+                style = MaterialTheme.typography.bodyMedium, color = MUTED,
+                modifier = Modifier.fillMaxWidth().clickable { aboutOpen = !aboutOpen }.padding(vertical = 10.dp),
+            )
+            if (aboutOpen) Pages(r.about)
         }
     }
 }

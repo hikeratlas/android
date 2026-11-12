@@ -5,6 +5,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.builtins.serializer
 import kotlinx.serialization.json.Json
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -74,8 +75,32 @@ class RoutesRepository(
         return doc
     }
 
+    private val reports = object : LinkedHashMap<String, Map<String, RouteReports>>(16, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Map<String, RouteReports>>) = size > 20
+    }
+
+    /**
+     * A park's pages about its routes, by route key (or id, in builds
+     * without keys), with thumbnails as URLs; empty where the build has none
+     * for it. From the reports bundle, one range read a park.
+     */
+    suspend fun parkReports(parkId: String): Map<String, RouteReports> {
+        mutex.withLock { reports[parkId] }?.let { return it }
+        val rep = index().reports ?: return emptyMap()
+        val (offset, length) = rep.parks[parkId] ?: return emptyMap()
+        val gz = withContext(Dispatchers.IO) { get("$root/${rep.bundle}", offset until offset + length) }
+        val raw = JSON.decodeFromString(
+            kotlinx.serialization.builtins.MapSerializer(String.serializer(), RouteReports.serializer()),
+            GZIPInputStream(gz.inputStream()).readBytes().decodeToString(),
+        )
+        fun abs(p: ReportPage) = p.thumb?.takeIf { !it.startsWith("http") }?.let { p.copy(thumb = "$root/$it") } ?: p
+        val out = raw.mapValues { (_, r) -> RouteReports(r.reports.map(::abs), r.about.map(::abs)) }
+        mutex.withLock { reports[parkId] = out }
+        return out
+    }
+
     /** Forgets the index and parks, e.g. after a rebuild moved the bundle. */
-    suspend fun refresh() = mutex.withLock { index = null; regions = null; parks.clear() }
+    suspend fun refresh() = mutex.withLock { index = null; regions = null; parks.clear(); reports.clear() }
 
     /** The park's routes as the bundle has them (gzipped JSON), for keeping offline; null if it has none. */
     suspend fun parkBytes(parkId: String): ByteArray? {
