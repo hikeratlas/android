@@ -3,6 +3,7 @@ package com.hikeratlas.android.elevation
 import android.graphics.BitmapFactory
 import androidx.core.graphics.scale
 import com.hikeratlas.android.pmtiles.HttpRangeSource
+import com.hikeratlas.android.pmtiles.Offline
 import com.hikeratlas.android.pmtiles.Pmtiles
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -27,12 +28,19 @@ class MapterhornSource(private val client: OkHttpClient) : ElevationProfiler.Dem
     override fun tile(z: Int, x: Int, y: Int): FloatArray? = raw(z, x, y)?.let(::decodeTerrarium)
 
     override fun raw(z: Int, x: Int, y: Int): ByteArray? {
+        // Kept on the phone (an offline area's): no request.
+        Offline.tiles?.tile(KEY, z, x, y)?.let { return it.data }
         val req = Request.Builder().url("https://tiles.mapterhorn.com/$z/$x/$y.webp").build()
         client.newCall(req).execute().use { r ->
             if (r.code == 404) return null
             if (!r.isSuccessful) throw IOException("Mapterhorn ${r.code} for $z/$x/$y")
             return r.body.bytes()
         }
+    }
+
+    companion object {
+        /** Its tiles' source in the offline store: WebP, kept as served. */
+        const val KEY = "mapterhorn"
     }
 }
 

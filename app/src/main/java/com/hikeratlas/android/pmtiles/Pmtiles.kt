@@ -67,7 +67,11 @@ data class Entry(val tileId: Long, val offset: Long, val length: Int, val runLen
  * cached, so a tile costs one range read once its leaf has been seen. Safe to
  * use from many threads.
  */
-class Pmtiles(private val source: RangeSource) {
+class Pmtiles(
+    private val source: RangeSource,
+    /** Tiles kept on the phone, checked first: an offline area's, by [key]. */
+    private val local: () -> LocalTiles? = { Offline.tiles },
+) {
     val key: String get() = source.key
 
     private class State(val header: Header, val root: List<Entry>)
@@ -86,6 +90,8 @@ class Pmtiles(private val source: RangeSource) {
 
     /** The tile's bytes, decompressed, or null if the archive has no such tile. */
     fun tile(z: Int, x: Int, y: Int): ByteArray? {
+        // Kept on the phone: no header or directories needed, so offline too.
+        local()?.tile(key, z, x, y)?.let { return Compression.decompress(it.data, it.compression) }
         return try {
             readTile(z, x, y)
         } catch (e: ArchiveChangedException) {
@@ -121,11 +127,20 @@ class Pmtiles(private val source: RangeSource) {
      * a few larger reads, as the website's CoalescingSource does: one read a
      * tile was far slower, each costing a round trip.
      */
-    suspend fun tiles(z: Int, coords: List<Pair<Int, Int>>): Map<Pair<Int, Int>, ByteArray?> = try {
-        readTiles(z, coords)
-    } catch (e: ArchiveChangedException) {
-        reset()
-        readTiles(z, coords)
+    suspend fun tiles(z: Int, coords: List<Pair<Int, Int>>): Map<Pair<Int, Int>, ByteArray?> {
+        // Those kept on the phone first; only the rest are read from the archive.
+        val kept = withContext(Dispatchers.IO) { local()?.tiles(key, z, coords.distinct()) }.orEmpty()
+        val out = HashMap<Pair<Int, Int>, ByteArray?>()
+        for ((c, t) in kept) out[c] = Compression.decompress(t.data, t.compression)
+        val rest = coords.distinct().filter { it !in kept }
+        if (rest.isEmpty()) return out
+        out += try {
+            readTiles(z, rest)
+        } catch (e: ArchiveChangedException) {
+            reset()
+            readTiles(z, rest)
+        }
+        return out
     }
 
     private suspend fun readTiles(z: Int, coords: List<Pair<Int, Int>>): Map<Pair<Int, Int>, ByteArray?> =
