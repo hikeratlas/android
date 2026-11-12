@@ -36,13 +36,13 @@ object TileCover {
      * The tiles within [bufferM] metres of [lines]: each line walked every
      * few metres, with its points [bufferM] out each way.
      */
-    fun corridor(lines: List<List<List<Double>>>, z: Int, bufferM: Double): Set<Pair<Int, Int>> {
+    fun corridor(lines: List<List<List<Double>>>, z: Int, bufferM: Double, within: List<Double>? = null): Set<Pair<Int, Int>> {
         val out = HashSet<Pair<Int, Int>>()
         // Steps well under a tile's width at this zoom, and the buffer.
         val step = minOf(bufferM, 40_075_000.0 / (1 shl z) / 4).coerceAtLeast(10.0)
         for (line in lines) {
             if (line.isEmpty()) continue
-            if (line.size == 1) addAround(out, line[0][0], line[0][1], z, bufferM)
+            if (line.size == 1) addAround(out, line[0][0], line[0][1], z, bufferM, within)
             for (i in 1 until line.size) {
                 val a = line[i - 1]
                 val b = line[i]
@@ -50,14 +50,15 @@ object TileCover {
                 val n = max(1, (d / step).toInt())
                 for (k in 0..n) {
                     val t = k.toDouble() / n
-                    addAround(out, a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, z, bufferM)
+                    addAround(out, a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, z, bufferM, within)
                 }
             }
         }
         return out
     }
 
-    private fun addAround(out: MutableSet<Pair<Int, Int>>, lng: Double, lat: Double, z: Int, bufferM: Double) {
+    private fun addAround(out: MutableSet<Pair<Int, Int>>, lng: Double, lat: Double, z: Int, bufferM: Double, within: List<Double>? = null) {
+        if (within != null && (lng < within[0] || lat < within[1] || lng > within[2] || lat > within[3])) return
         val dLng = bufferM / (M_PER_DEG * cos(Math.toRadians(lat)))
         val dLat = bufferM / M_PER_DEG
         for (ox in doubleArrayOf(-dLng, 0.0, dLng)) for (oy in doubleArrayOf(-dLat, 0.0, dLat)) out += tile(lng + ox, lat + oy, z)
@@ -84,7 +85,12 @@ class AreaPlan(
     val vector: Map<Int, Set<Pair<Int, Int>>>,
     val dem: Map<Int, Set<Pair<Int, Int>>>,
     val withRoutes: Boolean = true,
+    /** Finer terrain along the park's trails too: worked out from its z14 map tiles once they're kept. */
+    val alongTrails: AlongTrails? = null,
 ) {
+    /** Terrain at [zooms] within [bufferM] of the trails in [box]'s z14 map tiles. */
+    class AlongTrails(val zooms: IntRange, val box: List<Double>, val bufferM: Double)
+
     val vectorCount get() = vector.values.sumOf { it.size }
     val demCount get() = dem.values.sumOf { it.size }
 
@@ -116,7 +122,7 @@ class AreaPlan(
 
         /**
          * A park: its box, z0-14; terrain z0-12 over it (z0-11 for a big
-         * park), and finer along [routes].
+         * park), and finer along [routes] and its trails.
          */
         fun park(box: List<Double>, routes: List<List<List<Double>>>): AreaPlan {
             val vector = (0..VECTOR_MAX).associateWith { z -> TileCover.box(box, z) }
@@ -125,7 +131,7 @@ class AreaPlan(
             val dem = HashMap<Int, Set<Pair<Int, Int>>>()
             for (z in 0..coarseMax) dem[z] = TileCover.box(box, z)
             for (z in coarseMax + 1..FINE_DEM_MAX) dem[z] = TileCover.corridor(routes, z, ROUTE_BUFFER_M)
-            return AreaPlan(vector, dem)
+            return AreaPlan(vector, dem, alongTrails = AlongTrails(coarseMax + 1..FINE_DEM_MAX, box, ROUTE_BUFFER_M))
         }
 
         /**

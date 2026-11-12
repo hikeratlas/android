@@ -40,15 +40,20 @@ class AreaDownloader(
     /** About how many bytes downloading [plan] would take, beyond what's kept. */
     suspend fun estimate(plan: AreaPlan): Long = withContext(Dispatchers.IO) {
         var bytes = 0L
+        var fine = 0L
         for (j in jobs(plan)) {
             for (chunk in j.coords.chunked(CHUNK)) {
                 val missing = chunk - store.tiles(j.source, j.z, chunk).keys
                 if (missing.isEmpty()) continue
                 // The archives' directories say exactly; terrain is a request a tile, so it's guessed.
-                bytes += j.archive?.sizes(j.z, missing)?.values?.sumOf { it.toLong() } ?: (missing.size * DEM_TILE_BYTES)
+                val b = j.archive?.sizes(j.z, missing)?.values?.sumOf { it.toLong() } ?: (missing.size * DEM_TILE_BYTES)
+                bytes += b
+                if (j.archive == null && plan.alongTrails != null && j.z in plan.alongTrails.zooms) fine += b
             }
         }
-        bytes
+        // The trails aren't known till the map's z14 tiles are kept: as measured
+        // (Garibaldi, Raging River), they add about this much to the routes' fine terrain.
+        bytes + (fine * TRAIL_FINE_EXTRA).toLong()
     }
 
     /**
@@ -64,11 +69,12 @@ class AreaDownloader(
         progress: suspend (done: Int, total: Int) -> Unit = { _, _ -> },
     ) =
         withContext(Dispatchers.IO) {
-            val jobs = jobs(plan)
-            val total = jobs.sumOf { it.coords.size }
+            val all = jobs(plan)
+            val (vector, dem) = all.partition { it.archive != null }
+            var total = all.sumOf { it.coords.size }
             var done = 0
             progress(0, total)
-            for (j in jobs) {
+            suspend fun run(j: Job) {
                 for (chunk in j.coords.chunked(CHUNK)) {
                     val kept = if (refetchVector && j.archive != null) emptySet() else store.tiles(j.source, j.z, chunk).keys
                     if (kept.isNotEmpty()) store.useTiles(area, j.source, j.z, kept)
@@ -81,7 +87,29 @@ class AreaDownloader(
                     progress(done, total)
                 }
             }
+            vector.forEach { run(it) }
+            // The map's kept: the trails in it, for finer terrain along them too.
+            val extra = plan.alongTrails?.let { trailTerrain(plan, it) }.orEmpty()
+            total += extra.sumOf { it.coords.size }
+            (dem + extra).forEach { run(it) }
         }
+
+    /** Terrain tiles along the park's trails, from its kept z14 map tiles, beyond those planned. */
+    private fun trailTerrain(plan: AreaPlan, a: AreaPlan.AlongTrails): List<Job> {
+        val want = a.zooms.associateWith { HashSet<Pair<Int, Int>>() }
+        val z = AreaPlan.VECTOR_MAX
+        for (chunk in plan.vector[z].orEmpty().toList().chunked(CHUNK)) {
+            for ((c, t) in store.tiles(basemap.key, z, chunk)) {
+                val lines = ParkTrails.lines(Compression.decompress(t.data, t.compression), z, c.first, c.second)
+                if (lines.isEmpty()) continue
+                for ((dz, set) in want) set += TileCover.corridor(lines, dz, a.bufferM, within = a.box)
+            }
+        }
+        return want.mapNotNull { (dz, set) ->
+            val more = set - plan.dem[dz].orEmpty()
+            if (more.isEmpty()) null else Job(MapterhornSource.KEY, dz, more.toList(), null)
+        }
+    }
 
     private suspend fun demTiles(z: Int, coords: List<Pair<Int, Int>>): Map<Pair<Int, Int>, StoredTile> = coroutineScope {
         val gate = Semaphore(demAtOnce)
@@ -93,6 +121,9 @@ class AreaDownloader(
     companion object {
         /** Tiles looked up and written at a time. */
         private const val CHUNK = 400
+
+        /** A park's trails add about this share to its routes' fine terrain (measured: Garibaldi 0.55, Raging River 0.5). */
+        const val TRAIL_FINE_EXTRA = 0.6
 
         /** Mapterhorn's tiles average about this along routes (sampled: 100-130 KB in BC, Washington and Alberta). */
         const val DEM_TILE_BYTES = 115_000L

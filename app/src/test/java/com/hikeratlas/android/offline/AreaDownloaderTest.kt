@@ -112,4 +112,49 @@ class AreaDownloaderTest {
         // Only the terrain tile it hasn't got is asked for.
         assertEquals(listOf(Triple(2, 1, 0)), demCalls.drop(demRequests))
     }
+
+    /** A park's trails, in its kept z14 map tiles, get finer terrain too: inside its box, not past it. */
+    @Test
+    fun finerTerrainFollowsTheParksTrails() = runBlocking {
+        val z = 14
+        val (x, y) = TileCover.tile(-123.03, 49.97, z)
+        // A trail across the tile's west half (in the box), and one across its east half (out of it).
+        val mvt = com.hikeratlas.android.contours.MvtLayer("path").apply {
+            add(mapOf("kind" to "path", "in_park" to true), listOf(intArrayOf(200, 200, 1800, 3900)))
+            add(mapOf("kind" to "path", "in_park" to true), listOf(intArrayOf(3900, 200, 3900, 3900)))
+        }.encode()
+        val trailArchive = BytesSource(
+            TestArchive.build(mapOf(TileId.fromZxy(z, x, y) to TestArchive.gzip(mvt)), Compression.GZIP, z, z),
+            key = "https://x/trails.pmtiles",
+        )
+        val d = AreaDownloader(store, Pmtiles(trailArchive) { null }, Pmtiles(routesSrc) { null }, dem)
+        // The tile's bounds; the box is its west half.
+        val n = (1 shl z).toDouble()
+        val west = x / n * 360 - 180
+        val east = (x + 1) / n * 360 - 180
+        val north = Math.toDegrees(Math.atan(Math.sinh(Math.PI * (1 - 2 * y / n))))
+        val south = Math.toDegrees(Math.atan(Math.sinh(Math.PI * (1 - 2 * (y + 1) / n))))
+        val box = listOf(west, south, (west + east) / 2, north)
+        val plan = AreaPlan(
+            vector = mapOf(z to setOf(x to y)), dem = emptyMap(), withRoutes = false,
+            alongTrails = AreaPlan.AlongTrails(13..14, box, 50.0),
+        )
+        d.download(store.area(OfflineStore.PARK, "1", "P").id, plan)
+        val fetched = demCalls.map { (dz, dx, dy) -> Triple(dz, dx, dy) }.toSet()
+        // Along the west trail at z14 (its tile) and z13 (the tile's parent).
+        assertEquals(true, Triple(14, x, y) in fetched)
+        assertEquals(true, Triple(13, x / 2, y / 2) in fetched)
+        // Nothing for the east trail: it's past the box (its tile to the east isn't asked for).
+        assertEquals(false, Triple(14, x + 1, y) in fetched)
+    }
+
+    @Test
+    fun aParksEstimateAllowsForItsTrails() = runBlocking {
+        val plan = AreaPlan(
+            vector = emptyMap(), dem = mapOf(14 to setOf(0 to 0, 1 to 0)),
+            alongTrails = AreaPlan.AlongTrails(13..14, listOf(-1.0, -1.0, 1.0, 1.0), 200.0),
+        )
+        val routesOnly = 2 * AreaDownloader.DEM_TILE_BYTES
+        assertEquals((routesOnly * (1 + AreaDownloader.TRAIL_FINE_EXTRA)).toLong(), downloader.estimate(plan))
+    }
 }

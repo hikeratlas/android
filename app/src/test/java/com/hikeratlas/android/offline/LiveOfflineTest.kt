@@ -67,6 +67,13 @@ class LiveOfflineTest {
             val t = store.tile(StyleLoader.BASEMAP_URL, 14, x, y)!!
             assertTrue(Compression.decompress(t.data, t.compression).size > 100)
             assertTrue(store.tile(MapterhornSource.KEY, 12, TileCover.tile(line[0][0], line[0][1], 12).first, TileCover.tile(line[0][0], line[0][1], 12).second) != null)
+
+            // The hike's z14 map tiles have the park's trails (Raging River's are in a park): what a
+            // park download's fine terrain follows.
+            val trails = plan.vector[14]!!.mapNotNull { c -> store.tile(StyleLoader.BASEMAP_URL, 14, c.first, c.second)?.let { c to it } }
+                .flatMap { (c, t) -> ParkTrails.lines(Compression.decompress(t.data, t.compression), 14, c.first, c.second) }
+            println("Upward Mobility's map tiles: ${trails.size} park trail lines")
+            assertTrue(trails.isNotEmpty())
         }
     }
 }
