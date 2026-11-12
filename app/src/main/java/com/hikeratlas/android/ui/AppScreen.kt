@@ -143,6 +143,16 @@ fun AppScreen(app: HikerAtlasApp, link: Uri? = null, onLinkHandled: () -> Unit =
                         openArea = OfflineAreas.Target(com.hikeratlas.android.offline.OfflineStore.PARK, id, name)
                         tab = Tab.Map
                     },
+                    featured = { asked ->
+                        com.hikeratlas.android.routes.Featured.load(
+                            app.routes, com.hikeratlas.android.map.lastMapCenter(context), (System.currentTimeMillis() / 86_400_000L).toInt(), asked,
+                        )
+                    },
+                    onHike = { _, id, title ->
+                        viewTrack = null
+                        openArea = OfflineAreas.Target(com.hikeratlas.android.offline.OfflineStore.HIKE, id, title)
+                        tab = Tab.Map
+                    },
                 )
             }
         }
