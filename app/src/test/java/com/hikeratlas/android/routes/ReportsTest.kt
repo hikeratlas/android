@@ -83,4 +83,26 @@ class ReportsTest {
         assertEquals("k-trip" to null, reportsKey(doc, "7/multi/0"))
         assertEquals("7/day/9" to null, reportsKey(doc, "7/day/9"))
     }
+
+    @Test
+    fun aStatesParkCards() = runBlocking {
+        val bc = gz("""{"2226817":{"top":"Garibaldi Lake","tags":["lakes","summits"],"outline":"M0 0L100 0L50 100Z"}}""")
+        val pad = ByteArray(10)
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse = when (request.url.encodedPath) {
+                "/index.json" -> MockResponse.Builder().body("""{"bundle":"b.bin","parks":{},"cards":{"canada/british-columbia":[10,${bc.size}]}}""").build()
+                "/b.bin" -> {
+                    val (a, b) = request.headers["Range"]!!.removePrefix("bytes=").split('-').map { it.toInt() }
+                    MockResponse.Builder().code(206).body(Buffer().write((pad + bc).copyOfRange(a, b + 1))).build()
+                }
+                else -> MockResponse.Builder().code(404).build()
+            }
+        }
+        server.start()
+        val r = RoutesRepository(OkHttpClient.Builder().proxy(java.net.Proxy.NO_PROXY).build(), server.url("/").toString().trimEnd('/'))
+        val card = r.stateCards("canada/british-columbia").getValue("2226817")
+        assertEquals("Garibaldi Lake", card.top)
+        assertEquals(listOf("lakes", "summits"), card.tags)
+        assertTrue(r.stateCards("canada/alberta").isEmpty())
+    }
 }
