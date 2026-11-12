@@ -47,6 +47,13 @@ class MapController(val map: MapLibreMap, private val density: Float) {
     /** Adds the selection layers once the basemap style has loaded. */
     fun onStyleLoaded(s: Style) {
         style = s
+        // Downloaded areas' outlines, offline: under the rest.
+        s.addSource(GeoJsonSource(OFFLINE_AREAS))
+        s.addLayer(
+            LineLayer(OFFLINE_AREAS, OFFLINE_AREAS).withProperties(
+                lineColor(OFFLINE_COLOR), lineWidth(2f), lineDasharray(arrayOf(3f, 2f)), lineOpacity(0.85f),
+            ),
+        )
         // Tracks: a saved one being looked at, and the one being recorded,
         // under the selected route.
         for (id in listOf(VIEWED, TRACK)) {
@@ -168,6 +175,12 @@ class MapController(val map: MapLibreMap, private val density: Float) {
         s.getSourceAs<GeoJsonSource>(PLAN_PENDING)?.setGeoJson(FeatureCollection.fromFeatures(pendingFeatures))
     }
 
+    /** Outlines the downloaded areas, boxes [west, south, east, north] (none: clears them). */
+    fun showOfflineAreas(boxes: List<List<Double>>) {
+        val src = style?.getSourceAs<GeoJsonSource>(OFFLINE_AREAS) ?: return
+        src.setGeoJson(FeatureCollection.fromFeatures(boxes.map { b -> Feature.fromGeometry(LineString.fromLngLats(boxRing(b))) }))
+    }
+
     /** Draws the track being recorded: a line per stretch between pauses (none: clears it). */
     fun showTrack(segments: List<List<List<Double>>>) = drawTrack(TRACK, segments)
 
@@ -278,6 +291,14 @@ class MapController(val map: MapLibreMap, private val density: Float) {
         private const val PLAN_PENDING = "plan-pending"
         private const val PLAN_HIT = "plan-hit"
         const val TRACK_COLOR = "#e8590c"
+        const val OFFLINE_COLOR = "#1f4d2c"
+        private const val OFFLINE_AREAS = "offline-areas"
+
+        /** A box's outline, closed: [west, south, east, north]. */
+        fun boxRing(b: List<Double>): List<Point> = listOf(
+            Point.fromLngLat(b[0], b[1]), Point.fromLngLat(b[2], b[1]), Point.fromLngLat(b[2], b[3]),
+            Point.fromLngLat(b[0], b[3]), Point.fromLngLat(b[0], b[1]),
+        )
         private const val TRACK = "track-recording"
         private const val VIEWED = "track-viewed"
         private const val SEL = "curated-sel"

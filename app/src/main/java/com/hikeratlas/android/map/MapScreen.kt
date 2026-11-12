@@ -59,6 +59,8 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Dp
 import android.net.Uri
 import com.hikeratlas.android.offline.OfflineAreas
+import com.hikeratlas.android.offline.OfflineChip
+import com.hikeratlas.android.offline.rememberOnline
 import com.hikeratlas.android.offline.OfflineStore
 import com.hikeratlas.android.offline.OfflineActions
 import com.hikeratlas.android.offline.DownloadDialog
@@ -277,6 +279,14 @@ fun MapScreen(
         } catch (e: Exception) {
             if (saved == null) styleError = e.message ?: e.toString()
         }
+    }
+
+    // Offline: the downloaded areas outlined, and a chip saying so.
+    val online = rememberOnline()
+    val offlineAreas = app.offlineAreas.areas
+    LaunchedEffect(online, style, offlineAreas) {
+        val c = controller ?: return@LaunchedEffect
+        c.showOfflineAreas(if (online || style == null) emptyList() else app.offlineAreas.outlines())
     }
 
     var containerPx by remember { mutableIntStateOf(0) }
@@ -508,19 +518,23 @@ fun MapScreen(
                         modifier = Modifier.padding(top = 10.dp),
                     )
                 }
-                Column(Modifier.align(Alignment.End).padding(top = 10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    RoundButton(Icons.Filled.Layers, "Map layers") { layersOpen = true }
-                    RoundButton(Icons.Filled.Route, "Plan a route") {
-                        model.close()
-                        planner.clear()
-                        planning = true
-                        controller?.map?.let { m ->
-                            val b = m.projection.visibleRegion.latLngBounds
-                            planner.prefetchView(b.longitudeWest, b.latitudeSouth, b.longitudeEast, b.latitudeNorth, m.cameraPosition.zoom)
+                Row(Modifier.fillMaxWidth().padding(top = 10.dp), verticalAlignment = Alignment.Top) {
+                    if (!online) OfflineChip(Modifier.padding(top = 10.dp))
+                    Spacer(Modifier.weight(1f))
+                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        RoundButton(Icons.Filled.Layers, "Map layers") { layersOpen = true }
+                        RoundButton(Icons.Filled.Route, "Plan a route") {
+                            model.close()
+                            planner.clear()
+                            planning = true
+                            controller?.map?.let { m ->
+                                val b = m.projection.visibleRegion.latLngBounds
+                                planner.prefetchView(b.longitudeWest, b.latitudeSouth, b.longitudeEast, b.latitudeNorth, m.cameraPosition.zoom)
+                            }
                         }
+                        if (recording == null) RoundButton(Icons.Filled.FiberManualRecord, "Record a track", record)
+                        RoundButton(Icons.Filled.MyLocation, "Show my location", locate)
                     }
-                    if (recording == null) RoundButton(Icons.Filled.FiberManualRecord, "Record a track", record)
-                    RoundButton(Icons.Filled.MyLocation, "Show my location", locate)
                 }
             }
             if (inView.isNotEmpty() && viewing == null) {

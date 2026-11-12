@@ -16,6 +16,7 @@ import com.hikeratlas.android.pmtiles.Pmtiles
 import com.hikeratlas.android.routes.ParkDoc
 import com.hikeratlas.android.routes.RoutesRepository
 import com.hikeratlas.android.routes.lookup
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.IOException
@@ -129,6 +130,20 @@ class OfflineAreas(
 
     suspend fun refresh() {
         areas = withContext(Dispatchers.IO) { store.areas() }
+    }
+
+    /** The ready parks' and hikes' boxes, to outline on the map offline. */
+    suspend fun outlines(): List<List<Double>> {
+        val regions = try { routes.regions() } catch (e: CancellationException) { throw e } catch (e: Exception) { null }
+        return areas.filter { it.ready }.mapNotNull { a ->
+            val t = Target(a.kind, a.ref, a.name)
+            val doc = if (a.kind == OfflineStore.HIKE) {
+                try { routes.park(a.ref.substringBefore('/')) } catch (e: CancellationException) { throw e } catch (e: Exception) { null }
+            } else {
+                null
+            }
+            Outlines.of(t, regions, doc)
+        }
     }
 
     fun downloader() = AreaDownloader(store, basemap(), routesArchive(), dem)

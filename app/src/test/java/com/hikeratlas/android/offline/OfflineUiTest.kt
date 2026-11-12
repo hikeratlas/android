@@ -139,4 +139,35 @@ class OfflineUiTest {
             opened,
         )
     }
+
+    @Test
+    fun knowsWhenItsOfflineAndTheChipSaysSo() {
+        val context = androidx.test.core.app.ApplicationProvider.getApplicationContext<android.app.Application>()
+        val cm = context.getSystemService(android.net.ConnectivityManager::class.java)
+        val shadow = org.robolectric.Shadows.shadowOf(cm)
+        val wifi = org.robolectric.shadows.ShadowNetworkCapabilities.newInstance()
+        org.robolectric.Shadows.shadowOf(wifi).addCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET)
+        shadow.setNetworkCapabilities(cm.activeNetwork, wifi)
+        var online: Boolean? = null
+        compose.setContent {
+            HikerAtlasTheme {
+                val on = rememberOnline()
+                online = on
+                if (!on) OfflineChip()
+            }
+        }
+        compose.waitForIdle()
+        assertEquals(true, online)
+        assertEquals(0, compose.onAllNodesWithText("Offline · downloaded areas").fetchSemanticsNodes().size)
+
+        // Airplane mode: no network, and the callback says it's lost.
+        val network = cm.activeNetwork!!
+        shadow.setDefaultNetworkActive(false)
+        shadow.setActiveNetworkInfo(null)
+        shadow.networkCallbacks.forEach { it.onLost(network) }
+        org.robolectric.shadows.ShadowLooper.idleMainLooper()
+        compose.waitForIdle()
+        assertEquals(false, online)
+        compose.onNodeWithText("Offline · downloaded areas").assertIsDisplayed()
+    }
 }
