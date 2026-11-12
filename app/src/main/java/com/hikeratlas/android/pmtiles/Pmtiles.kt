@@ -143,13 +143,42 @@ class Pmtiles(
         return out
     }
 
-    private suspend fun readTiles(z: Int, coords: List<Pair<Int, Int>>): Map<Pair<Int, Int>, ByteArray?> =
+    private suspend fun readTiles(z: Int, coords: List<Pair<Int, Int>>): Map<Pair<Int, Int>, ByteArray?> {
+        val raw = readRaw(z, coords)
+        val compression = load().header.tileCompression
+        return raw.mapValues { (_, b) -> b?.let { Compression.decompress(it, compression) } }
+    }
+
+    /**
+     * Tiles as the archive stores them (compressed), for keeping offline: the
+     * phone's copies aren't consulted. Absent tiles are left out.
+     */
+    suspend fun rawTiles(z: Int, coords: List<Pair<Int, Int>>): Map<Pair<Int, Int>, StoredTile> {
+        val raw = try {
+            readRaw(z, coords)
+        } catch (e: ArchiveChangedException) {
+            reset()
+            readRaw(z, coords)
+        }
+        val compression = load().header.tileCompression
+        return raw.entries.mapNotNull { (c, b) -> b?.let { c to StoredTile(compression, it) } }.toMap()
+    }
+
+    /** Each tile's size in the archive (absent tiles left out), from its directories only: for estimates. */
+    suspend fun sizes(z: Int, coords: List<Pair<Int, Int>>): Map<Pair<Int, Int>, Int> = withContext(Dispatchers.IO) {
+        coords.distinct().map { c -> async { c to locate(z, c.first, c.second)?.second } }.awaitAll()
+            .mapNotNull { (c, n) -> n?.let { c to it } }.toMap()
+    }
+
+    /** The tiles' bytes as stored (null where absent), their ranges merged into a few larger reads. */
+    private suspend fun readRaw(z: Int, coords: List<Pair<Int, Int>>): Map<Pair<Int, Int>, ByteArray?> =
         withContext(Dispatchers.IO) {
             val located = coords.distinct().map { c -> async { c to locate(z, c.first, c.second) } }.awaitAll()
             val out = HashMap<Pair<Int, Int>, ByteArray?>()
             located.filter { it.second == null }.forEach { out[it.first] = null }
-            val compression = load().header.tileCompression
             // Groups of ranges with gaps of at most MAX_GAP, up to MAX_READ each.
+            // Sorted by offset first, so an unclustered archive (tiles not in
+            // tile-id order) merges what it can too.
             val groups = ArrayList<MutableList<Pair<Pair<Int, Int>, Pair<Long, Int>>>>()
             var end = -1L
             for (t in located.filter { it.second != null }.map { it.first to it.second!! }.sortedBy { it.second.first }) {
@@ -170,7 +199,7 @@ class Pmtiles(
                     val bytes = source.read(start, (stop - start).toInt())
                     g.map { (c, r) ->
                         val from = (r.first - start).toInt()
-                        c to Compression.decompress(bytes.copyOfRange(from, from + r.second), compression)
+                        c to bytes.copyOfRange(from, from + r.second)
                     }
                 }
             }.awaitAll().flatten().forEach { (c, b) -> out[c] = b }

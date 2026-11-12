@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -156,21 +157,32 @@ fun TrackPanel(
     }
 }
 
-/** The Saved tab: recorded tracks, newest first. Tapping one shows it on the map. */
+/**
+ * The Saved tab: [above] first (offline areas), then recorded tracks, newest
+ * first. Tapping a track shows it on the map.
+ */
 @Composable
-fun SavedScreen(tracks: List<TrackStore.Track>, onOpen: (Long) -> Unit) {
+fun SavedScreen(
+    tracks: List<TrackStore.Track>,
+    onOpen: (Long) -> Unit,
+    above: LazyListScope.() -> Unit = {},
+) {
     val date = remember { SimpleDateFormat("EEE d MMM yyyy", Locale.getDefault()) }
     Column(Modifier.fillMaxSize().statusBarsPadding()) {
         Text(
             "Saved", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold,
-            modifier = Modifier.padding(start = 20.dp, top = 16.dp, bottom = 8.dp),
+            modifier = Modifier.padding(start = 20.dp, top = 16.dp, bottom = 4.dp),
         )
-        Text(
-            "Tracks you've recorded", style = MaterialTheme.typography.titleSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(horizontal = 20.dp),
-        )
-        Spacer(Modifier.height(8.dp))
         LazyColumn {
+            above()
+            if (tracks.isNotEmpty()) {
+                item(key = "tracks-header") {
+                    Text(
+                        "Tracks", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.padding(start = 20.dp, top = 16.dp, bottom = 8.dp),
+                    )
+                }
+            }
             items(tracks, key = { it.id }) { t ->
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
                 Column(

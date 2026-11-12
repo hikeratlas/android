@@ -52,7 +52,7 @@ class TrackScreensTest {
     @Test
     fun theSavedListOpensATrack() {
         var opened: Long? = null
-        compose.setContent { HikerAtlasTheme { SavedScreen(listOf(track)) { opened = it } } }
+        compose.setContent { HikerAtlasTheme { SavedScreen(listOf(track), onOpen = { opened = it }) } }
         compose.onNodeWithText("Raging River State Forest · 14 Nov").performClick()
         assertEquals(7L, opened)
     }

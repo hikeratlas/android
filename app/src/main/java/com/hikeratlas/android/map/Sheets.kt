@@ -24,6 +24,10 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Directions
+import com.hikeratlas.android.offline.OfflineActions
+import com.hikeratlas.android.offline.OfflineAreas
+import com.hikeratlas.android.offline.OfflineButton
+import com.hikeratlas.android.offline.OfflineStore
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.Button
 import androidx.compose.material3.LinearProgressIndicator
@@ -86,7 +90,13 @@ fun PanelContent(model: PanelModel, onScrub: (DoubleArray?) -> Unit) {
  * actions. At the sheet's lowest height, it's all that shows.
  */
 @Composable
-fun PanelHeader(model: PanelModel, full: Boolean, onScrub: (DoubleArray?) -> Unit = {}) {
+fun PanelHeader(
+    model: PanelModel,
+    full: Boolean,
+    onScrub: (DoubleArray?) -> Unit = {},
+    /** Downloading a park or hike for offline use, from its sheet; none where it's not offered. */
+    offline: OfflineActions? = null,
+) {
     val context = LocalContext.current
     Column(Modifier.fillMaxWidth().padding(bottom = 12.dp)) {
         when (val p = model.panel) {
@@ -115,6 +125,9 @@ fun PanelHeader(model: PanelModel, full: Boolean, onScrub: (DoubleArray?) -> Uni
             }
             is Panel.RouteList -> {
                 TitleRow(p.heading, full, model::close, actions = {
+                    if (offline != null && p.parkId != null) {
+                        OfflineButton(OfflineAreas.Target(OfflineStore.PARK, p.parkId, p.heading), offline)
+                    }
                     if (p.shareUrl != null) {
                         IconButton(onClick = { share(context, p.heading, p.shareUrl) }) {
                             Icon(Icons.Filled.Share, contentDescription = "Share")
@@ -174,6 +187,7 @@ fun PanelHeader(model: PanelModel, full: Boolean, onScrub: (DoubleArray?) -> Uni
                             Icon(Icons.Filled.Directions, contentDescription = "Directions to the start", tint = MaterialTheme.colorScheme.primary)
                         }
                     }
+                    if (offline != null) OfflineButton(OfflineAreas.Target(OfflineStore.HIKE, p.selected.id, p.selected.title), offline)
                     if (p.shareUrl != null) {
                         IconButton(onClick = { share(context, p.selected.title, p.shareUrl) }) {
                             Icon(Icons.Filled.Share, contentDescription = "Share")

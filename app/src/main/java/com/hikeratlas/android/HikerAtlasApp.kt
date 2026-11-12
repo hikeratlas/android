@@ -11,6 +11,10 @@ import com.hikeratlas.android.elevation.NlDemSource
 import com.hikeratlas.android.pmtiles.TileServer
 import com.hikeratlas.android.pmtiles.Offline
 import com.hikeratlas.android.offline.OfflineStore
+import com.hikeratlas.android.offline.OfflineAreas
+import com.hikeratlas.android.offline.OfflineHost
+import com.hikeratlas.android.pmtiles.HttpRangeSource
+import com.hikeratlas.android.style.StyleLoader
 import com.hikeratlas.android.offline.ResourceCache
 import com.hikeratlas.android.routes.RoutesRepository
 import com.hikeratlas.android.search.RecentSearches
@@ -26,7 +30,7 @@ import org.maplibre.android.MapLibre
 import org.maplibre.android.module.http.HttpRequestUtil
 import java.util.concurrent.TimeUnit
 
-class HikerAtlasApp : Application(), RecorderHost {
+class HikerAtlasApp : Application(), RecorderHost, OfflineHost {
     /** For our own requests: the style, and PMTiles range reads. */
     lateinit var http: OkHttpClient
         private set
@@ -44,6 +48,14 @@ class HikerAtlasApp : Application(), RecorderHost {
 
     /** What's kept for offline use: areas' tiles, routes data, fonts and icons. */
     val offline by lazy { OfflineStore(this) }
+    override val offlineAreas by lazy {
+        OfflineAreas(
+            this, offline, routes,
+            basemap = { TileServer.register(HttpRangeSource(StyleLoader.BASEMAP_URL, http)).first },
+            routesArchive = { TileServer.register(HttpRangeSource(StyleLoader.ROUTES_URL, http)).first },
+            dem = { z, x, y -> MapterhornSource(http).fetch(z, x, y) },
+        )
+    }
 
     override fun onCreate() {
         super.onCreate()

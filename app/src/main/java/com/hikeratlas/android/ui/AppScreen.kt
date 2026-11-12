@@ -16,6 +16,10 @@ import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Text
 import com.hikeratlas.android.track.SavedScreen
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
+import com.hikeratlas.android.offline.offlineAreasSection
 import androidx.compose.material3.Surface
 import androidx.compose.material.icons.outlined.BookmarkBorder
 import androidx.compose.material.icons.filled.Bookmark
@@ -56,7 +60,17 @@ fun AppScreen(app: HikerAtlasApp, link: Uri? = null, onLinkHandled: () -> Unit =
     }
     // A saved track being looked at on the map.
     var viewTrack by rememberSaveable { mutableStateOf<Long?>(null) }
-    val tabs = Tab.entries.filter { it != Tab.Saved || library.tracks.isNotEmpty() || tab == Tab.Saved }
+    val offline = app.offlineAreas
+    // Offline areas' state: often while any is on its way, now and then otherwise.
+    LaunchedEffect(Unit) {
+        while (true) {
+            offline.refresh()
+            delay(if (offline.areas.any { !it.ready }) 1_000 else 15_000)
+        }
+    }
+    val scope = rememberCoroutineScope()
+    var wifiOnly by remember { mutableStateOf(offline.wifiOnly) }
+    val tabs = Tab.entries.filter { it != Tab.Saved || library.tracks.isNotEmpty() || offline.areas.isNotEmpty() || tab == Tab.Saved }
     // A sheet on the map needs the room: the tabs step aside while it's open.
     var sheetOpen by remember { mutableStateOf(false) }
     val tabsShown = !(tab == Tab.Map && sheetOpen)
@@ -74,10 +88,21 @@ fun AppScreen(app: HikerAtlasApp, link: Uri? = null, onLinkHandled: () -> Unit =
         )
         if (tab == Tab.Saved) {
             Surface(Modifier.fillMaxSize().padding(bottom = barHeight)) {
-                SavedScreen(library.tracks) { id ->
-                    viewTrack = id
-                    tab = Tab.Map
-                }
+                SavedScreen(
+                    library.tracks,
+                    onOpen = { id ->
+                        viewTrack = id
+                        tab = Tab.Map
+                    },
+                    above = {
+                        offlineAreasSection(
+                            offline.areas, wifiOnly,
+                            onWifiOnly = { wifiOnly = it; offline.wifiOnly = it },
+                            onRetry = { id -> scope.launch { offline.retry(id) } },
+                            onDelete = { id -> scope.launch { offline.delete(id) } },
+                        )
+                    },
+                )
             }
         }
         if (tab == Tab.You) Box(Modifier.fillMaxSize().padding(bottom = barHeight)) { YouScreen() }
