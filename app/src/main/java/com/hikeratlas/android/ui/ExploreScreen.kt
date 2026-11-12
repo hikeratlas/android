@@ -43,6 +43,7 @@ import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.graphics.vector.PathParser
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.hikeratlas.android.routes.Featured
 import com.hikeratlas.android.routes.Regions
 import com.hikeratlas.android.routes.StateCard
 import com.hikeratlas.android.routes.parkLabel
@@ -71,6 +72,10 @@ fun ExploreScreen(
     path: ExplorePath,
     onPath: (ExplorePath) -> Unit,
     onPark: (id: String, name: String) -> Unit,
+    /** The featured park and hike, of the showcase park asked for (or the near or day's one: null). */
+    featured: (suspend (Int?) -> Featured.Card?)? = null,
+    /** A featured hike, opened on the map. */
+    onHike: (park: String, id: String, title: String) -> Unit = { _, _, _ -> },
 ) {
     var loaded by remember { mutableStateOf<Regions?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
@@ -115,6 +120,7 @@ fun ExploreScreen(
             )
             else -> Tiles(
                 r.countries.map { c -> Tile(c.name, c.hikes, c.parks, c.states.maxByOrNull { it.hikes }?.name) { onPath(listOf(c.slug)) } },
+                header = featured?.let { f -> { item(key = "featured") { FeaturedCards(f, onPark, onHike) } } },
             )
         }
     }
@@ -124,9 +130,10 @@ private class Tile(val name: String, val hikes: Int, val parks: Int, val top: St
 
 /** Countries or states, two to a row: their hikes big, in how many parks, a bar against the most, and the one with the most. */
 @Composable
-private fun Tiles(tiles: List<Tile>) {
+private fun Tiles(tiles: List<Tile>, header: (androidx.compose.foundation.lazy.LazyListScope.() -> Unit)? = null) {
     val most = maxOf(1, tiles.maxOfOrNull { it.hikes } ?: 1)
     LazyColumn(Modifier.fillMaxSize(), contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        header?.invoke(this)
         items(tiles.chunked(2)) { row ->
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 for (t in row) {
@@ -216,6 +223,129 @@ private fun ParkOutline(d: String?) {
                 }
                 drawPath(m, GREEN.copy(alpha = 0.6f), style = Stroke(1.6.dp.toPx()))
             }
+        }
+    }
+}
+
+/**
+ * The featured park and hike, as the website's homepage: the showcase park
+ * near the phone (else the day's), with ‹ › to look at the others; its counts
+ * and where to start; and its best approachable hike.
+ */
+@Composable
+private fun FeaturedCards(
+    load: suspend (Int?) -> Featured.Card?,
+    onPark: (String, String) -> Unit,
+    onHike: (String, String, String) -> Unit,
+) {
+    var asked by remember { mutableStateOf<Int?>(null) }
+    var card by remember { mutableStateOf<Featured.Card?>(null) }
+    var failed by remember { mutableStateOf(false) }
+    LaunchedEffect(asked) {
+        failed = false
+        card = try { load(asked) } catch (e: CancellationException) { throw e } catch (e: Exception) { null }
+        failed = card == null
+    }
+    val c = card
+    if (c == null) {
+        // Offline or loading: the tiles below still work.
+        if (!failed) LinearProgressIndicator(Modifier.fillMaxWidth().padding(vertical = 8.dp))
+        return
+    }
+    val muted = MaterialTheme.colorScheme.onSurfaceVariant
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.padding(bottom = 8.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                if (c.near && asked == null) "A park near you" else "Featured park",
+                style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f),
+            )
+            TextButton(onClick = { asked = c.index - 1 }) { Text("‹ ${c.parks[(c.index - 1 + c.parks.size) % c.parks.size].short}") }
+            TextButton(onClick = { asked = c.index + 1 }) { Text("${c.parks[(c.index + 1) % c.parks.size].short} ›") }
+        }
+        // The park.
+        Column(
+            Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(16.dp))
+                .clickable { onPark(c.parkId, c.parkName) },
+        ) {
+            val box = c.parks[c.index].area.bbox
+            Box(Modifier.fillMaxWidth().height(150.dp).background(THUMB_BG)) {
+                if (c.parkImage != null) {
+                    com.hikeratlas.android.map.RemoteThumb(c.parkImage, Modifier.fillMaxSize())
+                } else if (box != null) {
+                    ParkRoutes(c.doc.day_hikes.map { it.route.line }, box, Modifier.fillMaxSize().padding(10.dp))
+                }
+            }
+            Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(c.parkName, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                Text("${c.parks[c.index].state} · ${c.counts.joinToString(" · ")}", style = MaterialTheme.typography.bodySmall, color = muted)
+                if (c.picks.isNotEmpty()) {
+                    Text("Start with", style = MaterialTheme.typography.labelSmall, color = muted, modifier = Modifier.padding(top = 4.dp))
+                    for ((tag, h) in c.picks) {
+                        Text(
+                            "$tag: ${h.title} · ${com.hikeratlas.android.routes.km(h.route.km)} km", style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.clickable { onHike(c.parkId, h.id, h.title) }.padding(vertical = 2.dp),
+                        )
+                    }
+                }
+            }
+        }
+        // Its best approachable hike.
+        val h = c.hike
+        Column(
+            Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(16.dp))
+                .clickable { onHike(c.parkId, h.id, h.title) },
+        ) {
+            if (c.hikeImage != null) {
+                com.hikeratlas.android.map.RemoteThumb(c.hikeImage, Modifier.fillMaxWidth().height(150.dp))
+            }
+            Row(Modifier.padding(12.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                if (c.hikeImage == null) com.hikeratlas.android.map.RouteThumb(h.route.line, 72.dp)
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                    Text("A hike to start with", style = MaterialTheme.typography.labelSmall, color = muted)
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(h.title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f, fill = false))
+                        com.hikeratlas.android.map.DifficultyPill(h.diff)
+                    }
+                    Text(
+                        "${com.hikeratlas.android.routes.km(h.route.km)} km · ↑ ${com.hikeratlas.android.routes.metres(h.route.gain)} m · " +
+                            "${com.hikeratlas.android.routes.timeLabel(h.hours, h.route)} · ${h.shape}",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    com.hikeratlas.android.map.TerrainBar(h.route.terrain, Modifier.fillMaxWidth(0.7f).height(5.dp))
+                    Text(
+                        listOfNotNull(
+                            "from ${h.from}",
+                            h.features.takeIf { it.isNotEmpty() }?.joinToString(", "),
+                            h.reports.takeIf { it > 0 }?.let { "$it ${if (it == 1) "trip report" else "trip reports"}" },
+                        ).joinToString(" · "),
+                        style = MaterialTheme.typography.labelSmall, color = muted,
+                    )
+                }
+            }
+        }
+        Text("Or browse by place", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 8.dp))
+    }
+}
+
+/** A park's day hikes drawn in its box (longitude scaled by latitude), as a small still map would. */
+@Composable
+private fun ParkRoutes(lines: List<List<List<Double>>>, box: List<Double>, modifier: Modifier) {
+    Canvas(modifier) {
+        val k = kotlin.math.cos(Math.toRadians((box[1] + box[3]) / 2))
+        val w = (box[2] - box[0]) * k
+        val h = box[3] - box[1]
+        val sc = minOf(size.width / w, size.height / h).toFloat()
+        val dx = (size.width - w * sc).toFloat() / 2
+        val dy = (size.height - h * sc).toFloat() / 2
+        fun x(lon: Double) = dx + ((lon - box[0]) * k * sc).toFloat()
+        fun y(lat: Double) = dy + ((box[3] - lat) * sc).toFloat()
+        drawRect(Color(0x1415803D), androidx.compose.ui.geometry.Offset(dx, dy), androidx.compose.ui.geometry.Size((w * sc).toFloat(), (h * sc).toFloat()))
+        for (line in lines) {
+            if (line.size < 2) continue
+            val path = androidx.compose.ui.graphics.Path()
+            line.forEachIndexed { i, p -> if (i == 0) path.moveTo(x(p[0]), y(p[1])) else path.lineTo(x(p[0]), y(p[1])) }
+            drawPath(path, Color(0xFFC026D3), style = Stroke(1.8.dp.toPx()))
         }
     }
 }

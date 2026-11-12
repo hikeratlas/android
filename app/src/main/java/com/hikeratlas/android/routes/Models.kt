@@ -147,6 +147,8 @@ data class BundleIndex(
     val reports: ReportsIndex? = null,
     /** Each state's park cards, "<country>/<state>" -> [offset, length] in the bundle; missing in older builds. */
     val cards: Map<String, List<Long>> = emptyMap(),
+    /** The homepage's featured cards as pictures: a folder of this build's routes ("<home>/<park slug>-park.jpg", "-hike.jpg"); missing in builds without them. */
+    val home: String? = null,
 )
 
 /** A park's card in its state's list (basemap's hike-paths.py): its best hike, what its hikes pass, its outline (SVG, 100×100). */

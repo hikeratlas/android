@@ -76,4 +76,37 @@ class ExploreScreenTest {
         compose.onNodeWithContentDescription("Back").performClick()
         assertEquals(listOf("canada"), path)
     }
+
+    @Test
+    fun featuredParkAndHike() {
+        val doc = kotlinx.serialization.json.Json { ignoreUnknownKeys = true }.decodeFromString(
+            com.hikeratlas.android.routes.ParkDoc.serializer(),
+            """{"park":{"id":"2226817","name":"Garibaldi Provincial Park"},"day_hikes":[{"from":"Rubble Creek","dest":"Garibaldi Lake","kind":"out-and-back","score":9,
+               "route":{"km":16.6,"gain":1042,"line":[[-123.12,49.95],[-123.06,49.94]]}}]}""",
+        )
+        val hikes = com.hikeratlas.android.routes.parkHikes(doc)
+        val parks = com.hikeratlas.android.routes.Featured.parks(regions.copy(countries = regions.countries.map { c ->
+            c.copy(states = c.states.map { s -> s.copy(areas = s.areas.map { it.copy(bbox = listOf(-123.3, 49.7, -122.4, 50.2)) }) })
+        }))
+        val card = com.hikeratlas.android.routes.Featured.Card(
+            parks, 0, true, "2226817", "Garibaldi Provincial Park", doc, listOf("1 day hike"), emptyList(), hikes.single(), null, null,
+        )
+        val hikesOpened = mutableListOf<String>()
+        val asked = mutableListOf<Int?>()
+        compose.setContent {
+            HikerAtlasTheme {
+                ExploreScreen(
+                    regions = { regions }, cards = { emptyMap() }, path = emptyList(), onPath = {}, onPark = { _, _ -> },
+                    featured = { a -> asked += a; card }, onHike = { _, id, _ -> hikesOpened += id },
+                )
+            }
+        }
+        compose.waitUntil(5_000) { runCatching { compose.onNodeWithText("A park near you").assertExists() }.isSuccess }
+        compose.onNodeWithText("Garibaldi Provincial Park").assertExists()
+        compose.onNodeWithText("British Columbia · 1 day hike").assertExists()
+        compose.onNodeWithText("Garibaldi Lake").performClick()
+        assertEquals(listOf("2226817/day/0"), hikesOpened)
+        compose.onNodeWithText("Or browse by place").assertExists()
+        assertEquals(listOf<Int?>(null), asked)
+    }
 }

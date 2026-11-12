@@ -18,7 +18,7 @@ import java.util.zip.GZIPInputStream
  */
 class RoutesRepository(
     private val client: OkHttpClient,
-    private val root: String = "https://public.hikeratlas.com/routes/north-america",
+    val root: String = "https://public.hikeratlas.com/routes/north-america",
 ) {
     private val mutex = Mutex()
     private var index: BundleIndex? = null

@@ -759,6 +759,13 @@ private fun rememberMapViewWithLifecycle(): MapView {
 }
 
 /** Where the map was left, to open there next time. */
+/** Where the map was last left, [lon, lat]; null if it's never been moved. */
+fun lastMapCenter(context: Context): Pair<Double, Double>? {
+    val p = context.getSharedPreferences("camera", Context.MODE_PRIVATE)
+    if (!p.contains("lat")) return null
+    return p.getFloat("lng", 0f).toDouble() to p.getFloat("lat", 0f).toDouble()
+}
+
 private object CameraStore {
     private const val PREFS = "camera"
 
