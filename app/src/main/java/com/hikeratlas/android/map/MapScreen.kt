@@ -631,6 +631,7 @@ fun MapScreen(
                 scope.launch { onSearchPick(item, controller, model, (220 * density).toInt()) }
             },
             onClose = { searching = false },
+            offline = { q, lat, lon -> app.offlineSearch.search(q, lat, lon) },
         )
     }
 }

@@ -47,6 +47,15 @@ class HikerAtlasApp : Application(), RecorderHost, OfflineHost {
     override val recorder by lazy { TrackRecorder(tracks, profiler) }
     val library by lazy { TrackLibrary(tracks, profiler, regions = { routes.regions() }) }
 
+    /** Search with no network: the downloaded parks and hikes. */
+    val offlineSearch by lazy {
+        com.hikeratlas.android.search.OfflineSearch(
+            regions = { routes.regions() },
+            saved = { offlineAreas.areas.filter { it.ready }.map { OfflineAreas.Target(it.kind, it.ref, it.name) } },
+            park = { routes.park(it) },
+        )
+    }
+
     /** What's kept for offline use: areas' tiles, routes data, fonts and icons. */
     val offline by lazy { OfflineStore(this) }
     override val offlineAreas by lazy {
