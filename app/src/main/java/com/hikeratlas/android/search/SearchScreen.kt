@@ -76,16 +76,21 @@ fun SearchScreen(
     var query by rememberSaveable { mutableStateOf("") }
     var results by remember { mutableStateOf<List<SearchItem>>(emptyList()) }
     var error by remember { mutableStateOf<String?>(null) }
+    // The query [results] are for: "No matches" only once its search is back,
+    // not while a newer one's out.
+    var answered by remember { mutableStateOf<String?>(null) }
     val recent = remember { recents.load() }
     val focus = remember { FocusRequester() }
 
     BackHandler(onBack = onClose)
     LaunchedEffect(Unit) { focus.requestFocus() }
     LaunchedEffect(query) {
-        if (query.isBlank()) { results = emptyList(); error = null; return@LaunchedEffect }
+        if (query.isBlank()) { results = emptyList(); error = null; answered = null; return@LaunchedEffect }
         delay(200) // wait for a pause in typing
         try {
-            results = api.search(query.trim(), nearLat, nearLon)
+            val q = query.trim()
+            results = api.search(q, nearLat, nearLon)
+            answered = q
             error = null
         } catch (e: CancellationException) {
             // A newer query took over (typing on): not a failure.
@@ -123,6 +128,15 @@ fun SearchScreen(
         }
         HorizontalDivider()
         error?.let { Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(16.dp)) }
+        if (!showingRecent && error == null && results.isEmpty() && answered == query.trim()) {
+            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text("No matches for \u201c${query.trim()}\u201d", style = MaterialTheme.typography.bodyLarge)
+                Text(
+                    "Try a hike, park, peak or trail's name, or a town near it.",
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
         LazyColumn(Modifier.fillMaxSize()) {
             if (showingRecent && items.isNotEmpty()) {
                 item {
