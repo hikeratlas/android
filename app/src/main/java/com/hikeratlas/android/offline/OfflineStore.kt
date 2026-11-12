@@ -149,10 +149,16 @@ class OfflineStore(context: Context, name: String? = "offline.db") :
         )
     }
 
+    /**
+     * A running download's progress; it says it's downloading too. A stopped
+     * run's clean-up (back to queued) can land after the next run has begun,
+     * so it can't be left to the start of a run alone.
+     */
     fun setAreaProgress(id: Long, done: Int, total: Int) {
         writableDatabase.update(
-            "areas", ContentValues().apply { put("done", done); put("total", total) },
-            "id = ?", arrayOf(id.toString()),
+            "areas",
+            ContentValues().apply { put("done", done); put("total", total); put("state", DOWNLOADING); putNull("error") },
+            "id = ? AND state != ?", arrayOf(id.toString(), READY),
         )
     }
 
