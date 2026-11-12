@@ -59,6 +59,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Dp
 import android.net.Uri
 import com.hikeratlas.android.offline.OfflineAreas
+import com.hikeratlas.android.offline.OfflineStore
 import com.hikeratlas.android.offline.OfflineActions
 import com.hikeratlas.android.offline.DownloadDialog
 import com.hikeratlas.android.track.TrackSummarySheet
@@ -115,6 +116,9 @@ fun MapScreen(
     /** A saved track to show (from the Saved tab), until [onViewClosed]. */
     viewTrack: Long? = null,
     onViewClosed: () -> Unit = {},
+    /** An offline area to open (from the Saved tab): its park's or hike's sheet, until [onAreaOpened]. */
+    openArea: OfflineAreas.Target? = null,
+    onAreaOpened: () -> Unit = {},
 ) {
     val context = LocalContext.current
     val density = LocalDensity.current.density
@@ -322,6 +326,28 @@ fun MapScreen(
             // Fitting the hike waits for its sheet, as for a tapped one.
             is Link.Hike -> model.openRoute(resolved.park, resolved.id, fit = true, hint = resolved.title?.let { HikeHint(it, null) })
             null -> {}
+        }
+    }
+    // A saved area: its park or hike, as a link to it would open it.
+    LinkEffect(openArea, ready = controller != null, onHandled = onAreaOpened) { t ->
+        val c = controller ?: return@LinkEffect
+        searching = false
+        layersOpen = false
+        if (planning) stopPlanning()
+        when (t.kind) {
+            OfflineStore.PARK -> {
+                model.openPark(t.ref, t.name)
+                val box = try {
+                    app.routes.regions().countries.flatMap { it.states }.flatMap { it.areas }.firstOrNull { it.covers(t.ref) }?.bbox
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (_: Exception) {
+                    null
+                }
+                box?.let { c.fitBox(it[0], it[1], it[2], it[3], (220 * density).toInt()) }
+            }
+            // A hike's id starts with its park's; fitting it waits for its sheet.
+            OfflineStore.HIKE -> model.openRoute(t.ref.substringBefore('/'), t.ref, fit = true, hint = HikeHint(t.name, null))
         }
     }
     // A newly opened panel starts at its lowest height: the map stays in view.

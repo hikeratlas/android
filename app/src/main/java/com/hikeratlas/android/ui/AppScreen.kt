@@ -17,6 +17,7 @@ import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Text
 import com.hikeratlas.android.track.SavedScreen
 import com.hikeratlas.android.offline.MapLibreCache
+import com.hikeratlas.android.offline.OfflineAreas
 import androidx.compose.runtime.rememberCoroutineScope
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
@@ -61,6 +62,8 @@ fun AppScreen(app: HikerAtlasApp, link: Uri? = null, onLinkHandled: () -> Unit =
     }
     // A saved track being looked at on the map.
     var viewTrack by rememberSaveable { mutableStateOf<Long?>(null) }
+    // An offline area to open on the map (from the Saved tab), until it's opened.
+    var openArea by remember { mutableStateOf<OfflineAreas.Target?>(null) }
     val offline = app.offlineAreas
     // Offline areas' state: often while any is on its way, now and then otherwise.
     LaunchedEffect(Unit) {
@@ -90,6 +93,7 @@ fun AppScreen(app: HikerAtlasApp, link: Uri? = null, onLinkHandled: () -> Unit =
             app, onSheetOpen = { sheetOpen = it }, bottomBar = if (tabsShown) barHeight else 0.dp,
             link = link, onLinkHandled = onLinkHandled,
             viewTrack = viewTrack.takeIf { tab == Tab.Map }, onViewClosed = { viewTrack = null },
+            openArea = openArea.takeIf { tab == Tab.Map }, onAreaOpened = { openArea = null },
         )
         if (tab == Tab.Saved) {
             Surface(Modifier.fillMaxSize().padding(bottom = barHeight)) {
@@ -107,6 +111,11 @@ fun AppScreen(app: HikerAtlasApp, link: Uri? = null, onLinkHandled: () -> Unit =
                             updateAvailable = { offline.updateAvailable(it) },
                             onUpdate = { id -> scope.launch { offline.update(id) } },
                             onDelete = { id -> scope.launch { offline.delete(id) } },
+                            onOpen = { t ->
+                                viewTrack = null
+                                openArea = t
+                                tab = Tab.Map
+                            },
                         )
                     },
                 )

@@ -117,4 +117,26 @@ class OfflineUiTest {
         compose.onNodeWithText("Update").performClick()
         assertEquals(1L, updated)
     }
+
+    @Test
+    fun tappingAParkOrHikeOpensItButNotTheOverview() {
+        val opened = mutableListOf<OfflineAreas.Target>()
+        val hike = OfflineStore.Area(2, OfflineStore.HIKE, "2226817/garibaldi-lake", "Garibaldi Lake", 0, OfflineStore.READY, 0, 0, 0, null)
+        val overview = OfflineStore.Area(3, OfflineStore.OVERVIEW, "", "North America overview", 0, OfflineStore.READY, 0, 0, 0, null)
+        compose.setContent {
+            HikerAtlasTheme {
+                LazyColumn { offlineAreasSection(listOf(area(OfflineStore.READY), hike, overview), true, {}, {}, {}, onOpen = { opened += it }) }
+            }
+        }
+        compose.onNodeWithText("Garibaldi Provincial Park").performClick()
+        compose.onNodeWithText("Garibaldi Lake").performClick()
+        compose.onNodeWithText("North America overview").performClick()
+        assertEquals(
+            listOf(
+                OfflineAreas.Target(OfflineStore.PARK, "2226817", "Garibaldi Provincial Park"),
+                OfflineAreas.Target(OfflineStore.HIKE, "2226817/garibaldi-lake", "Garibaldi Lake"),
+            ),
+            opened,
+        )
+    }
 }

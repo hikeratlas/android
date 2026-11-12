@@ -66,6 +66,41 @@ class ProfileTest {
     }
 
     @Test
+    fun offlineAProfileComesFromTheCoarserTilesKept() {
+        // As offline: z13-14 can't be fetched (not kept), z12 is on the phone.
+        val slope = Slope()
+        val asked = mutableListOf<String>()
+        val offline = object : ElevationProfiler.DemSource {
+            override val minZoom = 0
+            override val maxZoom = 14
+            override fun tile(z: Int, x: Int, y: Int): FloatArray? {
+                asked += "$z/$x/$y"
+                if (z > 12) throw java.io.IOException("Unable to resolve host")
+                return slope.tile(z, x, y)
+            }
+        }
+        val prof = profiler(offline)
+        val line = listOf(listOf(-123.0, 50.0), listOf(-122.99, 50.0))
+        val p = prof.profile(line)
+        assertEquals(p.length, p.high - p.low, 30.0)
+        // The stand-in is kept a while: the next profile doesn't try z14 for each sample again.
+        val n = asked.size
+        prof.profile(line)
+        assertEquals(n, asked.size)
+    }
+
+    @Test
+    fun withNothingKeptAProfileFailsWithTheFetchsError() {
+        val down = object : ElevationProfiler.DemSource {
+            override val minZoom = 0
+            override val maxZoom = 14
+            override fun tile(z: Int, x: Int, y: Int): FloatArray? = throw java.io.IOException("Unable to resolve host")
+        }
+        val e = runCatching { profiler(down).profile(listOf(listOf(-123.0, 50.0), listOf(-122.99, 50.0))) }.exceptionOrNull()
+        assertEquals("Unable to resolve host", e?.message)
+    }
+
+    @Test
     fun fetchesAProfilesTilesAtOnce() {
         // Each tile takes 300 ms to come; a line across six z14 tiles.
         val slow = object : ElevationProfiler.DemSource {
