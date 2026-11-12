@@ -95,6 +95,7 @@ class HikerAtlasApp : Application(), RecorderHost, OfflineHost {
             .connectTimeout(15, TimeUnit.SECONDS)
             .readTimeout(30, TimeUnit.SECONDS)
             .build()
+        com.hikeratlas.android.map.Thumbs.client = http
         MapLibre.getInstance(this)
         // Offline areas answer MapLibre's requests with no network too.
         MapConnectivity.install(this)

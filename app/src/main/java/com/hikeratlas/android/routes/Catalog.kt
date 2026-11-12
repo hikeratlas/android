@@ -215,3 +215,24 @@ fun hikeUrl(index: BundleIndex, doc: ParkDoc, id: String): String? {
 }
 
 fun parkUrl(index: BundleIndex, parkId: String): String? = index.paths[parkId]?.let { "$SITE/hikes/$it" }
+
+/**
+ * What a route's pages are filed under (its key, else its id), and its
+ * destination's name for "More about ...": a base camp's walk in is about
+ * the camp; a multi-day trip has no one destination.
+ */
+fun reportsKey(doc: ParkDoc, id: String): Pair<String, String?> {
+    val parts = id.split('/')
+    val i = parts.getOrNull(2)?.toIntOrNull()
+    val j = parts.getOrNull(3)?.toIntOrNull()
+    val (key, dest) = when (parts.getOrNull(1)) {
+        "day" -> i?.let { doc.day_hikes.getOrNull(it) }?.let { it.key to it.dest }
+        "stop" -> i?.let { doc.stops.getOrNull(it) }?.let { it.key to it.dest }
+        "base" -> i?.let { doc.base_camps.getOrNull(it) }?.let { b ->
+            if (j == null) b.key to b.camp else b.hikes.getOrNull(j)?.let { it.key to it.dest }
+        }
+        "multi" -> i?.let { doc.point_to_points.getOrNull(it) }?.let { it.key to null }
+        else -> null
+    } ?: (null to null)
+    return (key ?: id) to dest
+}

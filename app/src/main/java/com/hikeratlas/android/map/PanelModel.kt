@@ -5,6 +5,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import com.hikeratlas.android.elevation.ElevationProfiler
 import com.hikeratlas.android.pmtiles.Pmtiles
+import com.hikeratlas.android.routes.RouteReports
+import com.hikeratlas.android.routes.reportsKey
 import com.hikeratlas.android.routes.BundleIndex
 import com.hikeratlas.android.routes.km
 import com.hikeratlas.android.trail.TrailGeometry
@@ -86,6 +88,8 @@ sealed interface Panel {
         val back: RouteList?,
         val shareUrl: String?,
         val profile: ProfileState = ProfileState.Loading,
+        /** Its trip reports and pages, once loaded; none where the build has none (or offline). */
+        val reports: RouteReports? = null,
     ) : Panel
 }
 
@@ -177,6 +181,7 @@ class PanelModel(
                 onRoute(p.selected, fit)
                 fitPending = fit
                 profile(p)
+                reports(p)
             }
         }
         // Already loaded: straight to the hike, with no loading state between.
@@ -277,6 +282,26 @@ class PanelModel(
             }
             geom.lines.isNotEmpty() -> TrailElevation(null, ranges(), null)
             else -> null
+        }
+    }
+
+    private var reportsJob: Job? = null
+
+    /** The route's trip reports, by its park's id (the routes document's: twin parks share one). */
+    private fun reports(d: Panel.Detail) {
+        reportsJob?.cancel()
+        reportsJob = scope.launch {
+            val park = d.doc.park?.id ?: d.selected.park
+            val (key, _) = reportsKey(d.doc, d.selected.id)
+            val r = try {
+                routes.parkReports(park)[key]
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                null // offline, or none: the sheet just leaves them out
+            } ?: return@launch
+            val now = panel
+            if (now is Panel.Detail && now.selected.id == d.selected.id) panel = now.copy(reports = r)
         }
     }
 
