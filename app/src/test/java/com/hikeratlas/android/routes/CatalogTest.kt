@@ -36,7 +36,7 @@ class CatalogTest {
     fun looksUpEachKindOfRoute() {
         val tusk = lookup(doc, "2226817/day/5")!!
         assertEquals("The Black Tusk from Rubble Creek Trailhead", tusk.title)
-        assertEquals("Day hike · out and back", tusk.label)
+        assertEquals("Day hike · out & back", tusk.label)
         assertEquals(23.6, tusk.route.km, 0.0)
         assertEquals("Taylor Meadows", tusk.route.stopovers.single().name)
         assertTrue(tusk.why.any { it.first == "appeal" })

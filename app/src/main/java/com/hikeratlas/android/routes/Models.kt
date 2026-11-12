@@ -15,16 +15,35 @@ data class Route(
     val gain: Double,
     val loss: Double = 0.0,
     val max_ele: Double = 0.0,
+    /** Missing in builds from before it. */
+    val min_ele: Double? = null,
     /** Hardest SAC grade along it: 4 is a scramble. 0: ungraded. */
     val max_sac: Int? = null,
     /** [landcover, share of the route] */
     val landcover: List<List<kotlinx.serialization.json.JsonPrimitive>> = emptyList(),
     /** [kind, names]: the passes, peaks, lakes... it goes by. */
     val passes: List<List<kotlinx.serialization.json.JsonElement>> = emptyList(),
+    /**
+     * [kind, name, km, [lon, lat]]: what it passes, in order (routes builds
+     * after hikeratlas/routes#170); empty before.
+     */
+    val along: List<List<kotlinx.serialization.json.JsonElement>> = emptyList(),
     val stopovers: List<Stopover> = emptyList(),
     val via: List<String> = emptyList(),
     val line: List<LngLat> = emptyList(),
 ) {
+    /** What it passes, in order, where the build says. */
+    val alongs: List<Along>
+        get() = along.mapNotNull { e ->
+            val kind = (e.getOrNull(0) as? kotlinx.serialization.json.JsonPrimitive)?.content ?: return@mapNotNull null
+            val name = (e.getOrNull(1) as? kotlinx.serialization.json.JsonPrimitive)?.content ?: return@mapNotNull null
+            val km = (e.getOrNull(2) as? kotlinx.serialization.json.JsonPrimitive)?.content?.toDoubleOrNull() ?: return@mapNotNull null
+            val at = (e.getOrNull(3) as? kotlinx.serialization.json.JsonArray)
+                ?.mapNotNull { (it as? kotlinx.serialization.json.JsonPrimitive)?.content?.toDoubleOrNull() }
+                ?.takeIf { it.size == 2 } ?: return@mapNotNull null
+            Along(kind, name, km, at)
+        }
+
     val scramble: Boolean get() = (max_sac ?: 0) >= 4
 
     /** Land cover shares, e.g. ("forest", 0.88). */
@@ -43,6 +62,9 @@ data class Route(
         }
 }
 
+/** Something a route passes: a lake, peak, waterfall... [km] from its start, at [at] (lon, lat). */
+data class Along(val kind: String, val name: String, val km: Double, val at: LngLat)
+
 @Serializable
 data class Stopover(val name: String, val km: Double, val at: LngLat)
 
@@ -51,9 +73,18 @@ data class Stopover(val name: String, val km: Double, val at: LngLat)
 data class Hike(
     val from: String,
     val dest: String,
+    /** loop, out-and-back, or one-way (walked one way only, e.g. the Grouse Grind: routes#165). */
     val kind: String,
     val name: String? = null,
+    /** How a one-way hike comes back: a lift's name ("Blue Grouse Gondola"). */
+    val return_by: String? = null,
+    /** Stays the same across routes builds, unlike the id (routes#153); missing before it. */
+    val key: String? = null,
+    /** The score's parts, [name, points]: the park's hikes are listed best first by their total. */
     val why: List<List<kotlinx.serialization.json.JsonPrimitive>>? = null,
+    val score: Double? = null,
+    /** What the destination is: peak, lake, waterfall, viewpoint, trail... */
+    val dest_kind: String? = null,
     val start: LngLat? = null,
     val route: Route,
 )
@@ -62,6 +93,7 @@ data class Hike(
 data class BaseCamp(
     val camp: String,
     val from: String,
+    val key: String? = null,
     val approach: Route,
     val hikes: List<Hike> = emptyList(),
 )
@@ -72,6 +104,7 @@ data class PointToPoint(
     val to: String,
     val kind: String,
     val name: String? = null,
+    val key: String? = null,
     val route: Route,
 )
 

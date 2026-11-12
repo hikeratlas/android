@@ -7,12 +7,6 @@ import kotlin.math.roundToInt
 // How the website names, lists and links curated routes (app/hikes.ts and
 // components/CuratedRoutes.tsx), ported so the app reads the same.
 
-private val KIND = mapOf(
-    "out-and-back" to "out and back",
-    "loop" to "loop",
-    "point-to-point" to "point to point (needs a shuttle)",
-)
-
 private val TYPE_LABEL = mapOf(
     "day" to "Day hike", "approach" to "Base camp", "multi-day" to "Multi-day",
     "from-camp" to "From camp", "stop" to "Stop",
@@ -71,7 +65,7 @@ fun lookup(doc: ParkDoc, id: String): Selected? {
     }
     return when (parts.getOrNull(1)) {
         "day" -> doc.day_hikes.getOrNull(i)?.let { h ->
-            Selected(id, park, named(h.name, "${h.dest} from ${h.from}"), "Day hike · ${KIND[h.kind] ?: h.kind}", h.route, why(h))
+            Selected(id, park, named(h.name, "${h.dest} from ${h.from}"), "Day hike · ${shapeWords(h.kind, h.return_by)}", h.route, why(h))
         }
         "stop" -> doc.stops.getOrNull(i)?.let { h ->
             Selected(id, park, h.dest, "Stop · ${walk(h)}", h.route, why(h))
@@ -83,13 +77,13 @@ fun lookup(doc: ParkDoc, id: String): Selected? {
                 b.hikes.getOrNull(j)?.let { h ->
                     Selected(
                         id, park, named(h.name, "${h.dest} from ${b.camp}"),
-                        "Day hike from base camp · ${KIND[h.kind] ?: h.kind}", h.route, why(h), b, i,
+                        "Day hike from base camp · ${shapeWords(h.kind, h.return_by)}", h.route, why(h), b, i,
                     )
                 }
             }
         }
         "multi" -> doc.point_to_points.getOrNull(i)?.let { t ->
-            Selected(id, park, named(t.name, "${t.from} to ${t.to}"), "Multi-day · ${KIND["point-to-point"]}", t.route)
+            Selected(id, park, named(t.name, "${t.from} to ${t.to}"), "Multi-day · point to point (needs a shuttle)", t.route)
         }
         else -> null
     }
