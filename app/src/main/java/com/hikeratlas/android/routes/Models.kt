@@ -31,6 +31,13 @@ data class Route(
     val stopovers: List<Stopover> = emptyList(),
     val via: List<String> = emptyList(),
     val line: List<LngLat> = emptyList(),
+    /**
+     * The route's key (hikeratlas/route-keys), made by the build
+     * (basemap#325): what faves and posts name it by. Missing in builds from
+     * before it, and in offline areas downloaded from them; the app never
+     * makes one itself, so such a route can't be faved.
+     */
+    val route_key: String? = null,
 ) {
     /** What it passes, in order, where the build says. */
     val alongs: List<Along>

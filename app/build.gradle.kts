@@ -60,6 +60,15 @@ android {
         buildConfig = true
     }
 
+    packaging {
+        resources {
+            // h3-java's jar carries its native library for each platform as
+            // a resource. A phone has no use for the desktop ones; its own
+            // go in as jniLibs (unpackH3Natives, below).
+            excludes += listOf("linux-*/**", "darwin-*/**", "windows-*/**")
+        }
+    }
+
     testOptions {
         unitTests.isReturnDefaultValues = true
         unitTests.isIncludeAndroidResources = true
@@ -87,6 +96,8 @@ dependencies {
     implementation(libs.androidx.browser)
     // The Android build of zstd-jni ships the native libraries for each ABI.
     implementation("${libs.zstd.get()}@aar")
+    // H3, to find where a route key's route is (its centroid cell).
+    implementation(libs.h3)
 
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)
@@ -101,4 +112,36 @@ dependencies {
     // android.jar's org.json is stubbed out in unit tests.
     testImplementation(libs.json)
     testImplementation(libs.androidx.work.testing)
+}
+
+// h3-java ships its Android libraries (arm and arm64; none for x86 or x86_64)
+// as resources in its jar, to be copied out at run time, but the APK leaves
+// .so resources out. They're unpacked into jniLibs instead, so Android
+// installs them as the app's own and H3Core.newSystemInstance loads them.
+val h3Natives: Configuration by configurations.creating { isTransitive = false }
+dependencies { h3Natives(libs.h3) }
+
+abstract class UnpackH3Natives : DefaultTask() {
+    @get:InputFiles abstract val jar: ConfigurableFileCollection
+    @get:OutputDirectory abstract val outputDir: DirectoryProperty
+    @get:Inject abstract val files: FileSystemOperations
+    @get:Inject abstract val archives: ArchiveOperations
+
+    @TaskAction
+    fun unpack() {
+        val abis = mapOf("android-arm64" to "arm64-v8a", "android-arm" to "armeabi-v7a")
+        files.sync {
+            from(archives.zipTree(jar.singleFile)) {
+                include(abis.keys.map { "$it/libh3-java.so" })
+                eachFile { path = "${abis.getValue(path.substringBefore('/'))}/$name" }
+                includeEmptyDirs = false
+            }
+            into(outputDir)
+        }
+    }
+}
+
+val unpackH3Natives = tasks.register<UnpackH3Natives>("unpackH3Natives") { jar.from(h3Natives) }
+androidComponents {
+    onVariants { variant -> variant.sources.jniLibs?.addGeneratedSourceDirectory(unpackH3Natives, UnpackH3Natives::outputDir) }
 }

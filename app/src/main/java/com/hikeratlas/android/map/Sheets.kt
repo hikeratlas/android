@@ -122,6 +122,8 @@ fun PanelHeader(
     offline: OfflineActions? = null,
     /** A park's country or state, tapped in its crumbs. */
     onCrumb: (Crumb) -> Unit = {},
+    /** Faving a hike, from its sheet's heart; none where it's not offered. */
+    faves: com.hikeratlas.android.ui.FaveActions? = null,
 ) {
     val context = LocalContext.current
     Column(Modifier.fillMaxWidth().padding(bottom = 12.dp)) {
@@ -236,6 +238,9 @@ fun PanelHeader(
                         }
                     }
                     if (offline != null) OfflineButton(OfflineAreas.Target(OfflineStore.HIKE, p.selected.id, p.selected.title), offline)
+                    // Only a route the build gave a key can be faved: the app never makes keys.
+                    val key = r.route_key
+                    if (faves != null && key != null) com.hikeratlas.android.ui.FaveButton(key, p.selected.title, faves)
                     if (p.shareUrl != null) {
                         IconButton(onClick = { share(context, p.selected.title, p.shareUrl) }) {
                             Icon(Icons.Filled.Share, contentDescription = "Share")

@@ -75,6 +75,24 @@ class RoutesRepository(
         return doc
     }
 
+    private val online = object : LinkedHashMap<String, ParkDoc>(16, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, ParkDoc>) = size > 20
+    }
+
+    /**
+     * The park's routes from the build online, never an offline area's copy
+     * (which may be from an older build: one without route keys, say). Null
+     * if the build has none for it; throws without a network.
+     */
+    suspend fun parkOnline(parkId: String): ParkDoc? {
+        mutex.withLock { online[parkId] }?.let { return it }
+        val idx = index()
+        val (offset, length) = idx.parks[parkId] ?: return null
+        val doc = withContext(Dispatchers.IO) { decodePark(get("$root/${idx.bundle}", offset until offset + length)) }
+        mutex.withLock { online[parkId] = doc }
+        return doc
+    }
+
     private val reports = object : LinkedHashMap<String, Map<String, RouteReports>>(16, 0.75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Map<String, RouteReports>>) = size > 20
     }
@@ -111,7 +129,7 @@ class RoutesRepository(
     }
 
     /** Forgets the index and parks, e.g. after a rebuild moved the bundle. */
-    suspend fun refresh() = mutex.withLock { index = null; regions = null; parks.clear(); reports.clear() }
+    suspend fun refresh() = mutex.withLock { index = null; regions = null; parks.clear(); online.clear(); reports.clear() }
 
     /** The park's routes as the bundle has them (gzipped JSON), for keeping offline; null if it has none. */
     suspend fun parkBytes(parkId: String): ByteArray? {

@@ -51,7 +51,11 @@ class FakeAtproto : AutoCloseable {
     @Volatile var refreshToken = "rt-1"
     private var issued = 1
 
-    /** The account's records that have rkeys, by "collection/rkey": getRecord reads them, createRecord and putRecord write them. */
+    /**
+     * The account's records that have rkeys, by "collection/rkey": getRecord
+     * and listRecords read them, createRecord and putRecord write them,
+     * deleteRecord removes them.
+     */
     val records = java.util.concurrent.ConcurrentHashMap<String, JsonObject>()
     /** The PDS's getRecord answers with this HTTP status (a 5xx: it's down) instead. */
     @Volatile var getRecordFails: Int? = null
@@ -204,6 +208,25 @@ class FakeAtproto : AutoCloseable {
                 val key = "${body["collection"]!!.jsonPrimitive.content}/${body["rkey"]!!.jsonPrimitive.content}"
                 records[key] = body["record"]!!.jsonObject
                 json("""{"uri":"at://$did/$key","cid":"bafy-$key"}""")
+            }
+            "/xrpc/com.atproto.repo.deleteRecord" -> {
+                // As a PDS: deleting a record that isn't there is fine.
+                val body = Json.parseToJsonElement(r.body!!.utf8()).jsonObject
+                records.remove("${body["collection"]!!.jsonPrimitive.content}/${body["rkey"]!!.jsonPrimitive.content}")
+                json("{}")
+            }
+            "/xrpc/com.atproto.repo.listRecords" -> {
+                // By record key, as a PDS lists them; the cursor is the last key given.
+                val collection = r.url.queryParameter("collection")!!
+                val limit = r.url.queryParameter("limit")?.toInt() ?: 50
+                val after = r.url.queryParameter("cursor")
+                val page = records.keys.filter { it.startsWith("$collection/") }.map { it.removePrefix("$collection/") }
+                    .sorted().filter { after == null || it > after }.take(limit)
+                val list = page.joinToString(",") { k ->
+                    """{"uri":"at://$did/$collection/$k","cid":"bafy-$k","value":${records["$collection/$k"]}}"""
+                }
+                val cursor = if (page.size == limit) ""","cursor":"${page.last()}"""" else ""
+                json("""{"records":[$list]$cursor}""")
             }
             "/xrpc/com.atproto.repo.uploadBlob" -> json(
                 """{"blob":{"${'$'}type":"blob","mimeType":"${r.headers["Content-Type"]}","size":${r.body!!.size}}}""",

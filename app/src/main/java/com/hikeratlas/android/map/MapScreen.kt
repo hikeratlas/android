@@ -123,6 +123,8 @@ fun MapScreen(
     onAreaOpened: () -> Unit = {},
     /** A park's country or state, tapped in its sheet's crumbs: none moves the map to it. */
     onCrumb: ((Crumb) -> Unit)? = null,
+    /** Faving hikes from their sheets: none, no heart. */
+    faves: com.hikeratlas.android.ui.FaveActions? = null,
 ) {
     val context = LocalContext.current
     val density = LocalDensity.current.density
@@ -600,6 +602,7 @@ fun MapScreen(
                         onCrumb = { c ->
                             if (onCrumb != null) onCrumb(c) else c.bbox?.let { b -> model.close(); controller?.fitBox(b[0], b[1], b[2], b[3], 0) }
                         },
+                        faves = faves,
                     )
                 },
                 body = { PanelBody(model) { p -> controller?.showHover(p) } },
