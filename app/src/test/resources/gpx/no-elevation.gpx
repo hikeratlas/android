@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<gpx version="1.1" creator="Hiker Atlas" xmlns="http://www.topografix.com/GPX/1/1" xmlns:ha="https://www.hikeratlas.com/gpx/1">
+  <trk>
+    <trkseg>
+      <trkpt lat="49.100000" lon="-123.000000"><time>2026-07-03T17:33:25Z</time></trkpt>
+      <trkpt lat="49.100300" lon="-122.999800"><time>2026-07-03T17:33:30Z</time></trkpt>
+      <trkpt lat="49.100600" lon="-122.999600"><time>2026-07-03T17:33:35Z</time></trkpt>
+      <trkpt lat="49.100900" lon="-122.999400"><time>2026-07-03T17:33:40Z</time></trkpt>
+      <trkpt lat="49.101200" lon="-122.999200"><time>2026-07-03T17:33:45Z</time></trkpt>
+      <trkpt lat="49.101500" lon="-122.999000"><time>2026-07-03T17:33:50Z</time></trkpt>
+      <trkpt lat="49.101800" lon="-122.998800"><time>2026-07-03T17:33:55Z</time></trkpt>
+      <trkpt lat="49.102100" lon="-122.998600"><time>2026-07-03T17:34:00Z</time></trkpt>
+      <trkpt lat="49.102400" lon="-122.998400"><time>2026-07-03T17:34:05Z</time></trkpt>
+      <trkpt lat="49.102700" lon="-122.998200"><time>2026-07-03T17:34:10Z</time></trkpt>
+      <trkpt lat="49.103000" lon="-122.998000"><time>2026-07-03T17:34:15Z</time></trkpt>
+      <trkpt lat="49.103300" lon="-122.997800"><time>2026-07-03T17:34:20Z</time></trkpt>
+      <trkpt lat="49.103600" lon="-122.997600"><time>2026-07-03T17:34:25Z</time></trkpt>
+      <trkpt lat="49.103900" lon="-122.997400"><time>2026-07-03T17:34:30Z</time></trkpt>
+      <trkpt lat="49.104200" lon="-122.997200"><time>2026-07-03T17:34:35Z</time></trkpt>
+      <trkpt lat="49.104500" lon="-122.997000"><time>2026-07-03T17:34:40Z</time></trkpt>
+      <trkpt lat="49.104800" lon="-122.996800"><time>2026-07-03T17:34:45Z</time></trkpt>
+      <trkpt lat="49.105100" lon="-122.996600"><time>2026-07-03T17:34:50Z</time></trkpt>
+      <trkpt lat="49.105400" lon="-122.996400"><time>2026-07-03T17:34:55Z</time></trkpt>
+      <trkpt lat="49.105700" lon="-122.996200"><time>2026-07-03T17:35:00Z</time></trkpt>
+      <trkpt lat="49.106000" lon="-122.996000"><time>2026-07-03T17:35:05Z</time></trkpt>
+      <trkpt lat="49.106300" lon="-122.995800"><time>2026-07-03T17:35:10Z</time></trkpt>
+      <trkpt lat="49.106600" lon="-122.995600"><time>2026-07-03T17:35:15Z</time></trkpt>
+      <trkpt lat="49.106900" lon="-122.995400"><time>2026-07-03T17:35:20Z</time></trkpt>
+      <trkpt lat="49.107200" lon="-122.995200"><time>2026-07-03T17:35:25Z</time></trkpt>
+      <trkpt lat="49.107500" lon="-122.995000"><time>2026-07-03T17:35:30Z</time></trkpt>
+      <trkpt lat="49.107800" lon="-122.994800"><time>2026-07-03T17:35:35Z</time></trkpt>
+      <trkpt lat="49.108100" lon="-122.994600"><time>2026-07-03T17:35:40Z</time></trkpt>
+      <trkpt lat="49.108400" lon="-122.994400"><time>2026-07-03T17:35:45Z</time></trkpt>
+      <trkpt lat="49.108700" lon="-122.994200"><time>2026-07-03T17:35:50Z</time></trkpt>
+      <trkpt lat="49.109000" lon="-122.994000"><time>2026-07-03T17:35:55Z</time></trkpt>
+      <trkpt lat="49.109300" lon="-122.993800"><time>2026-07-03T17:36:00Z</time></trkpt>
+      <trkpt lat="49.109600" lon="-122.993600"><time>2026-07-03T17:36:05Z</time></trkpt>
+      <trkpt lat="49.109900" lon="-122.993400"><time>2026-07-03T17:36:10Z</time></trkpt>
+      <trkpt lat="49.110200" lon="-122.993200"><time>2026-07-03T17:36:15Z</time></trkpt>
+      <trkpt lat="49.110500" lon="-122.993000"><time>2026-07-03T17:36:20Z</time></trkpt>
+      <trkpt lat="49.110800" lon="-122.992800"><time>2026-07-03T17:36:25Z</time></trkpt>
+      <trkpt lat="49.111100" lon="-122.992600"><time>2026-07-03T17:36:30Z</time></trkpt>
+      <trkpt lat="49.111400" lon="-122.992400"><time>2026-07-03T17:36:35Z</time></trkpt>
+      <trkpt lat="49.111700" lon="-122.992200"><time>2026-07-03T17:36:40Z</time></trkpt>
+      <trkpt lat="49.112000" lon="-122.992000"><time>2026-07-03T17:36:45Z</time></trkpt>
+      <trkpt lat="49.112300" lon="-122.991800"><time>2026-07-03T17:36:50Z</time></trkpt>
+      <trkpt lat="49.112600" lon="-122.991600"><time>2026-07-03T17:36:55Z</time></trkpt>
+      <trkpt lat="49.112900" lon="-122.991400"><time>2026-07-03T17:37:00Z</time></trkpt>
+      <trkpt lat="49.113200" lon="-122.991200"><time>2026-07-03T17:37:05Z</time></trkpt>
+      <trkpt lat="49.113500" lon="-122.991000"><time>2026-07-03T17:37:10Z</time></trkpt>
+      <trkpt lat="49.113800" lon="-122.990800"><time>2026-07-03T17:37:15Z</time></trkpt>
+      <trkpt lat="49.114100" lon="-122.990600"><time>2026-07-03T17:37:20Z</time></trkpt>
+      <trkpt lat="49.114400" lon="-122.990400"><time>2026-07-03T17:37:25Z</time></trkpt>
+      <trkpt lat="49.114700" lon="-122.990200"><time>2026-07-03T17:37:30Z</time></trkpt>
+    </trkseg>
+  </trk>
+</gpx>

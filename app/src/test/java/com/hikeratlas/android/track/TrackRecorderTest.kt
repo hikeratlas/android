@@ -48,7 +48,7 @@ class TrackRecorderTest {
         assertEquals(812.5, saved[0].altitude!!, 0.0)
         assertEquals(830.1, saved[0].mslAltitude!!, 0.0)
         assertEquals(6f, saved[0].verticalAccuracy!!, 0f)
-        assertEquals(22.2, r.state!!.metres, 0.2)
+        assertEquals(22.0, r.state!!.metres, 0.0)
         assertEquals(listOf(2), r.state!!.segments.map { it.size })
     }
 
@@ -88,7 +88,7 @@ class TrackRecorderTest {
         assertEquals(id, s.trackId)
         assertTrue(s.paused)
         assertEquals(120_000, s.elapsed(now))
-        assertEquals(111.2, s.metres, 0.5)
+        assertEquals(111.0, s.metres, 0.0)
         // Resumed: carries on in a new segment, the hour not counted.
         again.resume()
         now += 10_000
@@ -98,11 +98,24 @@ class TrackRecorderTest {
     }
 
     @Test
-    fun theClimbIsMeasuredFromTheDem() {
+    fun withoutGpsAltitudesTheClimbIsMeasuredFromTheDem() {
         val r = recorder(ElevationProfiler(listOf(slope)))
         r.start()
-        r.onFix(fix(49.0, lon = -123.0))
-        r.onFix(fix(49.0, lon = -122.99))
+        r.onFix(fix(49.0, lon = -123.0, alt = null, msl = null))
+        r.onFix(fix(49.0, lon = -122.99, alt = null, msl = null))
         assertTrue("climb ${r.state!!.gain}", (r.state!!.gain ?: 0.0) > 0)
+    }
+
+    @Test
+    fun withGpsAltitudesTheClimbIsGpssAsTheFinishedTracksWillBe() {
+        // The DEM climbs steeply east; GPS says 12 m up, then 3 m (noise).
+        val r = recorder(ElevationProfiler(listOf(slope)))
+        r.start()
+        r.onFix(fix(49.0, lon = -123.0, msl = 800.0))
+        r.onFix(fix(49.0, lon = -122.995, msl = 812.0))
+        r.onFix(fix(49.0, lon = -122.99, msl = 815.0))
+        assertEquals(12.0, r.state!!.gain!!, 0.0)
+        // Rounded to the metre, as the track's record will be.
+        assertEquals(Math.round(r.state!!.metres).toDouble(), r.state!!.metres, 0.0)
     }
 }

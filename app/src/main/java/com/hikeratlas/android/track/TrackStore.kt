@@ -33,7 +33,7 @@ class TrackStore(context: Context, name: String? = "tracks.db") :
         val elapsedMs: Long,
         /** Of that, moving. */
         val movingMs: Long,
-        /** From the DEM; null where there was none. */
+        /** From GPS altitudes as the website measures them; from the DEM for a track without any; null where neither. */
         val gain: Double?,
         val loss: Double?,
     )
@@ -70,6 +70,10 @@ class TrackStore(context: Context, name: String? = "tracks.db") :
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
         if (oldVersion < 2) addStats(db)
+        // Version 3: tracks are measured as the website measures their GPX
+        // (its distance, and the climb from GPS altitudes, not the DEM), so
+        // numbers kept from before are worked out again.
+        if (oldVersion < 3) db.execSQL("UPDATE tracks SET metres = NULL, elapsed_ms = NULL, moving_ms = NULL, gain = NULL, loss = NULL")
     }
 
     // Version 2: a finished track's numbers.
@@ -180,6 +184,6 @@ class TrackStore(context: Context, name: String? = "tracks.db") :
     private fun Cursor.string(n: String) = col(n).let { if (isNull(it)) null else getString(it) }
 
     private companion object {
-        const val VERSION = 2
+        const val VERSION = 3
     }
 }

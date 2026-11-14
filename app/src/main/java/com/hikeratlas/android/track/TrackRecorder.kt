@@ -14,7 +14,7 @@ import java.util.concurrent.Executors
  */
 class TrackRecorder(
     private val store: TrackStore,
-    /** Measures the climb from the DEM, as the hike charts do; null for none. */
+    /** Measures the climb from the DEM, for a track without GPS altitudes; null for none. */
     private val profiler: ElevationProfiler?,
     private val clock: () -> Long = System::currentTimeMillis,
     private val background: Executor = Executors.newSingleThreadExecutor { r -> Thread(r, "track-climb").apply { isDaemon = true } },
@@ -27,8 +27,13 @@ class TrackRecorder(
         val pausedAt: Long?,
         /** The kept fixes as [lng, lat], a segment per stretch between pauses. */
         val segments: List<List<List<Double>>>,
+        /** As the finished track's GPX will measure (the website's way). */
         val metres: Double,
-        /** Climb from the DEM; null until first measured, or where there's no DEM. */
+        /**
+         * Climb from GPS altitudes, as the finished track's; from the DEM
+         * where GPS gives none (null until first measured, or where there's
+         * no DEM).
+         */
         val gain: Double?,
     ) {
         val paused get() = pausedAt != null
@@ -72,7 +77,7 @@ class TrackRecorder(
         }
         if (pausedAt != null) log.breakSegment()
         measuredAt = 0L
-        state = State(t.id, t.started, t.pausedMs, pausedAt, lines(), log.metres, null)
+        state = State(t.id, t.started, t.pausedMs, pausedAt, lines(), metres(), gpsGain())
         measure()
         return true
     }
@@ -114,16 +119,24 @@ class TrackRecorder(
         if (s.paused) return
         if (!log.accept(f)) return
         store.add(s.trackId, log.segment, f)
-        state = s.copy(segments = lines(), metres = log.metres)
-        if (clock() - measuredAt >= MEASURE_EVERY_MS) measure()
+        val gps = gpsGain()
+        state = s.copy(segments = lines(), metres = metres(), gain = gps ?: s.gain)
+        if (gps == null && clock() - measuredAt >= MEASURE_EVERY_MS) measure()
     }
 
     private fun lines() = log.segments.map { seg -> seg.map { it.lngLat } }
 
-    /** The climb so far, from the DEM, off the main thread. */
+    /** The climb from GPS altitudes, if any fix had one: the finished track's, rounded as it will be. */
+    private fun gpsGain() = log.stats().gain?.toDouble()
+
+    /** The length, rounded to the metre as the finished track's will be. */
+    private fun metres() = TrackMeasure.jsRound(log.metres).toDouble()
+
+    /** The climb so far, from the DEM, off the main thread: only while GPS has given no altitudes. */
     private fun measure() {
         val p = profiler ?: return
         val s = state ?: return
+        if (log.stats().gain != null) return
         val line = s.segments.flatten()
         if (line.size < 2 || measuring) return
         measuring = true
@@ -133,7 +146,8 @@ class TrackRecorder(
             synchronized(this) {
                 measuring = false
                 val now = state
-                if (gain != null && now != null && now.trackId == s.trackId) state = now.copy(gain = gain)
+                // GPS altitudes since arrived win: they're what the track will say.
+                if (gain != null && now != null && now.trackId == s.trackId && gpsGain() == null) state = now.copy(gain = gain)
             }
         }
     }
