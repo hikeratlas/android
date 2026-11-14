@@ -125,6 +125,8 @@ fun MapScreen(
     onCrumb: ((Crumb) -> Unit)? = null,
     /** Faving hikes from their sheets: none, no heart. */
     faves: com.hikeratlas.android.ui.FaveActions? = null,
+    /** Posting reviews and tracks, from hikes' sheets and recorded tracks: none, not offered. */
+    posts: com.hikeratlas.android.ui.PostActions? = null,
 ) {
     val context = LocalContext.current
     val density = LocalDensity.current.density
@@ -138,6 +140,8 @@ fun MapScreen(
     var inView by remember { mutableStateOf<List<RouteItem>>(emptyList()) }
     var searching by remember { mutableStateOf(false) }
     var layersOpen by remember { mutableStateOf(false) }
+    // A recorded track being posted (its id and name), from its panel.
+    var postingTrack by remember { mutableStateOf<Pair<Long, String>?>(null) }
     var layerChoice by remember { mutableStateOf(LayerChoice.load(context)) }
     var mapLayers by remember { mutableStateOf<MapLayers?>(null) }
     var planning by remember { mutableStateOf(false) }
@@ -583,8 +587,12 @@ fun MapScreen(
                     },
                     onScrub = { p -> controller?.showHover(p) },
                     modifier = Modifier.align(Alignment.BottomCenter).onSizeChanged { trackPanelPx = it.height },
+                    onPost = posts?.let { { postingTrack = v.track.id to v.name } },
                 )
             }
+        }
+        postingTrack?.let { (id, name) ->
+            if (posts != null) com.hikeratlas.android.ui.TrackPostDialog(id, name, posts, onClose = { postingTrack = null })
         }
 
         if (open && !planning && containerPx > 0) {
@@ -605,7 +613,7 @@ fun MapScreen(
                         faves = faves,
                     )
                 },
-                body = { PanelBody(model) { p -> controller?.showHover(p) } },
+                body = { PanelBody(model, posts) { p -> controller?.showHover(p) } },
             )
         }
     }

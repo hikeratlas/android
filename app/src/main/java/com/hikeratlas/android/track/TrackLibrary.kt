@@ -102,6 +102,15 @@ class TrackLibrary(
         File(dir, Gpx.fileName(name)).apply { writeText(Gpx.write(name, t.started, store.points(id))) }
     }
 
+    /** A track as GPX, as it's shared and posted. */
+    suspend fun gpxText(id: Long): String? = withContext(io) {
+        val t = store.track(id) ?: return@withContext null
+        Gpx.write(t.name ?: "Track", t.started, store.points(id))
+    }
+
+    /** A track's line: a list of [lng, lat] per stretch between pauses. */
+    suspend fun lines(id: Long): List<List<List<Double>>> = withContext(io) { segmentsOf(store.points(id)) }
+
     suspend fun rename(id: Long, name: String) {
         withContext(io) { store.rename(id, name.trim().ifEmpty { "Track" }) }
         refresh()

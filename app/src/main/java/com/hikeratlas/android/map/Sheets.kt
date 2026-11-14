@@ -105,7 +105,7 @@ private fun TitleRow(title: String, full: Boolean, onClose: () -> Unit, actions:
 fun PanelContent(model: PanelModel, onScrub: (DoubleArray?) -> Unit) {
     Column {
         PanelHeader(model, full = true, onScrub)
-        PanelBody(model, onScrub)
+        PanelBody(model, onScrub = onScrub)
     }
 }
 
@@ -288,7 +288,12 @@ fun hasDetailBody(d: Panel.Detail) = true
 
 /** The rest of the sheet: lists, the elevation chart, details. Scrolls. */
 @Composable
-fun PanelBody(model: PanelModel, onScrub: (DoubleArray?) -> Unit) {
+fun PanelBody(
+    model: PanelModel,
+    /** Posting reviews and tracks, from a hike's sheet; none where it's not offered. */
+    posts: com.hikeratlas.android.ui.PostActions? = null,
+    onScrub: (DoubleArray?) -> Unit,
+) {
     when (val p = model.panel) {
         is Panel.RouteList -> if (p.doc != null) {
             ParkBody(p, p.doc, model)
@@ -303,7 +308,7 @@ fun PanelBody(model: PanelModel, onScrub: (DoubleArray?) -> Unit) {
                 for (item in shown) RouteRow(item) { model.openRoute(item.park, item.id, hint = HikeHint(item.title, item.meta)) }
             }
         }
-        is Panel.Detail -> DetailBody(p, model, onScrub)
+        is Panel.Detail -> DetailBody(p, model, onScrub, posts)
         is Panel.Trail -> TrailBody(p, model, onScrub)
         else -> {}
     }
@@ -366,7 +371,7 @@ private fun RouteRow(item: RouteItem, onClick: () -> Unit) {
 }
 
 @Composable
-private fun DetailBody(d: Panel.Detail, model: PanelModel, onScrub: (DoubleArray?) -> Unit) {
+private fun DetailBody(d: Panel.Detail, model: PanelModel, onScrub: (DoubleArray?) -> Unit, posts: com.hikeratlas.android.ui.PostActions?) {
     val context = LocalContext.current
     val r = d.selected.route
     val title = d.selected.title
@@ -457,6 +462,10 @@ private fun DetailBody(d: Panel.Detail, model: PanelModel, onScrub: (DoubleArray
                 LinkRow("The walk in", null) { model.openRoute(park, "$park/base/$i") }
             }
         }
+        // As the website's sheet: before the trip reports. Only a route the
+        // build gave a key: posts are tied to the hike by it.
+        val key = r.route_key
+        if (posts != null && key != null) com.hikeratlas.android.ui.PostSection(com.hikeratlas.android.ui.PostHike(key, title), posts)
         d.reports?.let { ReportsSection(it, d.selected.dest) }
         // The way there, the route for a GPS app, and a link to it.
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {

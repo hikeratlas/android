@@ -54,7 +54,11 @@ import com.hikeratlas.android.units.elev
 
 private val CHART_HEIGHT = 110.dp
 
-/** "7.3 km · 1:04:09 · ↑ 612 m", the climb where the DEM had it. */
+/**
+ * "7.3 km · 1:04:09 · ↑ 612 m": the distance and climb as the website
+ * measures the track's GPX (what its posted record says); the climb from the
+ * DEM for a track without GPS altitudes, where the DEM had it.
+ */
 fun statsLine(s: TrackStore.Stats): String =
     listOfNotNull(dist(s.metres / 1000, 1), duration(s.elapsedMs), s.gain?.let { "↑ ${elev(it)}" }).joinToString(" · ")
 
@@ -118,7 +122,7 @@ fun TrackSummarySheet(
     }
 }
 
-/** A saved track on the map: its name and numbers, its profile, Share (as GPX) and Delete. */
+/** A saved track on the map: its name and numbers, its profile, Share (as GPX), Post and Delete. */
 @Composable
 fun TrackPanel(
     detail: TrackLibrary.Detail,
@@ -127,6 +131,8 @@ fun TrackPanel(
     onShare: () -> Unit,
     onScrub: (DoubleArray?) -> Unit,
     modifier: Modifier = Modifier,
+    /** "Post this track" (to the user's account); null, not offered. */
+    onPost: (() -> Unit)? = null,
 ) {
     var deleting by remember { mutableStateOf(false) }
     Surface(shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp), shadowElevation = 8.dp, modifier = modifier.fillMaxWidth()) {
@@ -143,6 +149,7 @@ fun TrackPanel(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(moreLine(detail.stats), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
                 TextButton(onClick = { deleting = true }) { Text("Delete") }
+                if (onPost != null) TextButton(onClick = onPost) { Text("Post this track") }
             }
         }
     }

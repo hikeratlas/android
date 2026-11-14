@@ -1,0 +1,99 @@
+[
+  {
+    "path": "/xrpc/com.atproto.repo.uploadBlob",
+    "contentType": "application/gzip"
+  },
+  {
+    "path": "/xrpc/com.atproto.repo.createRecord",
+    "body": {
+      "repo": "did:plc:abcdefghijklmnopqrstuvwx",
+      "collection": "com.hikeratlas.temp.track",
+      "record": {
+        "$type": "com.hikeratlas.temp.track",
+        "gpx": {
+          "$type": "blob",
+          "ref": {
+            "$link": "bafkreigpx"
+          },
+          "mimeType": "application/gzip",
+          "size": 1234
+        },
+        "createdAt": "<createdAt>",
+        "license": "CC-BY-4.0",
+        "startedAt": "2026-07-02T13:46:43.000Z",
+        "duration": 4928,
+        "distance": 2204,
+        "gain": 88,
+        "title": "Mount Si",
+        "routeKey": "1E57E06gbDEBBBICDGF.tn3dBnAuR_Q"
+      }
+    }
+  },
+  {
+    "path": "/xrpc/com.atproto.repo.createRecord",
+    "body": {
+      "repo": "did:plc:abcdefghijklmnopqrstuvwx",
+      "collection": "com.hikeratlas.temp.review",
+      "record": {
+        "$type": "com.hikeratlas.temp.review",
+        "text": "Great views.",
+        "createdAt": "<createdAt>",
+        "license": "CC-BY-4.0",
+        "hikedAt": "2026-07-02T19:00:00.000Z",
+        "routeKey": "1E57E06gbDEBBBICDGF.tn3dBnAuR_Q",
+        "track": {
+          "uri": "at://did:plc:abcdefghijklmnopqrstuvwx/com.hikeratlas.temp.track/3tid1",
+          "cid": "bafyrecord1"
+        },
+        "tags": [
+          "views",
+          "mud"
+        ]
+      }
+    }
+  },
+  {
+    "path": "/xrpc/com.atproto.repo.uploadBlob",
+    "contentType": "application/gzip"
+  },
+  {
+    "path": "/xrpc/com.atproto.repo.createRecord",
+    "body": {
+      "repo": "did:plc:abcdefghijklmnopqrstuvwx",
+      "collection": "com.hikeratlas.temp.track",
+      "record": {
+        "$type": "com.hikeratlas.temp.track",
+        "gpx": {
+          "$type": "blob",
+          "ref": {
+            "$link": "bafkreigpx"
+          },
+          "mimeType": "application/gzip",
+          "size": 1234
+        },
+        "createdAt": "<createdAt>",
+        "license": "CC0-1.0",
+        "startedAt": "2026-07-03T17:33:25.000Z",
+        "duration": 245,
+        "distance": 1783,
+        "title": "Mount Si",
+        "routeKey": "1E57E06gbDEBBBICDGF.tn3dBnAuR_Q"
+      }
+    }
+  },
+  {
+    "path": "/xrpc/com.atproto.repo.createRecord",
+    "body": {
+      "repo": "did:plc:abcdefghijklmnopqrstuvwx",
+      "collection": "com.hikeratlas.temp.review",
+      "record": {
+        "$type": "com.hikeratlas.temp.review",
+        "text": "Just words.",
+        "createdAt": "<createdAt>",
+        "license": "CC0-1.0",
+        "hikedAt": "2026-07-02T19:00:00.000Z",
+        "routeKey": "1E57E06gbDEBBBICDGF.tn3dBnAuR_Q"
+      }
+    }
+  }
+]
