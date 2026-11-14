@@ -51,6 +51,11 @@ class FakeAtproto : AutoCloseable {
     @Volatile var refreshToken = "rt-1"
     private var issued = 1
 
+    /** The account's records that have rkeys, by "collection/rkey": getRecord reads them, createRecord and putRecord write them. */
+    val records = java.util.concurrent.ConcurrentHashMap<String, JsonObject>()
+    /** The PDS's getRecord answers with this HTTP status (a 5xx: it's down) instead. */
+    @Volatile var getRecordFails: Int? = null
+
     val pars = CopyOnWriteArrayList<Map<String, String>>()
     val tokenRequests = CopyOnWriteArrayList<Map<String, String>>()
     val revoked = CopyOnWriteArrayList<String>()
@@ -170,8 +175,36 @@ class FakeAtproto : AutoCloseable {
         }
         return when (path) {
             "/xrpc/com.atproto.repo.describeRepo" -> json("""{"handle":"$handle","did":"$did"}""")
-            "/xrpc/com.atproto.repo.getRecord" -> json("""{"error":"RecordNotFound","message":"Could not locate record"}""", 400)
-            "/xrpc/com.atproto.repo.createRecord" -> json("""{"uri":"at://$did/x/1","cid":"bafy","echo":${r.body!!.utf8()}}""")
+            "/xrpc/com.atproto.repo.getRecord" -> {
+                val key = "${r.url.queryParameter("collection")}/${r.url.queryParameter("rkey")}"
+                val value = records[key]
+                when {
+                    getRecordFails != null -> json("""{"error":"InternalServerError"}""", getRecordFails!!)
+                    r.url.queryParameter("repo") == did && value != null ->
+                        json("""{"uri":"at://$did/$key","cid":"bafy-$key","value":$value}""")
+                    else -> json("""{"error":"RecordNotFound","message":"Could not locate record"}""", 400)
+                }
+            }
+            "/xrpc/com.atproto.repo.createRecord" -> {
+                val body = Json.parseToJsonElement(r.body!!.utf8()).jsonObject
+                val rkey = body["rkey"]?.jsonPrimitive?.content
+                val key = "${body["collection"]?.jsonPrimitive?.content}/$rkey"
+                when {
+                    rkey == null -> json("""{"uri":"at://$did/x/1","cid":"bafy","echo":$body}""")
+                    // As a PDS: create never replaces.
+                    records.containsKey(key) -> json("""{"error":"InvalidRequest","message":"Record already exists"}""", 400)
+                    else -> {
+                        records[key] = body["record"]!!.jsonObject
+                        json("""{"uri":"at://$did/$key","cid":"bafy-$key"}""")
+                    }
+                }
+            }
+            "/xrpc/com.atproto.repo.putRecord" -> {
+                val body = Json.parseToJsonElement(r.body!!.utf8()).jsonObject
+                val key = "${body["collection"]!!.jsonPrimitive.content}/${body["rkey"]!!.jsonPrimitive.content}"
+                records[key] = body["record"]!!.jsonObject
+                json("""{"uri":"at://$did/$key","cid":"bafy-$key"}""")
+            }
             "/xrpc/com.atproto.repo.uploadBlob" -> json(
                 """{"blob":{"${'$'}type":"blob","mimeType":"${r.headers["Content-Type"]}","size":${r.body!!.size}}}""",
             )

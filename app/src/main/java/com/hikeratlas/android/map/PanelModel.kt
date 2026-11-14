@@ -13,7 +13,6 @@ import com.hikeratlas.android.routes.nearbyParks
 import com.hikeratlas.android.routes.Filters
 import com.hikeratlas.android.routes.reportsKey
 import com.hikeratlas.android.routes.BundleIndex
-import com.hikeratlas.android.routes.km
 import com.hikeratlas.android.trail.TrailGeometry
 import com.hikeratlas.android.routes.ParkDoc
 import com.hikeratlas.android.routes.RouteItem
@@ -33,6 +32,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
+import com.hikeratlas.android.units.dist
 
 /** A park's operator and official website. */
 data class ParkAbout(val operator: String?, val website: String?) {
@@ -277,7 +277,7 @@ class PanelModel(
         onRoute(null, false)
         onTrail(null)
         fitPending = false
-        val subtitle = listOfNotNull("Trail", lengthKm?.takeIf { it > 0 }?.let { "${km(it)} km" }, listOfNotNull(park, state).joinToString(", ").ifEmpty { null })
+        val subtitle = listOfNotNull("Trail", lengthKm?.takeIf { it > 0 }?.let { dist(it, 1) }, listOfNotNull(park, state).joinToString(", ").ifEmpty { null })
             .joinToString(" · ")
         panel = Panel.Trail(name, subtitle, null, park)
         fun update(f: (Panel.Trail) -> Panel.Trail) {

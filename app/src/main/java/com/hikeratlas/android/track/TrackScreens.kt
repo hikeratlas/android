@@ -46,21 +46,21 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.hikeratlas.android.elevation.ElevationProfiler
 import com.hikeratlas.android.map.ElevationChart
-import com.hikeratlas.android.routes.km
-import com.hikeratlas.android.routes.metres
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import com.hikeratlas.android.units.dist
+import com.hikeratlas.android.units.elev
 
 private val CHART_HEIGHT = 110.dp
 
 /** "7.3 km · 1:04:09 · ↑ 612 m", the climb where the DEM had it. */
 fun statsLine(s: TrackStore.Stats): String =
-    listOfNotNull("${km(s.metres / 1000)} km", duration(s.elapsedMs), s.gain?.let { "↑ ${metres(it)} m" }).joinToString(" · ")
+    listOfNotNull(dist(s.metres / 1000, 1), duration(s.elapsedMs), s.gain?.let { "↑ ${elev(it)}" }).joinToString(" · ")
 
 /** "Moving 52:10 · ↓ 598 m". */
 private fun moreLine(s: TrackStore.Stats): String =
-    listOfNotNull("Moving ${duration(s.movingMs)}", s.loss?.let { "↓ ${metres(it)} m" }).joinToString(" · ")
+    listOfNotNull("Moving ${duration(s.movingMs)}", s.loss?.let { "↓ ${elev(it)}" }).joinToString(" · ")
 
 @Composable
 private fun Chart(profile: ElevationProfiler.Profile?, onScrub: (DoubleArray?) -> Unit) {

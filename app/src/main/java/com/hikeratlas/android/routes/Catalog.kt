@@ -1,8 +1,8 @@
 package com.hikeratlas.android.routes
 
 import java.text.Normalizer
+import com.hikeratlas.android.units.Units
 import java.util.Locale
-import kotlin.math.roundToInt
 
 // How the website names, lists and links curated routes (app/hikes.ts and
 // components/CuratedRoutes.tsx), ported so the app reads the same.
@@ -16,29 +16,32 @@ private val TYPE_ORDER = listOf("day", "approach", "multi-day", "from-camp", "st
 /** A route that follows an OSM hiking route carries its name. */
 private fun named(name: String?, otherwise: String) = if (!name.isNullOrEmpty()) name else otherwise
 
-fun km(x: Double) = String.format(Locale.US, "%.1f", x)
-fun metres(x: Double) = String.format(Locale.US, "%,d", x.roundToInt())
-
 /** "Day hike · 12.3 km · ↑ 850 m", plus "· scramble" for SAC 4 and up. */
-fun meta(type: String, km: Double, gain: Double, sac: Int? = null): String =
-    "${TYPE_LABEL[type] ?: type} · ${km(km)} km · ↑ ${metres(gain)} m" + if ((sac ?: 0) >= 4) " · scramble" else ""
+fun meta(type: String, km: Double, gain: Double, sac: Int? = null, u: Units = Units.current): String =
+    "${TYPE_LABEL[type] ?: type} · ${u.distance(km, 1)} · ↑ ${u.elevation(gain)}" + if ((sac ?: 0) >= 4) " · scramble" else ""
 
 /** How far a stop is from the car: a pull-out has no walk. */
-fun walk(h: Hike): String {
+fun walk(h: Hike, u: Units = Units.current): String {
     val d = h.route.one_way_km ?: (h.route.km / 2)
     val end = h.from == "Road's end"
     if (d < 0.05) return if (end) "by the road" else "by the road at ${h.from}"
-    return "${km(d)} km walk from ${if (end) "the road's end" else h.from}"
+    return "${u.distance(d, 1)} walk from ${if (end) "the road's end" else h.from}"
 }
 
-/** A route in a list: under a tap, in view, or in a park. */
+/**
+ * A route in a list: under a tap, in view, or in a park. Its [meta] is
+ * written in the units shown when it's read, so a list made before the
+ * units changed follows them.
+ */
 data class RouteItem(
     val park: String,
     val id: String,
     val title: String,
-    val meta: String,
+    val metaIn: (Units) -> String,
     val section: String? = null,
-)
+) {
+    val meta: String get() = metaIn(Units.current)
+}
 
 /** A route opened from its id: <park>/day/i, /stop/i, /base/i, /base/i/j or /multi/i. */
 data class Selected(
@@ -105,20 +108,20 @@ fun itemsFromPark(doc: ParkDoc): List<RouteItem> {
     val park = doc.park?.id ?: return emptyList()
     return buildList {
         doc.day_hikes.forEachIndexed { i, h ->
-            add(RouteItem(park, "$park/day/$i", named(h.name, "${h.dest} from ${h.from}"), meta("day", h.route.km, h.route.gain, h.route.max_sac), "Day hikes"))
+            add(RouteItem(park, "$park/day/$i", named(h.name, "${h.dest} from ${h.from}"), { u -> meta("day", h.route.km, h.route.gain, h.route.max_sac, u) }, "Day hikes"))
         }
         doc.base_camps.forEachIndexed { i, b ->
-            add(RouteItem(park, "$park/base/$i", "Base camp: ${b.camp} from ${b.from}", "${b.hikes.size} day hikes from camp · walk in ${km(b.approach.km)} km", "Base camps"))
+            add(RouteItem(park, "$park/base/$i", "Base camp: ${b.camp} from ${b.from}", { u -> "${b.hikes.size} day hikes from camp · walk in ${u.distance(b.approach.km, 1)}" }, "Base camps"))
         }
         doc.point_to_points.forEachIndexed { i, t ->
-            add(RouteItem(park, "$park/multi/$i", named(t.name, "${t.from} to ${t.to}"), meta("multi-day", t.route.km, t.route.gain, t.route.max_sac), "Multi-day"))
+            add(RouteItem(park, "$park/multi/$i", named(t.name, "${t.from} to ${t.to}"), { u -> meta("multi-day", t.route.km, t.route.gain, t.route.max_sac, u) }, "Multi-day"))
         }
         // Multi-day trips of a smaller park inside this one, opened in that park.
         doc.see_also.forEach { e ->
-            add(RouteItem(e.park, e.id, named(e.name, "${e.from} to ${e.to}"), "${meta("multi-day", e.km, e.gain)} · in ${e.park_name}", "Multi-day"))
+            add(RouteItem(e.park, e.id, named(e.name, "${e.from} to ${e.to}"), { u -> "${meta("multi-day", e.km, e.gain, u = u)} · in ${e.park_name}" }, "Multi-day"))
         }
         doc.stops.forEachIndexed { i, h ->
-            add(RouteItem(park, "$park/stop/$i", h.dest, walk(h).replaceFirstChar { it.uppercase() }, "Stops"))
+            add(RouteItem(park, "$park/stop/$i", h.dest, { u -> walk(h, u).replaceFirstChar { it.uppercase() } }, "Stops"))
         }
     }
 }
@@ -140,7 +143,7 @@ fun itemsFromProperties(props: List<Map<String, Any?>>, fromCamp: Boolean = true
                 park = p["park_id"]?.toString() ?: p["id"].toString().substringBefore('/'),
                 id = p["id"].toString(),
                 title = if (type == "approach") "Base camp: $title" else title,
-                meta = meta(type, (p["km"] as? Number)?.toDouble() ?: 0.0, (p["gain"] as? Number)?.toDouble() ?: 0.0),
+                metaIn = { u -> meta(type, (p["km"] as? Number)?.toDouble() ?: 0.0, (p["gain"] as? Number)?.toDouble() ?: 0.0, u = u) },
             )
         }
 

@@ -114,7 +114,7 @@ fun SearchScreen(
 
     val showingRecent = query.isBlank()
     val items = if (showingRecent) recent else results
-    val lines = if (showingRecent) items.map(SearchApi::describe) else SearchApi.secondLines(items, nearLat, nearLon)
+    val lines = if (showingRecent) items.map { SearchApi.describe(it) } else SearchApi.secondLines(items, nearLat, nearLon)
 
     Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface).statusBarsPadding().imePadding()) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {

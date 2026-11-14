@@ -34,10 +34,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import com.hikeratlas.android.routes.km
-import com.hikeratlas.android.routes.metres
 import kotlinx.coroutines.delay
 import java.util.Locale
+import com.hikeratlas.android.units.dist
+import com.hikeratlas.android.units.elev
 
 /** 1:04:09, or 4:09 under an hour. */
 fun duration(ms: Long): String {
@@ -50,7 +50,7 @@ fun duration(ms: Long): String {
 
 /** The track's time, distance and climb so far: 1:04:09 · 3.2 km · ↑ 240 m. */
 fun summary(s: TrackRecorder.State, now: Long): String =
-    listOfNotNull(duration(s.elapsed(now)), "${km(s.metres / 1000)} km", s.gain?.let { "↑ ${metres(it)} m" }).joinToString(" · ")
+    listOfNotNull(duration(s.elapsed(now)), dist(s.metres / 1000, 1), s.gain?.let { "↑ ${elev(it)}" }).joinToString(" · ")
 
 /**
  * The recording bar, under search: a dot (red recording, grey paused), the

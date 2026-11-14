@@ -70,6 +70,11 @@ class HikerAtlasApp : Application(), RecorderHost, OfflineHost {
         )
     }
 
+    /** The units distances and heights show in: the profile's when signed in, else this phone's. */
+    val units by lazy {
+        com.hikeratlas.android.units.UnitsSetting(getSharedPreferences("units", MODE_PRIVATE), account, appScope)
+    }
+
     /** What's kept for offline use: areas' tiles, routes data, fonts and icons. */
     val offline by lazy { OfflineStore(this) }
     override val offlineAreas by lazy {
@@ -126,8 +131,9 @@ class HikerAtlasApp : Application(), RecorderHost, OfflineHost {
         )
         // Room for a few areas' tiles, so going back somewhere is quick.
         OfflineManager.getInstance(this).setMaximumAmbientCacheSize(AMBIENT_CACHE_BYTES, null)
-        // The saved session, restored (in the background) at launch.
+        // The saved session, restored (in the background) at launch, and its units.
         account
+        units
     }
 
     private companion object {
