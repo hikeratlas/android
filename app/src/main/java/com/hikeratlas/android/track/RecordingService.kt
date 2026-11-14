@@ -19,7 +19,7 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
 import com.hikeratlas.android.R
-import com.hikeratlas.android.routes.km
+import com.hikeratlas.android.units.dist
 
 /** Whatever holds the app's [TrackRecorder] (the app; a test's own). */
 interface RecorderHost {
@@ -125,8 +125,8 @@ class RecordingService : Service() {
         val s = recorder.state
         val text = when {
             s == null -> "Starting…"
-            s.paused -> "Paused · ${km(s.metres / 1000)} km"
-            else -> "Recording · ${km(s.metres / 1000)} km"
+            s.paused -> "Paused · ${dist(s.metres / 1000, 1)}"
+            else -> "Recording · ${dist(s.metres / 1000, 1)}"
         }
         val open = packageManager.getLaunchIntentForPackage(packageName)?.let {
             PendingIntent.getActivity(this, 0, it, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)

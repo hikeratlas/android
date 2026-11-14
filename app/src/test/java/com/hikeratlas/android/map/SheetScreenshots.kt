@@ -100,7 +100,12 @@ class SheetScreenshots {
     @After
     fun tearDown() {
         if (::server.isInitialized) server.close()
+        com.hikeratlas.android.units.Units.current = com.hikeratlas.android.units.Units.METRIC
     }
+
+    private val imperial = com.hikeratlas.android.units.Units(
+        com.hikeratlas.android.units.DistanceUnit.MI, com.hikeratlas.android.units.ElevationUnit.FT,
+    )
 
     private fun shoot(name: String, open: PanelModel.() -> Unit, ready: () -> Boolean) {
         compose.setContent {
@@ -253,6 +258,21 @@ class SheetScreenshots {
     @Test
     fun hike() {
         shoot("hike", { openRoute("2226817", "2226817/day/5") }) { (model.panel as? Panel.Detail)?.profile is ProfileState.Ready }
+    }
+
+    // In miles and feet, as a profile set to them shows it.
+    @Test
+    fun hikeImperial() {
+        com.hikeratlas.android.units.Units.current = imperial
+        shoot("hike-mi-ft", { openRoute("2226817", "2226817/day/5") }) { (model.panel as? Panel.Detail)?.profile is ProfileState.Ready }
+    }
+
+    @Test
+    fun hikeSheetPeekImperial() {
+        com.hikeratlas.android.units.Units.current = imperial
+        shootSheet("sheet-hike-peek-mi-ft", { openRoute("2226817", "2226817/day/5") }, Stop.Peek) {
+            (modelState.value?.panel as? Panel.Detail)?.profile is ProfileState.Ready
+        }
     }
 
     @Test

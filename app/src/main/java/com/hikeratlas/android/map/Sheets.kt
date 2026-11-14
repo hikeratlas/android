@@ -75,10 +75,11 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.drawscope.clipRect
 import kotlin.math.roundToInt
-import com.hikeratlas.android.routes.km
-import com.hikeratlas.android.routes.metres
 import java.net.URI
 import java.util.Locale
+import com.hikeratlas.android.units.dist
+import com.hikeratlas.android.units.elev
+import com.hikeratlas.android.units.distanceAt
 
 private val MUTED @Composable get() = MaterialTheme.colorScheme.onSurfaceVariant
 
@@ -208,13 +209,13 @@ fun PanelHeader(
                 TitleRow(p.name, full, model::close)
                 Column(Modifier.padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text(p.subtitle, style = MaterialTheme.typography.bodyMedium, color = MUTED)
-                    val m = { x: Double -> "${metres(x)} m" }
+                    val m = { x: Double -> elev(x) }
                     val prof = p.profile
                     val range = p.range
                     when {
                         prof != null && range != null -> Text(
                             "↑ ${m(prof.gain)} · ↓ ${m(prof.loss)} " +
-                                (p.along?.let { "along ${km(it / 1000)} km of it" } ?: "end to end") +
+                                (p.along?.let { "along ${dist(it / 1000, 1)} of it" } ?: "end to end") +
                                 " · high ${m(range.second)} · low ${m(range.first)}",
                             style = MaterialTheme.typography.bodyMedium,
                         )
@@ -249,7 +250,7 @@ fun PanelHeader(
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         DifficultyPill(difficulty(r))
                         Text(
-                            "${km(r.km)} km · ↑ ${metres(r.gain)} m · ${timeLabel(hours(r), r).removePrefix("about ").let { if (it.endsWith("min")) "~$it" else it }}",
+                            "${dist(r.km, 1)} · ↑ ${elev(r.gain)} · ${timeLabel(hours(r), r).removePrefix("about ").let { if (it.endsWith("min")) "~$it" else it }}",
                             style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis,
                         )
                     }
@@ -383,7 +384,7 @@ private fun DetailBody(d: Panel.Detail, model: PanelModel, onScrub: (DoubleArray
         if (r.stopovers.isNotEmpty()) {
             Section("Campsites") {
                 for (c in r.stopovers) {
-                    ListRow(c.name, "km ${km(c.km)}") { onScrub(doubleArrayOf(c.at[0], c.at[1])) }
+                    ListRow(c.name, distanceAt(c.km)) { onScrub(doubleArrayOf(c.at[0], c.at[1])) }
                 }
             }
         }
@@ -392,7 +393,7 @@ private fun DetailBody(d: Panel.Detail, model: PanelModel, onScrub: (DoubleArray
             Section("Along the way") {
                 for (f in feats) {
                     ListRow(
-                        f.name, kindName(f.kind) + (f.km?.let { " · km ${km(it)}" } ?: ""),
+                        f.name, kindName(f.kind) + (f.km?.let { " · ${distanceAt(it)}" } ?: ""),
                         number = f.n.takeIf { f.km != null },
                     ) { f.at?.let { onScrub(doubleArrayOf(it[0], it[1])) } }
                 }
@@ -445,7 +446,7 @@ private fun DetailBody(d: Panel.Detail, model: PanelModel, onScrub: (DoubleArray
                 Text("From ${b.camp}:", color = MUTED, style = MaterialTheme.typography.bodyMedium)
                 b.hikes.forEachIndexed { j, h ->
                     val t = h.name?.takeIf { it.isNotEmpty() } ?: h.dest
-                    val meta = "${km(h.route.km)} km · ↑ ${metres(h.route.gain)} m" + if (h.route.scramble) " · scramble" else ""
+                    val meta = "${dist(h.route.km, 1)} · ↑ ${elev(h.route.gain)}" + if (h.route.scramble) " · scramble" else ""
                     LinkRow(t, meta) { model.openRoute(park, "$park/base/$i/$j", hint = HikeHint(t, meta)) }
                 }
                 LinkRow("The walk in", null) { model.openRoute(park, "$park/base/$i") }
@@ -533,10 +534,10 @@ private fun StatTiles(r: Route, kind: String) {
         else -> "one way"
     }
     val tiles = listOf(
-        "${km(r.km)} km" to shape,
-        "↑ ${metres(r.gain)} m" to "climbing",
+        dist(r.km, 1) to shape,
+        "↑ ${elev(r.gain)}" to "climbing",
         timeLabel(hours(r), r).replace(Regex("^about "), "~") to "walking time",
-        "${metres(r.max_ele)} m" to "high point",
+        elev(r.max_ele) to "high point",
     )
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         for (row in tiles.chunked(2)) {

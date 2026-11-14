@@ -26,8 +26,10 @@ import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.hikeratlas.android.elevation.ElevationProfiler
-import com.hikeratlas.android.routes.km
-import com.hikeratlas.android.routes.metres
+import com.hikeratlas.android.units.dist
+import com.hikeratlas.android.units.elev
+import com.hikeratlas.android.units.elevRange
+import com.hikeratlas.android.units.Units
 
 /** A campsite (or other mark) along the route, at metres from its start. */
 data class Mark(val at: Double, val label: String)
@@ -75,7 +77,7 @@ fun ElevationChart(
             .fillMaxWidth()
             .height(height)
             .semantics {
-                contentDescription = "Elevation from ${metres(lo)} m to ${metres(hi)} m over ${km(length / 1000)} km"
+                contentDescription = "Elevation from ${elev(lo)} to ${elev(hi)} over ${dist(length / 1000, 1)}"
             }
             .pointerInput(profile) {
                 detectHorizontalDragGestures(
@@ -152,18 +154,18 @@ fun ElevationChart(
 
         // The axes along the bottom, out of the line's way: 0 km, the
         // range of heights, and the length.
-        val rangeText = measurer.measure("${metres(lo)}–${metres(hi)} m", label)
+        val rangeText = measurer.measure(elevRange(lo, hi), label)
         drawText(rangeText, topLeft = Offset((size.width - rangeText.size.width) / 2, bottom + 2.dp.toPx()))
-        val end = measurer.measure("${km(length / 1000)} km", label)
+        val end = measurer.measure(dist(length / 1000, 1), label)
         drawText(end, topLeft = Offset(size.width - end.size.width, bottom + 2.dp.toPx()))
-        drawText(measurer.measure("0 km", label), topLeft = Offset(0f, bottom + 2.dp.toPx()))
+        drawText(measurer.measure("0 ${Units.current.distance.symbol}", label), topLeft = Offset(0f, bottom + 2.dp.toPx()))
 
         scrub?.let { i ->
             val sx = x(profile.distances[i])
             val sy = y(profile.elevations[i])
             drawLine(onSurface, Offset(sx, top), Offset(sx, bottom))
             drawCircle(onSurface, 5.dp.toPx(), Offset(sx, sy))
-            val t = measurer.measure("${km(profile.distances[i] / 1000)} km · ${metres(profile.elevations[i])} m", TextStyle(fontSize = 11.sp, color = onSurface))
+            val t = measurer.measure("${dist(profile.distances[i] / 1000, 1)} · ${elev(profile.elevations[i])}", TextStyle(fontSize = 11.sp, color = onSurface))
             val at = Offset((sx - t.size.width / 2).coerceIn(0f, size.width - t.size.width), 0f)
             drawRoundRect(
                 Color.White.copy(alpha = 0.9f), at - Offset(3.dp.toPx(), 0f),

@@ -278,7 +278,12 @@ class Account(
     private val auth = object : XrpcAuth {
         override val nonces get() = oauth.nonces
 
-        override fun key(s: Stored) = keys.load(s.keyAlias) ?: throw SignedOutException()
+        // A session whose key is gone can't be used again: signed out, as
+        // for a refused refresh, rather than signed in to nothing.
+        override fun key(s: Stored) = keys.load(s.keyAlias) ?: run {
+            if (stored?.keyAlias == s.keyAlias) drop()
+            throw SignedOutException()
+        }
 
         override suspend fun fresh(): Stored {
             restored.await()

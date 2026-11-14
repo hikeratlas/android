@@ -175,6 +175,11 @@ fun AppScreen(app: HikerAtlasApp, link: Uri? = null, onLinkHandled: () -> Unit =
                         signOut = { app.account.signOut() },
                         clearError = { app.account.clearError() },
                     ),
+                    UnitsActions(
+                        current = com.hikeratlas.android.units.Units.current,
+                        signedIn = accountState is com.hikeratlas.android.atproto.AccountState.In,
+                        save = { app.units.set(it) },
+                    ),
                 )
             }
         }

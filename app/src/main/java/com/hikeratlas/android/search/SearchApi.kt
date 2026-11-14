@@ -10,6 +10,7 @@ import kotlinx.serialization.json.Json
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import com.hikeratlas.android.units.Units
 import java.io.IOException
 import java.util.Locale
 import kotlin.math.PI
@@ -72,29 +73,26 @@ class SearchApi(private val client: OkHttpClient, private val endpoint: String =
 
         private fun Double?.nonZero() = this?.takeIf { it != 0.0 }
 
-        private fun kmText(km: Double) = if (km < 10) String.format(Locale.US, "%.1f km", km) else "${km.roundToInt()} km"
-        private fun thousands(x: Double) = String.format(Locale.US, "%,d", x.roundToInt())
-
         /**
          * A result's second line, as the website writes it: "2,830 m · Jasper NP,
          * Alberta", "Lake · 1.1 km² · Banff NP, Alberta", "Park · 14 hikes · Alberta".
          */
-        fun describe(item: SearchItem): String {
+        fun describe(item: SearchItem, u: Units = Units.current): String {
             val what = mutableListOf<String>()
             when (item.kind) {
                 // As the website: zero (falsy in JavaScript) means unknown.
-                "peak" -> item.ele.nonZero()?.let { what += "${thousands(it)} m" }
-                "trail" -> item.km.nonZero()?.let { what += kmText(it) }
+                "peak" -> item.ele.nonZero()?.let { what += u.elevation(it) }
+                "trail" -> item.km.nonZero()?.let { what += u.distance(it) }
                 "hike" -> {
                     what += HIKE_LABEL[item.hike] ?: "Hike"
-                    item.km.nonZero()?.let { what += kmText(it) }
-                    item.gain.nonZero()?.let { what += "↑ ${thousands(it)} m" }
+                    item.km.nonZero()?.let { what += u.distance(it) }
+                    item.gain.nonZero()?.let { what += "↑ ${u.elevation(it)}" }
                 }
                 else -> KIND_LABEL[item.kind]?.let { label ->
                     what += label
                     if (item.kind == "park" && item.hikes != null && item.hikes > 0) what += "${item.hikes} hike${if (item.hikes == 1) "" else "s"}"
                     if (item.kind == "lake" && item.area != null && item.area >= 100_000) {
-                        what += String.format(Locale.US, if (item.area < 10e6) "%.1f km²" else "%.0f km²", item.area / 1e6)
+                        what += u.area(item.area)
                     }
                 }
             }
@@ -103,19 +101,20 @@ class SearchApi(private val client: OkHttpClient, private val endpoint: String =
         }
 
         /** "38 km away" for a result well away from where you're looking. */
-        fun away(item: SearchItem, lat: Double?, lon: Double?): String {
+        fun away(item: SearchItem, lat: Double?, lon: Double?, u: Units = Units.current): String {
             if (lat == null || lon == null) return ""
             val r = PI / 180
             val h = sin((item.lat - lat) * r / 2).let { it * it } +
                 cos(lat * r) * cos(item.lat * r) * sin((item.lon - lon) * r / 2).let { it * it }
             val km = 2 * 6371 * asin(sqrt(min(1.0, h)))
             if (km < 25) return ""
-            return "${if (km < 100) km.roundToInt() else (km / 10).roundToInt() * 10} km away"
+            val d = u.distanceValue(km)
+            return "${if (d < 100) d.roundToInt() else (d / 10).roundToInt() * 10} ${u.distance.symbol} away"
         }
 
         /** Each result's second line; same-looking results get their country or position. */
-        fun secondLines(items: List<SearchItem>, lat: Double?, lon: Double?): List<String> {
-            val lines = items.map { listOf(describe(it), away(it, lat, lon)).filter(String::isNotEmpty).joinToString(" · ") }.toMutableList()
+        fun secondLines(items: List<SearchItem>, lat: Double?, lon: Double?, u: Units = Units.current): List<String> {
+            val lines = items.map { listOf(describe(it, u), away(it, lat, lon, u)).filter(String::isNotEmpty).joinToString(" · ") }.toMutableList()
             items.indices.groupBy { "${items[it].name}\n${lines[it]}" }.values.filter { it.size > 1 }.forEach { idx ->
                 val countries = idx.map { items[it].country }.toSet()
                 for (i in idx) {

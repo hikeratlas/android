@@ -48,12 +48,10 @@ import com.hikeratlas.android.routes.ParkHike
 import com.hikeratlas.android.routes.RouteReports
 import com.hikeratlas.android.routes.Sort
 import com.hikeratlas.android.routes.TimeBand
-import com.hikeratlas.android.routes.km
 import com.hikeratlas.android.routes.isSmall
 import com.hikeratlas.android.routes.matches
 import com.hikeratlas.android.routes.picks
 import com.hikeratlas.android.routes.summary
-import com.hikeratlas.android.routes.metres
 import com.hikeratlas.android.routes.parkHikes
 import com.hikeratlas.android.routes.sorted
 import com.hikeratlas.android.routes.timeBand
@@ -61,6 +59,10 @@ import com.hikeratlas.android.routes.timeLabel
 import com.hikeratlas.android.routes.trailhead
 import kotlin.math.cos
 import kotlin.math.roundToInt
+import com.hikeratlas.android.units.dist
+import com.hikeratlas.android.units.elev
+import com.hikeratlas.android.units.elevRange
+import com.hikeratlas.android.units.Units
 
 // A park's sheet, as the website's (its #103 redesign): its counts as tabs,
 // filters over its day hikes, and a card per hike with its shape, numbers,
@@ -142,7 +144,7 @@ fun ParkBody(p: Panel.RouteList, doc: ParkDoc, model: PanelModel) {
                 doc.base_camps.mapIndexed { i, b ->
                     Other(
                         b.hikes.size.toString(), b.camp,
-                        "${km(b.approach.km)} km walk in from ${trailhead(b.from)} · ↑ ${metres(b.approach.gain)} m · ${b.hikes.size} day ${if (b.hikes.size == 1) "hike" else "hikes"} from camp",
+                        "${dist(b.approach.km, 1)} walk in from ${trailhead(b.from)} · ↑ ${elev(b.approach.gain)} · ${b.hikes.size} day ${if (b.hikes.size == 1) "hike" else "hikes"} from camp",
                     ) { model.openRoute(park, "$park/base/$i", hint = HikeHint(b.camp, null)) }
                 },
             )
@@ -152,15 +154,15 @@ fun ParkBody(p: Panel.RouteList, doc: ParkDoc, model: PanelModel) {
                     val title = t.name?.takeIf { it.isNotEmpty() } ?: "${trailhead(t.from)} to ${trailhead(t.to)}"
                     val camps = t.route.stopovers.size
                     Other(
-                        t.route.km.roundToInt().toString(), title,
-                        "${t.route.km.roundToInt()} km · ↑ ${metres(t.route.gain)} m · ${if (t.kind == "loop") "loop" else "one way"}" +
+                        Units.current.distanceValue(t.route.km).roundToInt().toString(), title,
+                        "${dist(t.route.km, 0)} · ↑ ${elev(t.route.gain)} · ${if (t.kind == "loop") "loop" else "one way"}" +
                             if (camps > 0) " · $camps ${if (camps == 1) "campground" else "campgrounds"} along it" else "",
                     ) { model.openRoute(park, "$park/multi/$i", hint = HikeHint(title, null)) }
                 } + doc.see_also.map { e ->
                     val title = e.name?.takeIf { it.isNotEmpty() } ?: "${trailhead(e.from)} to ${trailhead(e.to)}"
                     Other(
-                        e.km.roundToInt().toString(), title,
-                        "${e.km.roundToInt()} km · ↑ ${metres(e.gain)} m · ${if (e.kind == "loop") "loop" else "one way"} · in ${e.park_name}",
+                        Units.current.distanceValue(e.km).roundToInt().toString(), title,
+                        "${dist(e.km, 0)} · ↑ ${elev(e.gain)} · ${if (e.kind == "loop") "loop" else "one way"} · in ${e.park_name}",
                     ) { model.openRoute(e.park, e.id, hint = HikeHint(title, null)) }
                 },
             )
@@ -198,8 +200,8 @@ private fun SmallPark(p: Panel.RouteList, doc: ParkDoc, model: PanelModel, park:
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     for ((v, l) in listOf(
                         hikes.size.toString() to if (hikes.size == 1) "day hike" else "day hikes",
-                        "${km(total)} km" to "of trail in all",
-                        "≤ ${metres(climb)} m" to "of climbing",
+                        dist(total, 1) to "of trail in all",
+                        "≤ ${elev(climb)}" to "of climbing",
                         reps.toString() to if (reps == 1) "trip report" else "trip reports",
                     )) {
                         Column(Modifier.weight(1f).background(Color.White, RoundedCornerShape(12.dp)).padding(8.dp)) {
@@ -224,7 +226,7 @@ private fun SmallPark(p: Panel.RouteList, doc: ParkDoc, model: PanelModel, park:
                         Text(h.title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
                         Text(cardStats(h), style = MaterialTheme.typography.bodySmall)
                         Text(
-                            "from ${h.from}" + (h.route.min_ele?.takeIf { it > 0 }?.let { " · ${metres(it)}–${metres(h.route.max_ele)} m" } ?: ""),
+                            "from ${h.from}" + (h.route.min_ele?.takeIf { it > 0 }?.let { " · ${elevRange(it, h.route.max_ele)}" } ?: ""),
                             style = MaterialTheme.typography.labelSmall, color = MUTED,
                         )
                     }
@@ -254,7 +256,7 @@ private fun SmallPark(p: Panel.RouteList, doc: ParkDoc, model: PanelModel, park:
                 Column {
                     Text("Do them all", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
                     Text(
-                        "${km(total)} km and about $time of walking in all" +
+                        "${dist(total, 1)} and about $time of walking in all" +
                             if (hikes.map { it.from }.toSet().size > 1) ", plus getting between trailheads." else ".",
                         style = MaterialTheme.typography.bodySmall,
                     )
@@ -279,7 +281,7 @@ private fun SmallPark(p: Panel.RouteList, doc: ParkDoc, model: PanelModel, park:
                     Row(Modifier.fillMaxWidth().clickable { model.openPark(n.id, n.name) }.padding(vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.weight(1f)) {
                             Text(n.name, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.primary)
-                            Text("${n.hikes} ${if (n.hikes == 1) "hike" else "hikes"} · ${n.km} km away", style = MaterialTheme.typography.bodySmall, color = MUTED)
+                            Text("${n.hikes} ${if (n.hikes == 1) "hike" else "hikes"} · ${dist(n.km.toDouble(), 0)} away", style = MaterialTheme.typography.bodySmall, color = MUTED)
                         }
                         Text("›", color = MUTED)
                     }
@@ -293,7 +295,7 @@ private fun SmallPark(p: Panel.RouteList, doc: ParkDoc, model: PanelModel, park:
 internal fun quickStop(oneWayKm: Double, from: String): String {
     val end = from == "Road's end"
     if (oneWayKm < 0.05) return if (end) "By the road" else "By the road at ${trailhead(from)}"
-    return "${km(oneWayKm * 2)} km there and back from ${if (end) "the road's end" else trailhead(from)}"
+    return "${dist(oneWayKm * 2, 1)} there and back from ${if (end) "the road's end" else trailhead(from)}"
 }
 
 private val TIME_LABELS = listOf(null to "Any length", TimeBand.Short to "Under 2 h", TimeBand.Half to "2–5 h", TimeBand.Full to "Full day")
@@ -319,7 +321,7 @@ private fun DayHikes(p: Panel.RouteList, doc: ParkDoc, model: PanelModel, park: 
                     Text(tag.uppercase(), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.SemiBold, color = Color(0xFF3F6212))
                     RouteThumb(h.route.line, 56.dp, Modifier.fillMaxWidth())
                     Text(h.title, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                    Text("${km(h.route.km)} km · ↑ ${metres(h.route.gain)} m", style = MaterialTheme.typography.labelSmall, color = MUTED)
+                    Text("${dist(h.route.km, 1)} · ↑ ${elev(h.route.gain)}", style = MaterialTheme.typography.labelSmall, color = MUTED)
                 }
             }
         }
@@ -383,7 +385,7 @@ private fun Chip(on: Boolean, label: String, onClick: () -> Unit) {
 }
 
 /** "8.3 km · ↑ 850 m · ~4.5 h · out & back". */
-internal fun cardStats(h: ParkHike) = "${km(h.route.km)} km · ↑ ${metres(h.route.gain)} m · ${timeLabel(h.hours, h.route)} · ${h.shape}"
+internal fun cardStats(h: ParkHike) = "${dist(h.route.km, 1)} · ↑ ${elev(h.route.gain)} · ${timeLabel(h.hours, h.route)} · ${h.shape}"
 
 /** A day hike's card: its shape, title and difficulty, numbers, terrain, trailhead and what it passes, and its reports. */
 @Composable

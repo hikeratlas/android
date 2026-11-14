@@ -49,6 +49,8 @@ import com.hikeratlas.android.routes.StateCard
 import com.hikeratlas.android.routes.parkLabel
 import kotlinx.coroutines.CancellationException
 import java.util.Locale
+import com.hikeratlas.android.units.dist
+import com.hikeratlas.android.units.elev
 
 private val MAGENTA = Color(0xFF86198F)
 private val GREEN = Color(0xFF14532D)
@@ -290,7 +292,7 @@ private fun FeaturedCards(
                     Text("Start with", style = MaterialTheme.typography.labelSmall, color = muted, modifier = Modifier.padding(top = 4.dp))
                     for ((tag, h) in c.picks) {
                         Text(
-                            "$tag: ${h.title} · ${com.hikeratlas.android.routes.km(h.route.km)} km", style = MaterialTheme.typography.bodySmall,
+                            "$tag: ${h.title} · ${dist(h.route.km, 1)}", style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.primary,
                             modifier = Modifier.clickable { onHike(c.parkId, h.id, h.title) }.padding(vertical = 2.dp),
                         )
@@ -316,7 +318,7 @@ private fun FeaturedCards(
                         com.hikeratlas.android.map.DifficultyPill(h.diff)
                     }
                     Text(
-                        "${com.hikeratlas.android.routes.km(h.route.km)} km · ↑ ${com.hikeratlas.android.routes.metres(h.route.gain)} m · " +
+                        "${dist(h.route.km, 1)} · ↑ ${elev(h.route.gain)} · " +
                             "${com.hikeratlas.android.routes.timeLabel(h.hours, h.route)} · ${h.shape}",
                         style = MaterialTheme.typography.bodySmall,
                     )

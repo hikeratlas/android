@@ -279,6 +279,21 @@ class AccountTest {
         next.awaitState { it == AccountState.Out() }
     }
 
+    /** A session whose DPoP key is gone (another Account, a Keystore reset) reads as signed out. */
+    @Test
+    fun lostKeySignsOut() = runBlocking {
+        val account = account()
+        signIn(account)
+        keys.aliases.toList().forEach(keys::delete)
+        try {
+            account.xrpc.query("com.atproto.repo.describeRepo", mapOf("repo" to fake.did))
+            fail("used a session with no key")
+        } catch (e: SignedOutException) {
+        }
+        assertEquals(AccountState.Out(), account.state.value)
+        assertNull(account.did)
+    }
+
     /** No network is not a revoked session: still signed in, to try again later. */
     @Test
     fun unreachableRefreshKeepsTheSession() = runBlocking {

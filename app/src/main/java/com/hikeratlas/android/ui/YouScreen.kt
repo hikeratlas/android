@@ -17,6 +17,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
+import androidx.compose.material.icons.filled.Error
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.ui.text.font.FontFamily
@@ -42,6 +43,13 @@ import androidx.compose.ui.unit.dp
 import com.hikeratlas.android.BuildConfig
 import com.hikeratlas.android.map.openUrl
 import com.hikeratlas.android.routes.SITE
+import com.hikeratlas.android.units.DistanceUnit
+import com.hikeratlas.android.units.ElevationUnit
+import com.hikeratlas.android.units.Units
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.material3.RadioButton
+import androidx.compose.ui.semantics.Role
+import kotlinx.coroutines.CancellationException
 
 /** What the Storage card shows and does: offline areas, and MapLibre's cache of what's been looked at. */
 class StorageActions(
@@ -53,7 +61,7 @@ class StorageActions(
 )
 
 @Composable
-fun YouScreen(storage: StorageActions? = null, account: AccountActions? = null) {
+fun YouScreen(storage: StorageActions? = null, account: AccountActions? = null, units: UnitsActions? = null) {
     val context = LocalContext.current
     var credits by remember { mutableStateOf(false) }
     Column(
@@ -63,6 +71,7 @@ fun YouScreen(storage: StorageActions? = null, account: AccountActions? = null) 
     ) {
         Text("You", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 4.dp, top = 8.dp))
         if (account != null) AccountCard(account)
+        if (units != null) UnitsCard(units)
         if (storage != null) StorageCard(storage)
         Card("About") {
             Item("hikeratlas.com", external = true) { openUrl(context, SITE) }
@@ -87,6 +96,94 @@ fun YouScreen(storage: StorageActions? = null, account: AccountActions? = null) 
                 }
             },
         )
+    }
+}
+
+/** What the Units card shows and does: [save] goes to the profile record when [signedIn], else to this phone. */
+class UnitsActions(
+    val current: Units,
+    val signedIn: Boolean,
+    val save: suspend (Units) -> Unit,
+)
+
+/** Km or mi, m or ft, worded as the website's Settings tab. */
+@Composable
+internal fun UnitsCard(units: UnitsActions) {
+    val scope = rememberCoroutineScope()
+    // What's chosen, ahead of a save finishing; back to what's in effect if it fails.
+    var chosen by remember(units.current) { mutableStateOf(units.current) }
+    var saving by remember { mutableStateOf(false) }
+    var status by remember(units.signedIn) { mutableStateOf<String?>(null) }
+    // A save that failed: said loudly, as the units haven't changed.
+    var failed by remember(units.signedIn) { mutableStateOf<String?>(null) }
+    fun choose(u: Units) {
+        if (u == chosen || saving) return
+        chosen = u
+        saving = true
+        failed = null
+        if (units.signedIn) status = "Saving…"
+        scope.launch {
+            status = try {
+                units.save(u)
+                if (units.signedIn) "Saved." else null
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                chosen = units.current
+                failed = "Couldn't save your units to your Hiker Atlas profile, so they haven't changed." +
+                    (e.message?.let { " ($it)" } ?: "")
+                null
+            }
+            saving = false
+        }
+    }
+    Card("Units") {
+        Row(Modifier.fillMaxWidth().padding(bottom = 4.dp)) {
+            Column(Modifier.weight(1f)) {
+                UnitGroup("Distance")
+                UnitChoice("Kilometres (km)", chosen.distance == DistanceUnit.KM, !saving) { choose(chosen.copy(distance = DistanceUnit.KM)) }
+                UnitChoice("Miles (mi)", chosen.distance == DistanceUnit.MI, !saving) { choose(chosen.copy(distance = DistanceUnit.MI)) }
+            }
+            Column(Modifier.weight(1f)) {
+                UnitGroup("Elevation")
+                UnitChoice("Metres (m)", chosen.elevation == ElevationUnit.M, !saving) { choose(chosen.copy(elevation = ElevationUnit.M)) }
+                UnitChoice("Feet (ft)", chosen.elevation == ElevationUnit.FT, !saving) { choose(chosen.copy(elevation = ElevationUnit.FT)) }
+            }
+        }
+        failed?.let { msg ->
+            Row(
+                Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, bottom = 10.dp)
+                    .background(MaterialTheme.colorScheme.errorContainer, RoundedCornerShape(8.dp)).padding(12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(Icons.Filled.Error, contentDescription = null, tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(20.dp))
+                Text(msg, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onErrorContainer, modifier = Modifier.padding(start = 10.dp))
+            }
+        }
+        if (failed == null) Text(
+            status ?: if (units.signedIn) "For distances, climbs and heights across Hiker Atlas."
+            else "For distances, climbs and heights, on this phone. Signed in, your Hiker Atlas profile's apply, as on the website.",
+            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 14.dp),
+        )
+    }
+}
+
+@Composable
+private fun UnitGroup(name: String) {
+    Text(name, style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(start = 16.dp, top = 4.dp, bottom = 2.dp))
+}
+
+@Composable
+private fun UnitChoice(label: String, selected: Boolean, enabled: Boolean, onClick: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().selectable(selected, enabled = enabled, role = Role.RadioButton, onClick = onClick)
+            .heightIn(min = 48.dp).padding(horizontal = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        RadioButton(selected = selected, onClick = null, enabled = enabled, modifier = Modifier.padding(horizontal = 8.dp))
+        Text(label, style = MaterialTheme.typography.bodyLarge)
     }
 }
 

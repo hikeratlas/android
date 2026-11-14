@@ -25,9 +25,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import com.hikeratlas.android.routes.km
-import com.hikeratlas.android.routes.metres
 import com.hikeratlas.android.routing.Planner
+import com.hikeratlas.android.units.dist
+import com.hikeratlas.android.units.elev
 
 /** What the planner asks for next, as the website words it (for taps). */
 private fun status(p: Planner): String = p.error ?: when {
@@ -43,7 +43,7 @@ fun PlannerBar(planner: Planner, onDone: () -> Unit, modifier: Modifier = Modifi
     Surface(shape = RoundedCornerShape(26.dp), shadowElevation = 4.dp, modifier = modifier.fillMaxWidth()) {
         Row(Modifier.padding(start = 16.dp, end = 6.dp).height(52.dp), verticalAlignment = Alignment.CenterVertically) {
             Text(
-                if (planner.points.size < 2) "Plan a route" else "${km(planner.metres / 1000)} km",
+                if (planner.points.size < 2) "Plan a route" else dist(planner.metres / 1000, 1),
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.SemiBold,
                 modifier = Modifier.weight(1f),
@@ -67,8 +67,8 @@ fun PlannerPanel(planner: Planner, onScrub: (DoubleArray?) -> Unit, modifier: Mo
                     val prof = planner.profile
                     if (planner.points.size >= 2) {
                         Text(
-                            "${km(planner.metres / 1000)} km" + (prof?.let { p ->
-                                " · ↑ ${metres(p.gain)} m · ↓ ${metres(p.loss)} m · high ${metres(p.high)} m"
+                            dist(planner.metres / 1000, 1) + (prof?.let { p ->
+                                " · ↑ ${elev(p.gain)} · ↓ ${elev(p.loss)} · high ${elev(p.high)}"
                             } ?: ""),
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.Bold,
