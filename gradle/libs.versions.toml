@@ -13,6 +13,7 @@ junit = "4.13.2"
 serialization = "1.12.0"
 robolectric = "4.17"
 work = "2.12.0"
+browser = "1.10.0"
 
 [libraries]
 androidx-core-ktx = { module = "androidx.core:core-ktx", version.ref = "coreKtx" }
@@ -38,6 +39,7 @@ compose-ui-test-manifest = { module = "androidx.compose.ui:ui-test-manifest" }
 junit = { module = "junit:junit", version.ref = "junit" }
 json = { module = "org.json:json", version = "20260814" }
 androidx-work-runtime = { module = "androidx.work:work-runtime-ktx", version.ref = "work" }
+androidx-browser = { module = "androidx.browser:browser", version.ref = "browser" }
 androidx-work-testing = { module = "androidx.work:work-testing", version.ref = "work" }
 
 [plugins]

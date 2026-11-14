@@ -29,6 +29,7 @@ import androidx.compose.material.icons.outlined.BookmarkBorder
 import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -157,6 +158,7 @@ fun AppScreen(app: HikerAtlasApp, link: Uri? = null, onLinkHandled: () -> Unit =
             }
         }
         if (tab == Tab.You) {
+            val accountState by app.account.state.collectAsState()
             Box(Modifier.fillMaxSize().padding(bottom = barHeight)) {
                 YouScreen(
                     StorageActions(
@@ -165,6 +167,13 @@ fun AppScreen(app: HikerAtlasApp, link: Uri? = null, onLinkHandled: () -> Unit =
                         mapCacheBytes = { mapCache.bytes() },
                         deleteAll = { offline.deleteAll() },
                         clearMapCache = { mapCache.clear() },
+                    ),
+                    AccountActions(
+                        state = accountState,
+                        signIn = { app.account.beginSignIn(it) },
+                        openPage = { openSignInPage(context, it) },
+                        signOut = { app.account.signOut() },
+                        clearError = { app.account.clearError() },
                     ),
                 )
             }
@@ -186,5 +195,18 @@ fun AppScreen(app: HikerAtlasApp, link: Uri? = null, onLinkHandled: () -> Unit =
                 }
             }
         }
+    }
+}
+
+/**
+ * The sign-in page, in a Custom Tab: the user's own browser (where they may
+ * already be signed in to Bluesky), over the app. It comes back to the app
+ * by the redirect URI (MainActivity).
+ */
+private fun openSignInPage(context: android.content.Context, url: String) {
+    try {
+        androidx.browser.customtabs.CustomTabsIntent.Builder().build().launchUrl(context, android.net.Uri.parse(url))
+    } catch (e: android.content.ActivityNotFoundException) {
+        android.widget.Toast.makeText(context, "No browser to sign in with", android.widget.Toast.LENGTH_LONG).show()
     }
 }

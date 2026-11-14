@@ -53,7 +53,7 @@ class StorageActions(
 )
 
 @Composable
-fun YouScreen(storage: StorageActions? = null) {
+fun YouScreen(storage: StorageActions? = null, account: AccountActions? = null) {
     val context = LocalContext.current
     var credits by remember { mutableStateOf(false) }
     Column(
@@ -62,6 +62,7 @@ fun YouScreen(storage: StorageActions? = null) {
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         Text("You", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 4.dp, top = 8.dp))
+        if (account != null) AccountCard(account)
         if (storage != null) StorageCard(storage)
         Card("About") {
             Item("hikeratlas.com", external = true) { openUrl(context, SITE) }
@@ -150,7 +151,7 @@ private fun StorageCard(storage: StorageActions) {
 }
 
 @Composable
-private fun Card(title: String, content: @Composable () -> Unit) {
+internal fun Card(title: String, content: @Composable () -> Unit) {
     Column(
         Modifier.fillMaxWidth()
             .background(MaterialTheme.colorScheme.surface, RoundedCornerShape(16.dp))
@@ -202,7 +203,7 @@ internal fun VersionRow(commit: String, date: String, open: (String) -> Unit) {
 private const val SOURCE = "https://github.com/hikeratlas/android"
 
 @Composable
-private fun Item(title: String, subtitle: String? = null, external: Boolean = false, onClick: () -> Unit) {
+internal fun Item(title: String, subtitle: String? = null, external: Boolean = false, onClick: () -> Unit) {
     HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
     Row(
         Modifier.fillMaxWidth().clickable(onClick = onClick).heightIn(min = 52.dp).padding(horizontal = 16.dp, vertical = 10.dp),

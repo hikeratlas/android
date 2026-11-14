@@ -83,6 +83,8 @@ dependencies {
     implementation(libs.okhttp)
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.androidx.work.runtime)
+    // Custom Tabs, for signing in to an AT Protocol account.
+    implementation(libs.androidx.browser)
     // The Android build of zstd-jni ships the native libraries for each ABI.
     implementation("${libs.zstd.get()}@aar")
 
