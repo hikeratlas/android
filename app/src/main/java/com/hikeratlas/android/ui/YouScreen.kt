@@ -17,6 +17,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
+import androidx.compose.material.icons.filled.Error
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.ui.text.font.FontFamily
@@ -113,10 +114,13 @@ internal fun UnitsCard(units: UnitsActions) {
     var chosen by remember(units.current) { mutableStateOf(units.current) }
     var saving by remember { mutableStateOf(false) }
     var status by remember(units.signedIn) { mutableStateOf<String?>(null) }
+    // A save that failed: said loudly, as the units haven't changed.
+    var failed by remember(units.signedIn) { mutableStateOf<String?>(null) }
     fun choose(u: Units) {
         if (u == chosen || saving) return
         chosen = u
         saving = true
+        failed = null
         if (units.signedIn) status = "Saving…"
         scope.launch {
             status = try {
@@ -126,7 +130,9 @@ internal fun UnitsCard(units: UnitsActions) {
                 throw e
             } catch (e: Exception) {
                 chosen = units.current
-                "Couldn't save: ${e.message ?: "try again?"}"
+                failed = "Couldn't save your units to your Hiker Atlas profile, so they haven't changed." +
+                    (e.message?.let { " ($it)" } ?: "")
+                null
             }
             saving = false
         }
@@ -144,7 +150,18 @@ internal fun UnitsCard(units: UnitsActions) {
                 UnitChoice("Feet (ft)", chosen.elevation == ElevationUnit.FT, !saving) { choose(chosen.copy(elevation = ElevationUnit.FT)) }
             }
         }
-        Text(
+        failed?.let { msg ->
+            Row(
+                Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, bottom = 10.dp)
+                    .background(MaterialTheme.colorScheme.errorContainer, RoundedCornerShape(8.dp)).padding(12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(Icons.Filled.Error, contentDescription = null, tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(20.dp))
+                Text(msg, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onErrorContainer, modifier = Modifier.padding(start = 10.dp))
+            }
+        }
+        if (failed == null) Text(
             status ?: if (units.signedIn) "For distances, climbs and heights across Hiker Atlas."
             else "For distances, climbs and heights, on this phone. Signed in, your Hiker Atlas profile's apply, as on the website.",
             style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,

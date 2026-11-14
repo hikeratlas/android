@@ -119,14 +119,17 @@ class UnitsSettingTest {
     }
 
     @Test
-    fun aNewAccountGetsAProfileAndMetric() {
+    fun aNewAccountsProfileTakesThePhonesUnits() {
         val account = account()
         val setting = UnitsSetting(prefs, account, scope)
         await("signed out") { account.state.value is AccountState.Out }
         runBlocking { setting.set(imperial) }
         signIn(account)
         await("the profile made") { fake.records[key] != null }
-        assertEquals(setOf("\$type", "createdAt"), fake.records[key]!!.keys)
-        await("metric, as the record has no units") { Units.current == Units.METRIC }
+        // Chosen before signing in: kept, in the new record.
+        assertEquals(setOf("\$type", "createdAt", "units"), fake.records[key]!!.keys)
+        assertEquals("""{"distance":"mi","elevation":"ft"}""", fake.records[key]!!["units"].toString())
+        Thread.sleep(200)
+        assertEquals(imperial, Units.current)
     }
 }

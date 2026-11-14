@@ -63,6 +63,16 @@ class ProfileRecordTest {
     }
 
     @Test
+    fun aNewRecordTakesInitialSettings() = runBlocking {
+        val units = record("""{"distance":"mi","elevation":"ft"}""")
+        val got = ProfileRecord.ensure(account.xrpc, fake.did, mapOf("units" to units))!!
+        val stored = fake.records[key]!!
+        assertEquals(setOf("\$type", "createdAt", "units"), stored.keys)
+        assertEquals(units, stored["units"])
+        assertEquals(stored, got)
+    }
+
+    @Test
     fun keptWhenThere() = runBlocking {
         val existing = record("""{"${'$'}type":"${ProfileRecord.NSID}","createdAt":"2025-03-01T10:00:00.000Z","units":{"distance":"mi","elevation":"ft"},"license":"CC-BY-4.0"}""")
         fake.records[key] = existing

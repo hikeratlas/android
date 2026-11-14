@@ -22,15 +22,21 @@ object ProfileRecord {
     private const val RKEY = "self"
 
     /**
-     * The profile record, written the first time an account signs in (with
-     * createdAt only) and never overwritten: indexers find our users by it.
-     * Gives its value (the one just written, if it was missing), or null
-     * if the PDS couldn't be asked: we try again next sign-in or launch.
+     * The profile record, written the first time an account signs in and
+     * never overwritten: indexers find our users by it. A new one gets
+     * createdAt and [initial]'s fields (the settings already chosen on this
+     * phone, e.g. `units`, so signing in doesn't undo them). Gives its value
+     * (the one just written, if it was missing), or null if the PDS
+     * couldn't be asked: we try again next sign-in or launch.
      */
-    suspend fun ensure(xrpc: Xrpc, did: String): JsonObject? {
+    suspend fun ensure(xrpc: Xrpc, did: String, initial: Map<String, JsonElement> = emptyMap()): JsonObject? {
         try {
             return read(xrpc, did) ?: run {
-                val record = buildJsonObject { put("\$type", NSID); put("createdAt", now()) }
+                val record = JsonObject(buildMap {
+                    putAll(initial)
+                    put("\$type", JsonPrimitive(NSID))
+                    put("createdAt", JsonPrimitive(now()))
+                })
                 xrpc.procedure(
                     "com.atproto.repo.createRecord",
                     buildJsonObject {

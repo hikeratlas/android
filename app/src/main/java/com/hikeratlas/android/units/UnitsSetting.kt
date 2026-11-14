@@ -73,10 +73,14 @@ class UnitsSetting(
         remember(did, u)
     }
 
-    /** The profile record's units, written first if the account has none (a PDS that's down: next time). */
+    /**
+     * The profile record's units. An account without a record gets one,
+     * with this phone's units, so choosing mi/ft before signing in sticks.
+     * (A PDS that's down: next time.)
+     */
     private suspend fun load(did: String) {
         val before = saves
-        val record = ProfileRecord.ensure(account.xrpc, did) ?: return
+        val record = ProfileRecord.ensure(account.xrpc, did, mapOf("units" to local().toJson())) ?: return
         // Changed here meanwhile: that's newer than what was read.
         if (saves == before) remember(did, Units.of(record["units"]))
     }
