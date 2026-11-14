@@ -45,12 +45,18 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import android.net.Uri
 import com.hikeratlas.android.HikerAtlasApp
 import com.hikeratlas.android.map.MapScreen
+import com.hikeratlas.android.atproto.AccountState
+import com.hikeratlas.android.atproto.Faves
+import com.hikeratlas.android.atproto.SignedOutException
+import com.hikeratlas.android.routes.KeyedHike
+import com.hikeratlas.android.routes.RouteKeys
+import com.hikeratlas.android.routes.findKeyedHikes
 
 private enum class Tab(val label: String, val selected: ImageVector, val unselected: ImageVector) {
     Map("Map", Icons.Filled.Map, Icons.Outlined.Map),
     // Hikes by place: countries, states, parks.
     Explore("Explore", Icons.Filled.Explore, Icons.Outlined.Explore),
-    // Recorded tracks (and later offline areas): shown once it has something in it.
+    // Offline areas, faved hikes and recorded tracks: shown once it may have something in it.
     Saved("Saved", Icons.Filled.Bookmark, Icons.Outlined.BookmarkBorder),
     You("You", Icons.Filled.Person, Icons.Outlined.Person),
 }
@@ -85,7 +91,43 @@ fun AppScreen(app: HikerAtlasApp, link: Uri? = null, onLinkHandled: () -> Unit =
     val mapCache = remember { MapLibreCache(context.applicationContext) }
     // Areas from an older build of the map offer Update.
     LaunchedEffect(Unit) { offline.checkUpdates() }
-    val tabs = Tab.entries.filter { it != Tab.Saved || library.tracks.isNotEmpty() || offline.areas.isNotEmpty() || tab == Tab.Saved }
+    val accountState by app.account.state.collectAsState()
+    val did = (accountState as? AccountState.In)?.did
+    val accountActions = AccountActions(
+        state = accountState,
+        signIn = { app.account.beginSignIn(it) },
+        openPage = { openSignInPage(context, it) },
+        signOut = { app.account.signOut() },
+        clearError = { app.account.clearError() },
+    )
+    val faveActions = FaveActions(
+        accountActions,
+        isFaved = { key -> Faves.isFaved(app.account.xrpc, app.account.did ?: throw SignedOutException(), key) },
+        setFave = { key, on -> Faves.set(app.account.xrpc, app.account.did ?: throw SignedOutException(), key, on) },
+    )
+    // The faved hikes, read again each time Saved opens (one may have been
+    // faved since, here or on the website); the hikes found are kept.
+    var faved by remember(did) { mutableStateOf<FavedState>(FavedState.Loading) }
+    var favedAttempt by remember { mutableIntStateOf(0) }
+    val favedFound = remember(did) { mutableMapOf<String, KeyedHike>() }
+    LaunchedEffect(tab == Tab.Saved, did, favedAttempt) {
+        if (tab != Tab.Saved || did == null) return@LaunchedEffect
+        if (faved is FavedState.Failed) faved = FavedState.Loading
+        loadFaved(
+            list = { Faves.list(app.account.xrpc, did) },
+            find = { keys ->
+                findKeyedHikes(keys, app.routes.regions(), app.routes.index(), { app.routes.park(it) })
+            },
+            known = favedFound.toMap(),
+            canFind = RouteKeys.available,
+        ) { s ->
+            if (s is FavedState.Ready) s.found?.let { favedFound.putAll(it) }
+            faved = s
+        }
+    }
+    val tabs = Tab.entries.filter {
+        it != Tab.Saved || library.tracks.isNotEmpty() || offline.areas.isNotEmpty() || did != null || tab == Tab.Saved
+    }
     // A sheet on the map needs the room: the tabs step aside while it's open.
     var sheetOpen by remember { mutableStateOf(false) }
     val tabsShown = !(tab == Tab.Map && sheetOpen)
@@ -105,6 +147,7 @@ fun AppScreen(app: HikerAtlasApp, link: Uri? = null, onLinkHandled: () -> Unit =
                 explore = c.path.joinToString("/")
                 tab = Tab.Explore
             },
+            faves = faveActions,
         )
         if (tab == Tab.Saved) {
             Surface(Modifier.fillMaxSize().padding(bottom = barHeight)) {
@@ -128,6 +171,17 @@ fun AppScreen(app: HikerAtlasApp, link: Uri? = null, onLinkHandled: () -> Unit =
                                 tab = Tab.Map
                             },
                         )
+                        if (did != null) {
+                            favedHikesSection(
+                                faved,
+                                onOpen = { h ->
+                                    viewTrack = null
+                                    openArea = OfflineAreas.Target(com.hikeratlas.android.offline.OfflineStore.HIKE, h.id, h.title)
+                                    tab = Tab.Map
+                                },
+                                onRetry = { favedAttempt++ },
+                            )
+                        }
                     },
                 )
             }
@@ -158,7 +212,6 @@ fun AppScreen(app: HikerAtlasApp, link: Uri? = null, onLinkHandled: () -> Unit =
             }
         }
         if (tab == Tab.You) {
-            val accountState by app.account.state.collectAsState()
             Box(Modifier.fillMaxSize().padding(bottom = barHeight)) {
                 YouScreen(
                     StorageActions(
@@ -168,16 +221,10 @@ fun AppScreen(app: HikerAtlasApp, link: Uri? = null, onLinkHandled: () -> Unit =
                         deleteAll = { offline.deleteAll() },
                         clearMapCache = { mapCache.clear() },
                     ),
-                    AccountActions(
-                        state = accountState,
-                        signIn = { app.account.beginSignIn(it) },
-                        openPage = { openSignInPage(context, it) },
-                        signOut = { app.account.signOut() },
-                        clearError = { app.account.clearError() },
-                    ),
+                    accountActions,
                     UnitsActions(
                         current = com.hikeratlas.android.units.Units.current,
-                        signedIn = accountState is com.hikeratlas.android.atproto.AccountState.In,
+                        signedIn = accountState is AccountState.In,
                         save = { app.units.set(it) },
                     ),
                 )

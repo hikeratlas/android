@@ -136,20 +136,21 @@ internal fun Avatar(url: String?, name: String, size: Int) {
 
 /**
  * The website's sign-in dialog: "Continue with Bluesky" (its page asks
- * who), or a handle for another account.
+ * who), or a handle for another account. [why] says what it's for, as
+ * "Sign in to save X to your faves."
  */
 @Composable
-internal fun SignInDialog(account: AccountActions, onClose: () -> Unit) {
+internal fun SignInDialog(account: AccountActions, onClose: () -> Unit, why: String? = null) {
     Dialog(onDismissRequest = onClose) {
         Surface(shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.surface) {
-            SignInForm(account, onClose)
+            SignInForm(account, onClose, why)
         }
     }
 }
 
 /** The dialog's content (apart, to test: Robolectric never lets a text field in a dialog go idle). */
 @Composable
-internal fun SignInForm(account: AccountActions, onClose: () -> Unit) {
+internal fun SignInForm(account: AccountActions, onClose: () -> Unit, why: String? = null) {
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     var other by remember { mutableStateOf(false) }
@@ -174,6 +175,8 @@ internal fun SignInForm(account: AccountActions, onClose: () -> Unit) {
     }
     Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text("Sign in", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.ExtraBold)
+        // What signing in is for, when asked from something that needs it (a fave).
+        if (why != null) Text(why, style = MaterialTheme.typography.bodyMedium)
         // The whole line opens the terms (the privacy policy is a
         // section of them): a LinkAnnotation per phrase would be
         // nicer, but never lets Robolectric's tests go idle. The
