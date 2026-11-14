@@ -37,6 +37,12 @@ class LinkIntentTest {
         assertTrue(handlers("http://www.hikeratlas.com/hikes/canada").isEmpty())
     }
 
+    /** The browser coming back from signing in (the OAuth redirect URI). */
+    @Test
+    fun signInRedirectOpensTheApp() {
+        assertEquals(listOf(MainActivity::class.java.name), handlers("com.hikeratlas.www:/oauth/callback?code=c&state=s&iss=https%3A%2F%2Fbsky.social"))
+    }
+
     // What Chrome reads to tell the website the app is installed.
     @Test
     fun assetStatementsNameTheSite() {

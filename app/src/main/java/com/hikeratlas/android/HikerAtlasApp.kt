@@ -56,6 +56,20 @@ class HikerAtlasApp : Application(), RecorderHost, OfflineHost {
         )
     }
 
+    /** For work that outlives a screen: finishing a sign-in, refreshing its tokens. */
+    private val appScope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.Default)
+
+    /**
+     * The AT Protocol account signed in, if any: its tokens encrypted with a
+     * Keystore key, its DPoP key in the Keystore.
+     */
+    val account by lazy {
+        com.hikeratlas.android.atproto.Account(
+            http, com.hikeratlas.android.atproto.EncryptedSecretStore(this),
+            com.hikeratlas.android.atproto.KeystoreDpopKeys(), scope = appScope,
+        )
+    }
+
     /** What's kept for offline use: areas' tiles, routes data, fonts and icons. */
     val offline by lazy { OfflineStore(this) }
     override val offlineAreas by lazy {
@@ -112,6 +126,8 @@ class HikerAtlasApp : Application(), RecorderHost, OfflineHost {
         )
         // Room for a few areas' tiles, so going back somewhere is quick.
         OfflineManager.getInstance(this).setMaximumAmbientCacheSize(AMBIENT_CACHE_BYTES, null)
+        // The saved session, restored (in the background) at launch.
+        account
     }
 
     private companion object {

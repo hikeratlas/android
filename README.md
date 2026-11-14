@@ -31,6 +31,12 @@ The app matches more of the website with each version:
   planner); drag a point to move it, undo, clear; distance, climb and an
   elevation chart.
 
+- **Account**: sign in with Bluesky or any AT Protocol account, as on the
+  website (`atproto/`: atproto OAuth with PAR, PKCE and DPoP on OkHttp; the
+  DPoP key in the Android Keystore, the tokens encrypted with a Keystore
+  key). The session is kept and refreshed; `Xrpc` makes calls to the PDS
+  with it, for faves and posts to come.
+
 That's parity with the website's map. Next: offline areas.
 
 ## How the map works

@@ -19,9 +19,13 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        val app = application as HikerAtlasApp
+        // Back from signing in, even into a recreated activity (the app was
+        // killed while the browser was open): Account ignores a redirect
+        // it's already had.
+        signInCallback(intent)
         // Not again when the activity is recreated: the map already moved.
         if (savedInstanceState == null) link = linkOf(intent)
-        val app = application as HikerAtlasApp
         setContent {
             HikerAtlasTheme {
                 AppScreen(app, link = link, onLinkHandled = { link = null })
@@ -33,8 +37,18 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
+        signInCallback(intent)
         linkOf(intent)?.let { link = it }
     }
 
-    private fun linkOf(intent: Intent?): Uri? = intent?.takeIf { it.action == Intent.ACTION_VIEW }?.data
+    private fun viewed(intent: Intent?): Uri? = intent?.takeIf { it.action == Intent.ACTION_VIEW }?.data
+
+    /** A website link: anything viewed but the sign-in redirect. */
+    private fun linkOf(intent: Intent?): Uri? = viewed(intent)?.takeIf { it.scheme == "https" }
+
+    private fun signInCallback(intent: Intent?) {
+        val uri = viewed(intent)?.toString() ?: return
+        val account = (application as HikerAtlasApp).account
+        if (account.isCallback(uri)) account.completeSignIn(uri)
+    }
 }

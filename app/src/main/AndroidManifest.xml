@@ -45,6 +45,18 @@
                 <data android:host="hikeratlas.com" />
                 <data android:pathPrefix="/hikes" />
             </intent-filter>
+            <!--
+              Back from signing in (atproto OAuth's redirect URI,
+              com.hikeratlas.www:/oauth/callback, in the app's client
+              metadata). Only the scheme: Android ignores a path without a
+              host. MainActivity checks the rest.
+            -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="com.hikeratlas.www" />
+            </intent-filter>
         </activity>
         <!-- Shares exported tracks (GPX) with other apps. -->
         <provider
