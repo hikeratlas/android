@@ -34,6 +34,7 @@ import com.hikeratlas.android.atproto.AccountState
 import com.hikeratlas.android.atproto.Faves
 import com.hikeratlas.android.atproto.SignedOutException
 import com.hikeratlas.android.routes.KeyedHike
+import com.hikeratlas.android.routes.KeyedSearch
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import java.time.Instant
@@ -124,13 +125,16 @@ sealed interface FavedState {
     data class Failed(val message: String) : FavedState
     /**
      * The faves, newest first, and the hikes they are: [found] is null
-     * while they're being looked for. [canFind] is false where they
-     * couldn't be (no network for the build's index, or no H3 here).
+     * while they're being looked for. A fave not found is "no longer on
+     * Hiker Atlas" only after an exact search: not where [canFind] is false
+     * (no network for the build's index, or no H3 here), nor for a key in
+     * [unsure] (a park it may be in couldn't be searched).
      */
     data class Ready(
         val faves: List<Faves.Fave>,
         val found: Map<String, KeyedHike>? = null,
         val canFind: Boolean = true,
+        val unsure: Set<String> = emptySet(),
     ) : FavedState
 }
 
@@ -140,7 +144,7 @@ sealed interface FavedState {
  */
 suspend fun loadFaved(
     list: suspend () -> List<Faves.Fave>,
-    find: suspend (Collection<String>) -> Map<String, KeyedHike>,
+    find: suspend (Collection<String>) -> KeyedSearch,
     known: Map<String, KeyedHike>,
     canFind: Boolean,
     emit: (FavedState) -> Unit,
@@ -164,7 +168,8 @@ suspend fun loadFaved(
     }
     emit(FavedState.Ready(faves, null))
     try {
-        emit(FavedState.Ready(faves, known + find(missing), true))
+        val r = find(missing)
+        emit(FavedState.Ready(faves, known + r.found, true, r.unsure))
     } catch (e: CancellationException) {
         throw e
     } catch (_: Exception) {
@@ -225,7 +230,8 @@ fun LazyListScope.favedHikesSection(state: FavedState, onOpen: (KeyedHike) -> Un
                     when {
                         h != null -> Text(h.title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
                         state.found == null -> Text("Finding the hike…", style = MaterialTheme.typography.titleSmall, color = muted)
-                        state.canFind -> Text("A hike no longer on Hiker Atlas", style = MaterialTheme.typography.titleSmall, color = muted)
+                        state.canFind && f.key !in state.unsure ->
+                            Text("A hike no longer on Hiker Atlas", style = MaterialTheme.typography.titleSmall, color = muted)
                         else -> Text("A hike that couldn't be looked up", style = MaterialTheme.typography.titleSmall, color = muted)
                     }
                     val sub = listOfNotNull(h?.parkName?.takeIf { it.isNotEmpty() }, faveDay(f.createdAt).takeIf { it.isNotEmpty() }).joinToString(" · ")

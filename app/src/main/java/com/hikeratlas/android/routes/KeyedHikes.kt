@@ -33,7 +33,7 @@ fun keyedRoutes(doc: ParkDoc): Map<String, String> {
     return out
 }
 
-/** At most this many parks are loaded for one search. */
+/** At most this many parks are loaded for one search; keys only in parks past it are unsure. */
 const val MAX_KEY_PARKS = 60
 /** Degrees around a park's hikes' box that a key's centroid may fall in. */
 const val KEY_MARGIN = 0.01
@@ -41,25 +41,47 @@ const val KEY_MARGIN = 0.01
 private const val AT_ONCE = 6
 
 /**
- * The hikes [keys] name, in the build [regions] and [index] describe; a key
- * missing from the result is no current hike (or one whose park couldn't be
- * loaded). [park] loads a park's routes; [centroid] places a key.
+ * What a search for keys found. [found]: the hikes keys name. [unsure]: keys
+ * not found that can't be said to be gone, since a park they may be in
+ * couldn't be searched (it wouldn't load, it had only a document from before
+ * route keys, it was past the [MAX_KEY_PARKS] cap) or the key couldn't be
+ * placed. Any other key not found was looked for in every keyed park around
+ * it: it's no current hike.
+ */
+data class KeyedSearch(val found: Map<String, KeyedHike>, val unsure: Set<String>)
+
+/** Whether a park's document has route keys at all: one from before them (an older build) has none. */
+fun hasRouteKeys(doc: ParkDoc): Boolean = keyedRoutes(doc).isNotEmpty()
+
+/**
+ * The hikes [keys] name, in the build [regions] and [index] describe.
+ * [park] loads a park's routes (an offline area's copy first, as the app
+ * opens them); where that copy is from before route keys, [onlinePark]
+ * loads the build's. [centroid] places a key.
  */
 suspend fun findKeyedHikes(
     keys: Collection<String>,
     regions: Regions,
     index: BundleIndex,
     park: suspend (String) -> ParkDoc?,
+    onlinePark: suspend (String) -> ParkDoc? = { null },
     centroid: (String) -> LngLat? = RouteKeys::centroid,
-): Map<String, KeyedHike> {
+): KeyedSearch {
     val found = linkedMapOf<String, KeyedHike>()
     val want = keys.toSet()
-    if (want.isEmpty()) return found
+    if (want.isEmpty()) return KeyedSearch(found, emptySet())
+    val unsure = mutableSetOf<String>()
     val areas = regions.countries.flatMap { c -> c.states.flatMap { it.areas } }
     // The parks around each key's centroid. A park under two OSM ids shares
     // one document: loaded once, by its offset in the bundle.
     val parks = linkedMapOf<Long, String>()
-    for (c in want.mapNotNull(centroid)) {
+    val near = mutableMapOf<String, MutableSet<Long>>()
+    for (k in want) {
+        val c = centroid(k)
+        if (c == null) {
+            unsure += k
+            continue
+        }
         val (lon, lat) = c[0] to c[1]
         for (a in areas) {
             val b = a.bbox ?: continue
@@ -67,26 +89,36 @@ suspend fun findKeyedHikes(
             for (id in a.ids.ifEmpty { listOf(a.id) }) {
                 val at = index.parks[id]?.firstOrNull() ?: continue
                 parks.putIfAbsent(at, id)
+                near.getOrPut(k) { mutableSetOf() } += at
             }
         }
     }
-    for (batch in parks.values.take(MAX_KEY_PARKS).chunked(AT_ONCE)) {
+    suspend fun load(get: suspend (String) -> ParkDoc?, id: String): ParkDoc? = try {
+        get(id)
+    } catch (e: CancellationException) {
+        throw e
+    } catch (_: Exception) {
+        null
+    }
+    // Parks that couldn't be searched: by their offset.
+    val unsearched = parks.keys.drop(MAX_KEY_PARKS).toMutableSet()
+    val ids = parks.entries.take(MAX_KEY_PARKS)
+    for (batch in ids.chunked(AT_ONCE)) {
         val docs = coroutineScope {
-            batch.map { id ->
+            batch.map { (at, id) ->
                 async {
-                    try {
-                        park(id)
-                    } catch (e: CancellationException) {
-                        throw e
-                    } catch (_: Exception) {
-                        // One park that won't load leaves its keys unfound, not the rest.
-                        null
-                    }
+                    // An offline area's copy from before route keys can't
+                    // say a key isn't there: the build's own is needed.
+                    val doc = load(park, id)?.takeIf(::hasRouteKeys) ?: load(onlinePark, id)?.takeIf(::hasRouteKeys)
+                    at to doc
                 }
             }.awaitAll()
         }
-        for (doc in docs) {
-            doc ?: continue
+        for ((at, doc) in docs) {
+            if (doc == null) {
+                unsearched += at
+                continue
+            }
             for ((k, id) in keyedRoutes(doc)) {
                 if (k !in want || k in found) continue
                 val title = lookup(doc, id)?.title ?: continue
@@ -95,5 +127,8 @@ suspend fun findKeyedHikes(
         }
         if (found.size == want.size) break
     }
-    return found
+    for (k in want) {
+        if (k !in found && near[k].orEmpty().any { it in unsearched }) unsure += k
+    }
+    return KeyedSearch(found, unsure - found.keys)
 }

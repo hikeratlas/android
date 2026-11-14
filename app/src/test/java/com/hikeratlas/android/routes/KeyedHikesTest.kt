@@ -69,32 +69,88 @@ class KeyedHikesTest {
 
     @Test
     fun keysMatchedToHikes() = runBlocking {
-        val found = findKeyedHikes(listOf(walkIn, nugget, mendenhall, "not a key"), regions, index, park)
+        val r = findKeyedHikes(listOf(walkIn, nugget, mendenhall, "not a key"), regions, index, park)
+        val found = r.found
         assertEquals(KeyedHike("100", "Parc du Lac", "100/base/0", "Camp Rouge"), found[walkIn])
         assertEquals(KeyedHike("200", "Juneau Trails", "200/day/1", "Nugget Falls"), found[nugget])
         // Its park was loaded (its centroid is Nugget Falls' cell), but no
         // route there has the key exactly: no longer curated.
         assertEquals(setOf(walkIn, nugget), found.keys)
+        // Every park around it was searched: Mendenhall is surely gone. "not a key" can't be placed.
+        assertEquals(setOf("not a key"), r.unsure)
         // Only the parks around the keys, and a shared document once.
         assertEquals(listOf("100", "200"), loaded.sorted())
     }
 
     @Test
     fun anUnmatchedKey() = runBlocking {
-        val found = findKeyedHikes(listOf(mendenhall), regions, index, park)
-        assertTrue(found.isEmpty())
+        val r = findKeyedHikes(listOf(mendenhall), regions, index, park)
+        assertTrue(r.found.isEmpty())
+        assertTrue(r.unsure.isEmpty())
         assertEquals(listOf("200"), loaded)
     }
 
     @Test
     fun aParkThatWontLoadLeavesTheOthers() = runBlocking {
-        val found = findKeyedHikes(listOf(walkIn, nugget), regions, index, { id -> if (id == "100") throw java.io.IOException("offline") else docs[id] })
-        assertEquals(setOf(nugget), found.keys)
+        val r = findKeyedHikes(listOf(walkIn, nugget), regions, index, { id -> if (id == "100") throw java.io.IOException("offline") else docs[id] })
+        assertEquals(setOf(nugget), r.found.keys)
+        // Not "no longer": its park couldn't be searched.
+        assertEquals(setOf(walkIn), r.unsure)
     }
 
     @Test
     fun noKeysLoadsNothing() = runBlocking {
-        assertTrue(findKeyedHikes(emptyList(), regions, index, park).isEmpty())
+        assertTrue(findKeyedHikes(emptyList(), regions, index, park).found.isEmpty())
         assertTrue(loaded.isEmpty())
+    }
+
+    // An offline area's copy of Juneau from a build before route keys.
+    private val juneauBeforeKeys = ParkDoc(
+        park = juneau.park,
+        day_hikes = juneau.day_hikes.map { it.copy(route = it.route.copy(route_key = null)) },
+        stops = juneau.stops.map { it.copy(route = it.route.copy(route_key = null)) },
+        point_to_points = juneau.point_to_points.map { it.copy(route = it.route.copy(route_key = null)) },
+    )
+
+    @Test
+    fun aParkDownloadedBeforeKeysIsLookedUpOnline() = runBlocking {
+        val online = mutableListOf<String>()
+        val r = findKeyedHikes(
+            listOf(nugget, mendenhall), regions, index,
+            park = { juneauBeforeKeys },
+            onlinePark = { id -> online += id; docs[id] },
+        )
+        assertEquals(KeyedHike("200", "Juneau Trails", "200/day/1", "Nugget Falls"), r.found[nugget])
+        // Searched in the build's keyed document: Mendenhall is surely gone.
+        assertTrue(r.unsure.isEmpty())
+        assertEquals(listOf("200"), online)
+    }
+
+    @Test
+    fun aParkDownloadedBeforeKeysWithNoNetworkIsUnsure() = runBlocking {
+        val r = findKeyedHikes(
+            listOf(nugget, mendenhall), regions, index,
+            park = { juneauBeforeKeys },
+            onlinePark = { throw java.io.IOException("no network") },
+        )
+        assertTrue(r.found.isEmpty())
+        assertEquals(setOf(nugget, mendenhall), r.unsure)
+    }
+
+    @Test
+    fun aBuildWithoutKeysIsUnsureToo() = runBlocking {
+        // north-america until its next routes build: no document has keys.
+        val r = findKeyedHikes(listOf(nugget), regions, index, park = { juneauBeforeKeys }, onlinePark = { juneauBeforeKeys })
+        assertEquals(setOf(nugget), r.unsure)
+    }
+
+    @Test
+    fun parksPastTheCapAreUnsure() = runBlocking {
+        // 61 parks around one point, none with the key: the 61st isn't searched.
+        val areas = (0..MAX_KEY_PARKS).map { Regions.Area("p$it", "P$it", bbox = listOf(-134.6, 58.4, -134.5, 58.45)) }
+        val many = Regions(listOf(Regions.Country("C", states = listOf(Regions.State("S", areas = areas)))))
+        val idx = BundleIndex("b.bin", areas.mapIndexed { i, a -> a.id to listOf(i.toLong(), 1L) }.toMap())
+        val r = findKeyedHikes(listOf(mendenhall), many, idx, { id -> ParkDoc(Park(id, id), day_hikes = listOf(hike("X", "x.$id"))) })
+        assertEquals(setOf(mendenhall), r.unsure)
     }
 }

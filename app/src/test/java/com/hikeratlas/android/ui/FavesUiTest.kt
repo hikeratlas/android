@@ -13,6 +13,7 @@ import androidx.compose.ui.test.performClick
 import com.hikeratlas.android.atproto.AccountState
 import com.hikeratlas.android.atproto.Faves
 import com.hikeratlas.android.routes.KeyedHike
+import com.hikeratlas.android.routes.KeyedSearch
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -124,6 +125,19 @@ class FavesUiTest {
     }
 
     @Test
+    fun aFaveThatCouldNotBeSearchedIsNotSaidToBeGone() {
+        val state = FavedState.Ready(
+            listOf(Faves.Fave(key, "2026-11-14T12:00:00.000Z"), Faves.Fave("gone", "2026-10-01T12:00:00.000Z")),
+            found = emptyMap(), unsure = setOf(key),
+        )
+        compose.setContent {
+            HikerAtlasTheme { LazyColumn { favedHikesSection(state, onOpen = {}, onRetry = {}) } }
+        }
+        assertEquals(1, compose.onAllNodesWithText("A hike that couldn't be looked up").fetchSemanticsNodes().size)
+        assertEquals(1, compose.onAllNodesWithText("A hike no longer on Hiker Atlas").fetchSemanticsNodes().size)
+    }
+
+    @Test
     fun whileLookingAndWhenNone() {
         var state: FavedState by mutableStateOf(FavedState.Ready(listOf(Faves.Fave(key, "")), found = null))
         compose.setContent {
@@ -145,9 +159,14 @@ class FavesUiTest {
         val faves = listOf(Faves.Fave(key, "2026-11-14T12:00:00.000Z"), Faves.Fave("b", "2026-11-01T12:00:00.000Z"))
         val asked = mutableListOf<Collection<String>>()
         val states = mutableListOf<FavedState>()
-        loadFaved({ faves }, { ks -> asked += ks; mapOf("b" to other) }, known = mapOf(key to nugget), canFind = true) { states += it }
+        loadFaved({ faves }, { ks -> asked += ks; KeyedSearch(mapOf("b" to other), emptySet()) }, known = mapOf(key to nugget), canFind = true) { states += it }
         assertEquals(listOf(listOf("b")), asked)
         assertEquals(listOf(FavedState.Ready(faves, null), FavedState.Ready(faves, mapOf(key to nugget, "b" to other))), states)
+
+        // Unsure keys are passed on, and not kept as found.
+        states.clear()
+        loadFaved({ faves }, { KeyedSearch(emptyMap(), setOf("b")) }, known = mapOf(key to nugget), canFind = true) { states += it }
+        assertEquals(FavedState.Ready(faves, mapOf(key to nugget), unsure = setOf("b")), states.last())
 
         // Everything already found: nothing looked for.
         states.clear()
@@ -160,7 +179,7 @@ class FavesUiTest {
         assertEquals(FavedState.Ready(faves, emptyMap(), canFind = false), states.last())
 
         states.clear()
-        loadFaved({ throw IOException("HTTP 502") }, { emptyMap() }, known = emptyMap(), canFind = true) { states += it }
+        loadFaved({ throw IOException("HTTP 502") }, { KeyedSearch(emptyMap(), emptySet()) }, known = emptyMap(), canFind = true) { states += it }
         assertEquals(listOf<FavedState>(FavedState.Failed("HTTP 502")), states)
     }
 }

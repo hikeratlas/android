@@ -38,7 +38,7 @@ class LiveRoutesTest {
             for (r in keyedRoutesAll(doc)) routes.getOrPut(r.first) { mutableSetOf() } += r.second
         }
         assertTrue(routes.size > 50)
-        val found = findKeyedHikes(routes.keys, regions, index, { repo.park(it) })
+        val found = findKeyedHikes(routes.keys, regions, index, { repo.park(it) }).found
         // A park regions.json doesn't list has no box to look in (as on the
         // website, which has no page for it either): its routes can't be found.
         val areas = regions.countries.flatMap { c -> c.states.flatMap { it.areas } }

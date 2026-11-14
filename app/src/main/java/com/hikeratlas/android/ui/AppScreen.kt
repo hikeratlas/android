@@ -116,7 +116,7 @@ fun AppScreen(app: HikerAtlasApp, link: Uri? = null, onLinkHandled: () -> Unit =
         loadFaved(
             list = { Faves.list(app.account.xrpc, did) },
             find = { keys ->
-                findKeyedHikes(keys, app.routes.regions(), app.routes.index(), { app.routes.park(it) })
+                findKeyedHikes(keys, app.routes.regions(), app.routes.index(), { app.routes.park(it) }, { app.routes.parkOnline(it) })
             },
             known = favedFound.toMap(),
             canFind = RouteKeys.available,
