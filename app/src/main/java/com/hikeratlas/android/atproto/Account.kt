@@ -91,6 +91,57 @@ class Account(
     private val _state = MutableStateFlow<AccountState>(AccountState.Loading)
     val state: StateFlow<AccountState> = _state
 
+    // auth and xrpc come before anything that launches work (restored,
+    // init): Kotlin sets properties in order, and a profile check started
+    // earlier made xrpc with no auth, for good (signed in, but every call
+    // "signed out").
+    private val auth = object : XrpcAuth {
+        override val nonces get() = oauth.nonces
+
+        // A session whose key is gone can't be used again: signed out, as
+        // for a refused refresh, rather than signed in to nothing.
+        override fun key(s: Stored) = keys.load(s.keyAlias) ?: run {
+            if (stored?.keyAlias == s.keyAlias) drop()
+            throw SignedOutException()
+        }
+
+        override suspend fun fresh(): Stored {
+            restored.await()
+            val s = stored ?: throw SignedOutException()
+            return if (s.expiresAt - now() < EARLY_MS) refresh(s) else s
+        }
+
+        // One refresh at a time: a refresh token works once, so two at once
+        // would leave one with a spent token (and the server may then end the
+        // session). A caller whose tokens another refresh already replaced
+        // gets those.
+        override suspend fun refresh(used: Stored): Stored = lock.withLock {
+            val s = stored ?: throw SignedOutException()
+            if (s.accessToken != used.accessToken) return@withLock s
+            val refreshToken = s.refreshToken ?: run { drop(); throw SignedOutException() }
+            val key = keys.load(s.keyAlias) ?: run { drop(); throw SignedOutException() }
+            val t = try {
+                oauth.refresh(s.tokenEndpoint, key, refreshToken)
+            } catch (e: OAuthException) {
+                // Revoked, expired, or otherwise refused: signed out. (A 5xx
+                // or no network is an IOException, and keeps the session.)
+                drop()
+                keys.delete(s.keyAlias)
+                throw SignedOutException()
+            }
+            if (t.sub != null && t.sub != s.did) {
+                drop()
+                keys.delete(s.keyAlias)
+                throw SignedOutException()
+            }
+            s.copy(accessToken = t.access_token, refreshToken = t.refresh_token ?: s.refreshToken, expiresAt = expiry(t))
+                .also(::save)
+        }
+    }
+
+    /** Calls to the signed-in account's PDS; they throw [SignedOutException] once there's no session. */
+    val xrpc: Xrpc by lazy { Xrpc(http, null, auth) }
+
     @Volatile private var stored: Stored? = null
     private val lock = Mutex()
     private val restored: Deferred<Unit> = scope.async(Dispatchers.IO) {
@@ -108,9 +159,6 @@ class Account(
 
     /** The signed-in account's DID, or null. */
     val did: String? get() = stored?.did
-
-    /** Calls to the signed-in account's PDS; they throw [SignedOutException] once there's no session. */
-    val xrpc: Xrpc by lazy { Xrpc(http, null, auth) }
 
     /**
      * Starts signing in: at Bluesky ([AtConfig.BLUESKY], whose page asks
@@ -275,49 +323,6 @@ class Account(
         }
     }
 
-    private val auth = object : XrpcAuth {
-        override val nonces get() = oauth.nonces
-
-        // A session whose key is gone can't be used again: signed out, as
-        // for a refused refresh, rather than signed in to nothing.
-        override fun key(s: Stored) = keys.load(s.keyAlias) ?: run {
-            if (stored?.keyAlias == s.keyAlias) drop()
-            throw SignedOutException()
-        }
-
-        override suspend fun fresh(): Stored {
-            restored.await()
-            val s = stored ?: throw SignedOutException()
-            return if (s.expiresAt - now() < EARLY_MS) refresh(s) else s
-        }
-
-        // One refresh at a time: a refresh token works once, so two at once
-        // would leave one with a spent token (and the server may then end the
-        // session). A caller whose tokens another refresh already replaced
-        // gets those.
-        override suspend fun refresh(used: Stored): Stored = lock.withLock {
-            val s = stored ?: throw SignedOutException()
-            if (s.accessToken != used.accessToken) return@withLock s
-            val refreshToken = s.refreshToken ?: run { drop(); throw SignedOutException() }
-            val key = keys.load(s.keyAlias) ?: run { drop(); throw SignedOutException() }
-            val t = try {
-                oauth.refresh(s.tokenEndpoint, key, refreshToken)
-            } catch (e: OAuthException) {
-                // Revoked, expired, or otherwise refused: signed out. (A 5xx
-                // or no network is an IOException, and keeps the session.)
-                drop()
-                keys.delete(s.keyAlias)
-                throw SignedOutException()
-            }
-            if (t.sub != null && t.sub != s.did) {
-                drop()
-                keys.delete(s.keyAlias)
-                throw SignedOutException()
-            }
-            s.copy(accessToken = t.access_token, refreshToken = t.refresh_token ?: s.refreshToken, expiresAt = expiry(t))
-                .also(::save)
-        }
-    }
 
     private fun expiry(t: TokenResponse) = now() + (t.expires_in ?: DEFAULT_EXPIRES_S) * 1000
 
