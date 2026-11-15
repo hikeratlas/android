@@ -75,10 +75,11 @@ object ProfileRecord {
     }
 
     /**
-     * The record's value; null if the PDS says there's none (HTTP 400,
-     * RecordNotFound, as the website takes it). Other failures throw.
+     * The record's value (the settings: `units`, `license`); null if the
+     * PDS says there's none (HTTP 400, RecordNotFound, as the website takes
+     * it). Other failures throw.
      */
-    private suspend fun read(xrpc: Xrpc, did: String): JsonObject? = try {
+    suspend fun read(xrpc: Xrpc, did: String): JsonObject? = try {
         xrpc.query("com.atproto.repo.getRecord", mapOf("repo" to did, "collection" to NSID, "rkey" to RKEY))["value"] as? JsonObject
             ?: throw IOException("getRecord gave no value")
     } catch (e: XrpcException) {

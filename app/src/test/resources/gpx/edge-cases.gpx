@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<gpx version="1.1" creator="Hiker Atlas" xmlns="http://www.topografix.com/GPX/1/1" xmlns:ha="https://www.hikeratlas.com/gpx/1">
+  <trk>
+    <trkseg></trkseg>
+    <trkseg>
+      <trkpt lat="45.0" lon="-75.0"><ele>100</ele><time>2026-06-01T10:00:00.250Z</time></trkpt>
+      <trkpt lat="45.0001" lon="-75.0"><ele> 104.9 </ele><time>2026-06-01T12:00:05+02:00</time></trkpt>
+      <trkpt lat="45.0002" lon="-75.0"><ele></ele></trkpt>
+      <trkpt lat="45.0003" lon="-75.0"><ele>105</ele><time>2026-06-01T10:00:20Z</time></trkpt>
+      <trkpt lat="45.0004" lon="-75.0"><ele>98</ele><time>not a time</time></trkpt>
+      <trkpt lat="45.0005" lon="-75.0"><ele>103</ele><time>2026-06-01T10:00:41.750Z</time></trkpt>
+      <trkpt lat="45.0006" lon="-75.0"><ele>1.1e2</ele></trkpt>
+      <trkpt lat="45.0007" lon="-75.0"><ele>abc</ele><time>2026-06-01T10:01:00Z</time></trkpt>
+      <trkpt lat="45.0008" lon="-75.0"><ele>-3.5</ele><time>2026-06-01T09:59:59.500Z</time></trkpt>
+      <trkpt lat="45.0009" lon="-75.0"><ele>1.5</ele><time>2026-06-01T10:02:00Z</time></trkpt>
+      <trkpt lat="45.0010" lon="-75.0"><ele>6.5</ele><time>2026-06-01T10:03:00Z</time></trkpt>
+    </trkseg>
+    <trkseg>
+      <trkpt lat="45.1" lon="-75.1"><ele>50</ele></trkpt>
+      <trkpt lat="45.1" lon="-75.1001"><ele>54.99</ele></trkpt>
+      <trkpt lat="45.1" lon="-75.1002"><ele>60</ele></trkpt>
+    </trkseg>
+  </trk>
+</gpx>

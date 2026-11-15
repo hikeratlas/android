@@ -105,6 +105,37 @@ fun AppScreen(app: HikerAtlasApp, link: Uri? = null, onLinkHandled: () -> Unit =
         isFaved = { key -> Faves.isFaved(app.account.xrpc, app.account.did ?: throw SignedOutException(), key) },
         setFave = { key, on -> Faves.set(app.account.xrpc, app.account.did ?: throw SignedOutException(), key, on) },
     )
+    val postActions = PostActions(
+        accountActions,
+        tracks = library.tracks,
+        license = { com.hikeratlas.android.atproto.Posts.licenseFor(app.account.xrpc, app.account.did ?: throw SignedOutException()) },
+        trackStats = { id -> library.gpxText(id)?.let { com.hikeratlas.android.track.TrackMeasure.ofGpx(it) } },
+        hikesNear = { id ->
+            com.hikeratlas.android.track.hikesNear(library.lines(id), app.routes.regions(), app.routes.index(), { app.routes.park(it) })
+        },
+        tracksNear = { line -> library.tracksNear(line) },
+        post = { d, progress -> postDraft(app.account.xrpc, app.account.did ?: throw SignedOutException(), library, d, progress) },
+        openProfile = {
+            val s = accountState as? AccountState.In
+            if (s != null) com.hikeratlas.android.map.openUrl(context, "${com.hikeratlas.android.routes.SITE}/@${android.net.Uri.encode(s.handle ?: s.did)}")
+        },
+        verifyPosted = { id -> app.account.did?.let { verifyPosted(app.account.xrpc, it, library, id) } },
+    )
+    // The licence for new posts, read from the profile record when You opens.
+    var license by remember(did) { mutableStateOf<String?>(null) }
+    var licenseError by remember(did) { mutableStateOf<String?>(null) }
+    LaunchedEffect(tab == Tab.You, did) {
+        if (tab != Tab.You || did == null) return@LaunchedEffect
+        licenseError = null
+        try {
+            val l = (com.hikeratlas.android.atproto.ProfileRecord.read(app.account.xrpc, did)?.get("license") as? kotlinx.serialization.json.JsonPrimitive)?.content
+            license = l?.takeIf { it in com.hikeratlas.android.atproto.Posts.LICENSES } ?: com.hikeratlas.android.atproto.Posts.DEFAULT_LICENSE
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            if (license == null) licenseError = e.message ?: e.toString()
+        }
+    }
     // The faved hikes, read again each time Saved opens (one may have been
     // faved since, here or on the website); the hikes found are kept.
     var faved by remember(did) { mutableStateOf<FavedState>(FavedState.Loading) }
@@ -148,6 +179,7 @@ fun AppScreen(app: HikerAtlasApp, link: Uri? = null, onLinkHandled: () -> Unit =
                 tab = Tab.Explore
             },
             faves = faveActions,
+            posts = postActions,
         )
         if (tab == Tab.Saved) {
             Surface(Modifier.fillMaxSize().padding(bottom = barHeight)) {
@@ -227,6 +259,14 @@ fun AppScreen(app: HikerAtlasApp, link: Uri? = null, onLinkHandled: () -> Unit =
                         signedIn = accountState is AccountState.In,
                         save = { app.units.set(it) },
                     ),
+                    did?.let { me ->
+                        LicenseActions(license, licenseError) { l ->
+                            com.hikeratlas.android.atproto.ProfileRecord.saveSettings(
+                                app.account.xrpc, me, mapOf("license" to kotlinx.serialization.json.JsonPrimitive(l)),
+                            )
+                            license = l
+                        }
+                    },
                 )
             }
         }

@@ -57,6 +57,13 @@ class FakeAtproto : AutoCloseable {
      * deleteRecord removes them.
      */
     val records = java.util.concurrent.ConcurrentHashMap<String, JsonObject>()
+    /** Blobs uploaded: their Content-Type and bytes. */
+    val blobs = CopyOnWriteArrayList<Pair<String?, ByteArray>>()
+    /** uploadBlob answers with this blob (JSON) instead of one made up from the upload. */
+    @Volatile var blobAnswer: String? = null
+    /** createRecord answers with this HTTP status and error body instead. */
+    @Volatile var createFails: Pair<Int, String>? = null
+    private val tids = java.util.concurrent.atomic.AtomicInteger()
     /** The PDS's getRecord answers with this HTTP status (a 5xx: it's down) instead. */
     @Volatile var getRecordFails: Int? = null
 
@@ -194,7 +201,14 @@ class FakeAtproto : AutoCloseable {
                 val rkey = body["rkey"]?.jsonPrimitive?.content
                 val key = "${body["collection"]?.jsonPrimitive?.content}/$rkey"
                 when {
-                    rkey == null -> json("""{"uri":"at://$did/x/1","cid":"bafy","echo":$body}""")
+                    createFails != null -> json(createFails!!.second, createFails!!.first)
+                    // As a PDS: a TID it makes (here, in order), kept like any other record.
+                    rkey == null -> {
+                        val tid = "3tid${tids.incrementAndGet()}"
+                        val k = "${body["collection"]?.jsonPrimitive?.content}/$tid"
+                        body["record"]?.let { records[k] = it.jsonObject }
+                        json("""{"uri":"at://$did/$k","cid":"bafy-$k","echo":$body}""")
+                    }
                     // As a PDS: create never replaces.
                     records.containsKey(key) -> json("""{"error":"InvalidRequest","message":"Record already exists"}""", 400)
                     else -> {
@@ -228,9 +242,13 @@ class FakeAtproto : AutoCloseable {
                 val cursor = if (page.size == limit) ""","cursor":"${page.last()}"""" else ""
                 json("""{"records":[$list]$cursor}""")
             }
-            "/xrpc/com.atproto.repo.uploadBlob" -> json(
-                """{"blob":{"${'$'}type":"blob","mimeType":"${r.headers["Content-Type"]}","size":${r.body!!.size}}}""",
-            )
+            "/xrpc/com.atproto.repo.uploadBlob" -> {
+                val bytes = r.body!!.toByteArray()
+                blobs += r.headers["Content-Type"] to bytes
+                json(
+                    """{"blob":${blobAnswer ?: """{"${'$'}type":"blob","ref":{"${'$'}link":"bafkrei-${blobs.size}"},"mimeType":"${r.headers["Content-Type"]}","size":${bytes.size}}"""}}""",
+                )
+            }
             else -> json("""{"error":"MethodNotImplemented"}""", 501)
         }
     }

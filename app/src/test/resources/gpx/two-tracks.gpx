@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<g:gpx xmlns:g="http://www.topografix.com/GPX/1/1" version="1.1" creator="Other">
+  <g:trk><g:trkseg>
+    <g:trkpt lat="-41.2" lon="174.7"><g:ele>10</g:ele><g:time>2026-01-02T20:00:00Z</g:time></g:trkpt>
+    <g:trkpt lat="-41.21" lon="174.71"><g:ele>30</g:ele><g:time>2026-01-02T20:30:00Z</g:time></g:trkpt>
+    <g:trkpt lat="-41.22" lon="174.72"><g:ele>12</g:ele><g:time>2026-01-02T21:00:00Z</g:time></g:trkpt>
+  </g:trkseg></g:trk>
+  <g:trk><g:trkseg>
+    <g:trkpt lat="-41.3" lon="174.8"><g:ele>12</g:ele><g:time>2026-01-03T19:00:00Z</g:time></g:trkpt>
+    <g:trkpt lat="-41.31" lon="174.82"><g:ele>80</g:ele><g:time>2026-01-03T22:00:00.001Z</g:time></g:trkpt>
+  </g:trkseg></g:trk>
+</g:gpx>

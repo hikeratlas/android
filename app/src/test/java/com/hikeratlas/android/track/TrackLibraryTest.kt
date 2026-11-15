@@ -48,7 +48,7 @@ class TrackLibraryTest {
         val date = SimpleDateFormat("d MMM", Locale.getDefault()).format(Date(1_700_000_000_000))
         assertEquals("Raging River State Forest · $date", d.name)
         assertEquals(60_000, d.stats.elapsedMs)
-        assertEquals(11.1, d.stats.metres, 0.1)
+        assertEquals(11.0, d.stats.metres, 0.0)
         // Kept: the list shows them without working them out again.
         assertEquals(d.stats, store.track(id)!!.stats)
         assertEquals(d.name, store.track(id)!!.name)
@@ -92,7 +92,7 @@ class TrackLibraryTest {
         lib.fillMissing()
         val t = lib.tracks.single()
         assertEquals(id, t.id)
-        assertEquals(11.1, t.stats!!.metres, 0.1)
+        assertEquals(11.0, t.stats!!.metres, 0.0)
         assertTrue(t.name!!.startsWith("Raging River State Forest"))
     }
 }

@@ -22,7 +22,7 @@ class TrackStatsTest {
         val s = statsOf(track, points, null)
         assertEquals(10_000 + 30_000L, s.movingMs)
         assertEquals(900_000, s.elapsedMs) // ended - started - paused
-        assertEquals(44.5, s.metres, 0.5) // not across the pause
+        assertEquals(44.0, s.metres, 0.0) // not across the pause, to the metre
         assertNull(s.gain)
     }
 

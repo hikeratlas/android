@@ -54,13 +54,32 @@ import com.hikeratlas.android.units.elev
 
 private val CHART_HEIGHT = 110.dp
 
-/** "7.3 km · 1:04:09 · ↑ 612 m", the climb where the DEM had it. */
+/**
+ * "7.3 km · 1:04:09 · ↑ 612 m": the distance and climb as the website
+ * measures the track's GPX (what its posted record says); the climb from the
+ * DEM for a track without GPS altitudes, where the DEM had it.
+ */
 fun statsLine(s: TrackStore.Stats): String =
     listOfNotNull(dist(s.metres / 1000, 1), duration(s.elapsedMs), s.gain?.let { "↑ ${elev(it)}" }).joinToString(" · ")
 
 /** "Moving 52:10 · ↓ 598 m". */
 private fun moreLine(s: TrackStore.Stats): String =
     listOfNotNull("Moving ${duration(s.movingMs)}", s.loss?.let { "↓ ${elev(it)}" }).joinToString(" · ")
+
+/** What deleting a track does: a post of it stays up. */
+internal fun deletedText(posted: TrackStore.Posted?) =
+    if (posted != null) "It's deleted from this phone. Your post on Hiker Atlas stays up." else "It's deleted from this phone."
+
+/** "Posted 15 Nov 2026 · See post": a posted track is never posted again. */
+@Composable
+private fun PostedRow(posted: TrackStore.Posted, onSeePost: () -> Unit) {
+    val day = remember(posted.at) { SimpleDateFormat("d MMM yyyy", Locale.getDefault()).format(Date(posted.at)) }
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text("Posted $day", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(" · ", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        TextButton(onClick = onSeePost) { Text("See post") }
+    }
+}
 
 @Composable
 private fun Chart(profile: ElevationProfiler.Profile?, onScrub: (DoubleArray?) -> Unit) {
@@ -86,6 +105,11 @@ fun TrackSummarySheet(
     onResume: () -> Unit,
     onDiscard: () -> Unit,
     onScrub: (DoubleArray?) -> Unit,
+    /** "Post this track", with the name as typed; null, not offered. */
+    onPost: ((name: String) -> Unit)? = null,
+    /** What it was posted as, if it was (a posted track recorded on). */
+    posted: TrackStore.Posted? = null,
+    onSeePost: () -> Unit = {},
 ) {
     var name by remember(detail.track.id) { mutableStateOf(detail.name) }
     var discarding by remember { mutableStateOf(false) }
@@ -98,6 +122,10 @@ fun TrackSummarySheet(
                 Text(moreLine(detail.stats), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             Chart(detail.profile, onScrub)
+            when {
+                posted != null -> PostedRow(posted, onSeePost)
+                onPost != null -> OutlinedButton(onClick = { onPost(name) }, modifier = Modifier.fillMaxWidth()) { Text("Post this track") }
+            }
             Row(verticalAlignment = Alignment.CenterVertically) {
                 TextButton(onClick = { discarding = true }) { Text("Discard") }
                 Spacer(Modifier.weight(1f))
@@ -111,14 +139,14 @@ fun TrackSummarySheet(
         AlertDialog(
             onDismissRequest = { discarding = false },
             title = { Text("Discard this track?") },
-            text = { Text("It's deleted from this phone.") },
+            text = { Text(deletedText(posted)) },
             confirmButton = { TextButton(onClick = { discarding = false; onDiscard() }) { Text("Discard") } },
             dismissButton = { TextButton(onClick = { discarding = false }) { Text("Keep") } },
         )
     }
 }
 
-/** A saved track on the map: its name and numbers, its profile, Share (as GPX) and Delete. */
+/** A saved track on the map: its name and numbers, its profile, Share (as GPX), Post and Delete. */
 @Composable
 fun TrackPanel(
     detail: TrackLibrary.Detail,
@@ -127,6 +155,11 @@ fun TrackPanel(
     onShare: () -> Unit,
     onScrub: (DoubleArray?) -> Unit,
     modifier: Modifier = Modifier,
+    /** "Post this track" (to the user's account); null, not offered. */
+    onPost: (() -> Unit)? = null,
+    /** What it was posted as, if it was: it isn't offered again. */
+    posted: TrackStore.Posted? = null,
+    onSeePost: () -> Unit = {},
 ) {
     var deleting by remember { mutableStateOf(false) }
     Surface(shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp), shadowElevation = 8.dp, modifier = modifier.fillMaxWidth()) {
@@ -143,14 +176,16 @@ fun TrackPanel(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(moreLine(detail.stats), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
                 TextButton(onClick = { deleting = true }) { Text("Delete") }
+                if (posted == null && onPost != null) TextButton(onClick = onPost) { Text("Post this track") }
             }
+            if (posted != null) PostedRow(posted, onSeePost)
         }
     }
     if (deleting) {
         AlertDialog(
             onDismissRequest = { deleting = false },
             title = { Text("Delete this track?") },
-            text = { Text("It's deleted from this phone.") },
+            text = { Text(deletedText(posted)) },
             confirmButton = { TextButton(onClick = { deleting = false; onDelete() }) { Text("Delete") } },
             dismissButton = { TextButton(onClick = { deleting = false }) { Text("Keep") } },
         )

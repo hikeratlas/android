@@ -1,0 +1,56 @@
+{
+  "app-two-segments.gpx": {
+    "startedAt": "2026-07-02T13:46:43.000Z",
+    "duration": 4928,
+    "distance": 2204,
+    "rawDistance": 2204.31538361157,
+    "gain": 88,
+    "rawGain": 87.89999999999998,
+    "points": 300
+  },
+  "edge-cases.gpx": {
+    "startedAt": "2026-06-01T09:59:59.500Z",
+    "duration": 181,
+    "distance": 127,
+    "rawDistance": 126.89296942103105,
+    "gain": 37,
+    "rawGain": 37,
+    "points": 14
+  },
+  "long-noisy.gpx": {
+    "startedAt": "2026-09-21T14:13:23.574Z",
+    "duration": 2495,
+    "distance": 5811,
+    "rawDistance": 5810.803601224504,
+    "gain": 390,
+    "rawGain": 390.0700000000002,
+    "points": 1000
+  },
+  "no-elevation.gpx": {
+    "startedAt": "2026-07-03T17:33:25.000Z",
+    "duration": 245,
+    "distance": 1783,
+    "rawDistance": 1783.455270018642,
+    "gain": null,
+    "rawGain": null,
+    "points": 50
+  },
+  "route-only.gpx": {
+    "startedAt": null,
+    "duration": null,
+    "distance": 0,
+    "rawDistance": 0,
+    "gain": null,
+    "rawGain": null,
+    "points": 0
+  },
+  "two-tracks.gpx": {
+    "startedAt": "2026-01-02T20:00:00.000Z",
+    "duration": 93600,
+    "distance": 4790,
+    "rawDistance": 4789.779833112247,
+    "gain": 88,
+    "rawGain": 88,
+    "points": 5
+  }
+}

@@ -7,11 +7,14 @@ import com.hikeratlas.android.routes.Regions
 const val MOVING_SPEED = 0.3
 
 /**
- * A stopped track's numbers: its length; its time recording (pauses not
- * counted) and, of that, moving; and its climb and descent from [profile]
- * (the DEM), if there is one.
+ * A stopped track's numbers: its length and climb as the website measures
+ * its GPX ([TrackMeasure]: what its posted record says), with the descent
+ * measured the same way; its time recording (pauses not counted) and, of
+ * that, moving. The climb and descent are from [profile] (the DEM) only for
+ * a track with no GPS altitudes, whose posted record has no climb.
  */
 fun statsOf(track: TrackStore.Track, points: List<Pair<Int, Fix>>, profile: ElevationProfiler.Profile?): TrackStore.Stats {
+    val measured = TrackMeasure.of(points)
     val log = TrackLog()
     for ((seg, f) in points) log.restore(f, seg)
     var moving = 0L
@@ -25,7 +28,12 @@ fun statsOf(track: TrackStore.Track, points: List<Pair<Int, Fix>>, profile: Elev
     }
     val end = track.ended ?: points.lastOrNull()?.second?.t ?: track.started
     val elapsed = (end - track.started - track.pausedMs).coerceAtLeast(0)
-    return TrackStore.Stats(log.metres, elapsed, moving.coerceAtMost(elapsed), profile?.gain, profile?.loss)
+    val gps = measured.gain != null
+    return TrackStore.Stats(
+        measured.distance.toDouble(), elapsed, moving.coerceAtMost(elapsed),
+        if (gps) measured.gain?.toDouble() else profile?.gain,
+        if (gps) measured.loss?.toDouble() else profile?.loss,
+    )
 }
 
 /** The track's line, a list of [lng, lat] per stretch between pauses. */

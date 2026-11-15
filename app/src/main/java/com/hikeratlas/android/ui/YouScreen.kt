@@ -61,7 +61,13 @@ class StorageActions(
 )
 
 @Composable
-fun YouScreen(storage: StorageActions? = null, account: AccountActions? = null, units: UnitsActions? = null) {
+fun YouScreen(
+    storage: StorageActions? = null,
+    account: AccountActions? = null,
+    units: UnitsActions? = null,
+    /** The licence for new posts: only signed in (it's a profile setting). */
+    license: LicenseActions? = null,
+) {
     val context = LocalContext.current
     var credits by remember { mutableStateOf(false) }
     Column(
@@ -72,6 +78,7 @@ fun YouScreen(storage: StorageActions? = null, account: AccountActions? = null, 
         Text("You", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 4.dp, top = 8.dp))
         if (account != null) AccountCard(account)
         if (units != null) UnitsCard(units)
+        if (license != null) LicenseCard(license)
         if (storage != null) StorageCard(storage)
         Card("About") {
             Item("hikeratlas.com", external = true) { openUrl(context, SITE) }
@@ -164,6 +171,73 @@ internal fun UnitsCard(units: UnitsActions) {
         if (failed == null) Text(
             status ?: if (units.signedIn) "For distances, climbs and heights across Hiker Atlas."
             else "For distances, climbs and heights, on this phone. Signed in, your Hiker Atlas profile's apply, as on the website.",
+            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 14.dp),
+        )
+    }
+}
+
+/**
+ * The licence for new posts, from the profile record: [current] is null
+ * while it's being read, or if reading failed ([readError]).
+ */
+class LicenseActions(
+    val current: String?,
+    val readError: String? = null,
+    val save: suspend (String) -> Unit,
+)
+
+/** What others may do with your new posts, worded as the website's Settings tab. */
+@Composable
+internal fun LicenseCard(license: LicenseActions) {
+    val scope = rememberCoroutineScope()
+    var chosen by remember(license.current) { mutableStateOf(license.current) }
+    var saving by remember { mutableStateOf(false) }
+    var status by remember { mutableStateOf<String?>(null) }
+    // A save that failed: said loudly, as the licence hasn't changed.
+    var failed by remember { mutableStateOf<String?>(null) }
+    fun choose(l: String) {
+        if (l == chosen || saving) return
+        val before = chosen
+        chosen = l
+        saving = true
+        failed = null
+        status = "Saving…"
+        scope.launch {
+            status = try {
+                license.save(l)
+                "Saved. Posts you've already made keep their existing license."
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                chosen = before
+                failed = "Couldn't save your licence to your Hiker Atlas profile, so it hasn't changed." +
+                    (e.message?.let { " ($it)" } ?: "")
+                null
+            }
+            saving = false
+        }
+    }
+    // Unknown (not read yet): what a post would use, the default, can't be changed until it's read...
+    // unless reading failed, when choosing is still worth trying (saving reads it again).
+    val shown = chosen ?: com.hikeratlas.android.atproto.Posts.DEFAULT_LICENSE.takeIf { license.readError != null }
+    val enabled = !saving && (chosen != null || license.readError != null)
+    Card("Licence") {
+        Text(
+            "What others may do with your new posts (you keep ownership):",
+            style = MaterialTheme.typography.bodyMedium,
+            modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 4.dp),
+        )
+        for (l in com.hikeratlas.android.atproto.Posts.LICENSES) {
+            UnitChoice(com.hikeratlas.android.atproto.Posts.LICENSE_CHOICE.getValue(l), shown == l, enabled) { choose(l) }
+        }
+        val error = failed ?: license.readError?.takeIf { license.current == null }?.let {
+            "Couldn't read your licence from your Hiker Atlas profile. ($it)"
+        }
+        error?.let { ErrorBox(it, Modifier.padding(start = 16.dp, end = 16.dp, bottom = 10.dp)) }
+        if (failed == null) Text(
+            status ?: if (license.current == null && license.readError == null) "Reading your profile…"
+            else "Posts you've already made keep their existing license.",
             style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 14.dp),
         )

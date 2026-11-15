@@ -102,6 +102,37 @@ class TrackLibrary(
         File(dir, Gpx.fileName(name)).apply { writeText(Gpx.write(name, t.started, store.points(id))) }
     }
 
+    /** A track as GPX, as it's shared and posted. */
+    suspend fun gpxText(id: Long): String? = withContext(io) {
+        val t = store.track(id) ?: return@withContext null
+        Gpx.write(t.name ?: "Track", t.started, store.points(id))
+    }
+
+    /** What a track was posted as, if it was (read afresh, not from the list). */
+    suspend fun posted(id: Long): TrackStore.Posted? = withContext(io) { store.track(id)?.posted }
+
+    /** Marks a track as posted (or not, with null: its post was deleted), and the list again. */
+    suspend fun setPosted(id: Long, posted: TrackStore.Posted?) {
+        withContext(io) { store.setPosted(id, posted) }
+        refresh()
+    }
+
+    /**
+     * The saved tracks passing within [within] metres of [line] (a hike's):
+     * boxes first, from one query, so only the tracks around it are read.
+     */
+    suspend fun tracksNear(line: List<List<Double>>, within: Double = NEAR_METRES): Set<Long> = withContext(io) {
+        if (line.isEmpty()) return@withContext emptySet()
+        val box = grow(boxOf(line), within)
+        val saved = store.saved().map { it.id }.toSet()
+        store.boxes().filter { (id, b) -> id in saved && overlaps(b, box) }.keys
+            .filter { id -> closestApproach(segmentsOf(store.points(id)), line, within) != null }
+            .toSet()
+    }
+
+    /** A track's line: a list of [lng, lat] per stretch between pauses. */
+    suspend fun lines(id: Long): List<List<List<Double>>> = withContext(io) { segmentsOf(store.points(id)) }
+
     suspend fun rename(id: Long, name: String) {
         withContext(io) { store.rename(id, name.trim().ifEmpty { "Track" }) }
         refresh()
