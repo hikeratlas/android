@@ -80,21 +80,39 @@ object Profiles {
         /** The track [r]'s strongRef points at, if it's among this account's tracks (not gone, not someone else's). */
         fun trackOf(r: Review): Track? = r.trackUri?.let { u -> tracks.firstOrNull { it.uri == u } }
 
-        /** Deleting a review deletes its track too: they were posted together, as the website's. */
-        fun deletion(r: Review) = Deletion(listOf(r), listOfNotNull(trackOf(r)))
+        /**
+         * One post deletes as one: a review, its track, and every other
+         * review pointing at that track. The track goes by its URI even when
+         * it isn't among the loaded tracks (past the first 200), as long as
+         * the URI names this account's own track collection; a strongRef to
+         * anyone else's record is never followed.
+         */
+        fun deletion(r: Review): Deletion {
+            val t = r.trackUri?.takeIf { it.startsWith("at://$did/${Posts.TRACK}/") }
+                ?: return Deletion(listOf(r), emptyList())
+            val loaded = tracks.firstOrNull { it.uri == t }
+            val others = reviews.filter { it.trackUri == t && it.uri != r.uri }
+            return Deletion(listOf(r) + others, listOfNotNull(loaded), if (loaded == null) listOf(t) else emptyList())
+        }
 
         /** Deleting a track deletes the reviews pointing at it too, so none is left pointing at nothing. */
         fun deletion(t: Track) = Deletion(reviews.filter { it.trackUri == t.uri }, listOf(t))
 
         /** This profile once [d] has gone. */
         fun without(d: Deletion): Profile {
-            val gone = (d.reviews.map { it.uri } + d.tracks.map { it.uri }).toSet()
+            val gone = (d.reviews.map { it.uri } + d.tracks.map { it.uri } + d.unloadedTracks).toSet()
             return copy(reviews = reviews.filter { it.uri !in gone }, tracks = tracks.filter { it.uri !in gone })
         }
     }
 
-    /** What one Delete deletes: a review and its track, or a track and the reviews pointing at it. */
-    data class Deletion(val reviews: List<Review>, val tracks: List<Track>)
+    /**
+     * What one Delete deletes: a review and its track, or a track and the
+     * reviews pointing at it. [unloadedTracks]: a review's own track that
+     * isn't among the loaded tracks, by URI.
+     */
+    data class Deletion(val reviews: List<Review>, val tracks: List<Track>, val unloadedTracks: List<String> = emptyList()) {
+        val hasTrack get() = tracks.isNotEmpty() || unloadedTracks.isNotEmpty()
+    }
 
     /**
      * [did]'s profile, from [pds]. Throws (IOException, [XrpcException]) if a
@@ -177,10 +195,12 @@ object Profiles {
      * [onDeleted] hears each record as it goes, so a failure halfway still
      * leaves the phone knowing what's gone.
      */
-    suspend fun delete(xrpc: Xrpc, did: String, d: Deletion, onDeleted: suspend (Review?, Track?) -> Unit = { _, _ -> }) {
-        (d.reviews.map { it.uri } + d.tracks.map { it.uri }).forEach { rkeyOf(did, it) }
-        for (r in d.reviews) { deleteRecord(xrpc, did, r.uri); onDeleted(r, null) }
-        for (t in d.tracks) { deleteRecord(xrpc, did, t.uri); onDeleted(null, t) }
+    /** Deletes [d]: reviews first, so none is left pointing at a track that's gone. [onDeleted] hears each (review URI, track URI). */
+    suspend fun delete(xrpc: Xrpc, did: String, d: Deletion, onDeleted: suspend (String?, String?) -> Unit = { _, _ -> }) {
+        val trackUris = d.tracks.map { it.uri } + d.unloadedTracks
+        (d.reviews.map { it.uri } + trackUris).forEach { rkeyOf(did, it) }
+        for (r in d.reviews) { deleteRecord(xrpc, did, r.uri); onDeleted(r.uri, null) }
+        for (t in trackUris) { deleteRecord(xrpc, did, t); onDeleted(null, t) }
     }
 
     /** [uri]'s collection and rkey, if it's [did]'s record. */

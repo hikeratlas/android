@@ -117,6 +117,44 @@ class ProfilesTest {
     }
 
     @Test
+    fun deletingAReviewDeletesItsTrackAndTheTracksOtherReviews() {
+        val t = Profiles.Track(uri(Posts.TRACK, "t"), "c", "2026", Profiles.Blob("b", null))
+        val r1 = Profiles.Review(uri(Posts.REVIEW, "r1"), "c", "x", "2026", trackUri = t.uri)
+        val r2 = Profiles.Review(uri(Posts.REVIEW, "r2"), "c", "x", "2026", trackUri = t.uri)
+        // Its track not among the loaded ones (past the first 200): deleted by its URI all the same.
+        val far = Profiles.Review(uri(Posts.REVIEW, "far"), "c", "x", "2026", trackUri = uri(Posts.TRACK, "unloaded"))
+        val p = Profiles.Profile(fake.did, null, fake.pdsOrigin, listOf(r1, r2, far), listOf(t), emptyList())
+        assertEquals(Profiles.Deletion(listOf(r1, r2), listOf(t)), p.deletion(r1))
+        assertEquals(Profiles.Deletion(listOf(r1, r2), listOf(t)), p.deletion(t))
+        val d = p.deletion(far)
+        assertEquals(Profiles.Deletion(listOf(far), emptyList(), listOf(uri(Posts.TRACK, "unloaded"))), d)
+        assertTrue(d.hasTrack)
+    }
+
+    @Test
+    fun aTrackThatIsntLoadedIsDeletedByItsUri() {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+        try {
+            val account = Account(http, MemorySecretStore(), MemoryDpopKeys(), fake.config(), scope)
+            track("unloaded")
+            review("far", ""","track":{"uri":"${uri(Posts.TRACK, "unloaded")}","cid":"x"}""")
+            // As if the track were past the first 200 loaded.
+            val p = load().copy(tracks = emptyList())
+            val heard = mutableListOf<Pair<String?, String?>>()
+            runBlocking {
+                account.beginSignIn(fake.authOrigin)
+                account.finishSignIn(fake.callback(fake.pars.last()["state"]!!))
+                Profiles.delete(account.xrpc, fake.did, p.deletion(p.reviews.single())) { r, t -> heard += r to t }
+            }
+            assertNull(fake.records["${Posts.TRACK}/unloaded"])
+            assertNull(fake.records["${Posts.REVIEW}/far"])
+            assertEquals(listOf(uri(Posts.REVIEW, "far") to null, null to uri(Posts.TRACK, "unloaded")), heard)
+        } finally {
+            scope.cancel()
+        }
+    }
+
+    @Test
     fun malformedRecordsAreSkippedNotFatal() {
         track("good")
         track("nogpx", gpx = "null")

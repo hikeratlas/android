@@ -229,7 +229,7 @@ internal data class Confirming(val uri: String, val isReview: Boolean, val delet
     /** Said only when more goes than the post itself. */
     val also: String?
         get() = when {
-            isReview && deletion.tracks.isNotEmpty() -> "Deleting this review also deletes its track."
+            isReview && deletion.hasTrack -> "Deleting this review also deletes its track."
             !isReview && deletion.reviews.size == 1 -> "Deleting this track also deletes its review."
             !isReview && deletion.reviews.size > 1 -> "Deleting this track also deletes its reviews."
             else -> null

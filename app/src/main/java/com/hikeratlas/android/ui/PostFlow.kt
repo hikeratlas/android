@@ -78,5 +78,5 @@ internal suspend fun verifyPosted(xrpc: Xrpc, did: String, library: TrackLibrary
  * be posted again.
  */
 internal suspend fun deletePost(xrpc: Xrpc, did: String, library: TrackLibrary, d: com.hikeratlas.android.atproto.Profiles.Deletion) {
-    com.hikeratlas.android.atproto.Profiles.delete(xrpc, did, d) { review, track -> library.postDeleted(track?.uri, review?.uri) }
+    com.hikeratlas.android.atproto.Profiles.delete(xrpc, did, d) { review, track -> library.postDeleted(track, review) }
 }
