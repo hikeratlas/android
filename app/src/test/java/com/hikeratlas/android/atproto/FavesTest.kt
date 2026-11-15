@@ -42,7 +42,7 @@ class FavesTest {
 
     @After
     fun tearDown() {
-        Indexer.notifier = {}
+        Indexer.notifier = { _, done -> done() }
         scope.cancel()
         fake.close()
     }
@@ -51,7 +51,7 @@ class FavesTest {
     @Test
     fun everyWriteNotifiesTheIndexer() = runBlocking {
         val heard = java.util.Collections.synchronizedList(mutableListOf<String>())
-        Indexer.notifier = { heard += it }
+        Indexer.notifier = { u, done -> heard += u; done() }
         val fave = "at://${fake.did}/${Faves.NSID}/$key"
         Faves.set(account.xrpc, fake.did, key, true)
         Faves.set(account.xrpc, fake.did, key, false)

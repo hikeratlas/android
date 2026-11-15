@@ -99,6 +99,8 @@ fun AppScreen(app: HikerAtlasApp, link: Uri? = null, onLinkHandled: () -> Unit =
     // posted track from it, on the map.
     var profileTarget by remember(did) { mutableStateOf<ProfileTarget?>(null) }
     var viewPosted by remember { mutableStateOf<PostedTrack?>(null) }
+    // The hike sheet a posted track was shown from, to go back to when it's closed.
+    var postedFrom by remember { mutableStateOf<OfflineAreas.Target?>(null) }
     val accountActions = AccountActions(
         state = accountState,
         signIn = { app.account.beginSignIn(it) },
@@ -221,10 +223,30 @@ fun AppScreen(app: HikerAtlasApp, link: Uri? = null, onLinkHandled: () -> Unit =
         showTrack = { t ->
             viewTrack = null
             viewPosted = t
+            postedFrom = null
             tab = Tab.Map
         },
         shareGpx = { title, gpx -> scope.launch { com.hikeratlas.android.track.shareGpx(context, title, gpx) } },
         openPhoto = { com.hikeratlas.android.map.openUrl(context, it) },
+    )
+    val indexer = remember(app.http) { com.hikeratlas.android.atproto.IndexerClient(app.http) }
+    val identity = remember(app.http) { com.hikeratlas.android.atproto.Identity(app.http) }
+    val hikerActions = HikerActions(
+        indexer,
+        pdsOf = { d -> identity.describeDid(d)?.pds },
+        getTrack = { pds, uri -> com.hikeratlas.android.atproto.Profiles.getTrack(com.hikeratlas.android.atproto.Xrpc.public(app.http, pds), uri) },
+        gpx = { pds, d, t ->
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                com.hikeratlas.android.atproto.Profiles.gpx(com.hikeratlas.android.atproto.Xrpc.public(app.http, pds), d, t.gpx)
+            }
+        },
+        openUrl = { com.hikeratlas.android.map.openUrl(context, it) },
+        showTrack = { t, id, title ->
+            viewTrack = null
+            viewPosted = t
+            postedFrom = OfflineAreas.Target(com.hikeratlas.android.offline.OfflineStore.HIKE, id, title)
+        },
+        shareGpx = { title, gpx -> scope.launch { com.hikeratlas.android.track.shareGpx(context, title, gpx) } },
     )
     val tabs = Tab.entries.filter {
         it != Tab.Saved || library.tracks.isNotEmpty() || offline.areas.isNotEmpty() || did != null || tab == Tab.Saved
@@ -247,7 +269,10 @@ fun AppScreen(app: HikerAtlasApp, link: Uri? = null, onLinkHandled: () -> Unit =
             // Back to the profile it came from.
             onPostedClosed = {
                 viewPosted = null
-                if (profileTarget != null) tab = Tab.You
+                val from = postedFrom
+                postedFrom = null
+                if (from != null) openArea = from
+                else if (profileTarget != null) tab = Tab.You
             },
             openArea = openArea.takeIf { tab == Tab.Map }, onAreaOpened = { openArea = null },
             onCrumb = { c ->
@@ -256,6 +281,7 @@ fun AppScreen(app: HikerAtlasApp, link: Uri? = null, onLinkHandled: () -> Unit =
             },
             faves = faveActions,
             posts = postActions,
+            hikers = hikerActions,
         )
         if (tab == Tab.Saved) {
             Surface(Modifier.fillMaxSize().padding(bottom = barHeight)) {

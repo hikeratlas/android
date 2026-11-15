@@ -19,7 +19,7 @@ class IndexerTest {
 
     @After
     fun tearDown() {
-        Indexer.notifier = {}
+        Indexer.notifier = { _, done -> done() }
         server.close()
     }
 
@@ -28,8 +28,10 @@ class IndexerTest {
         server.start()
         server.enqueue(MockResponse.Builder().code(200).body("""{"indexed":true}""").build())
         val uri = "at://did:plc:aaaaaaaaaaaaaaaaaaaaaaaa/com.hikeratlas.temp.review/3lbxyz"
-        Indexer.http(http, server.url("/notify").toString())(uri)
+        val done = java.util.concurrent.CountDownLatch(1)
+        Indexer.http(http, server.url("/notify").toString())(uri) { done.countDown() }
         val r = server.takeRequest(5, TimeUnit.SECONDS)!!
+        assertTrue("told once it's answered", done.await(5, TimeUnit.SECONDS))
         assertEquals("POST", r.method)
         assertEquals("/notify", r.url.encodedPath)
         assertTrue(r.headers["Content-Type"]!!.startsWith("application/json"))
@@ -42,10 +44,10 @@ class IndexerTest {
         server.start()
         server.enqueue(MockResponse.Builder().code(200).headersDelay(10, TimeUnit.SECONDS).build())
         val started = System.nanoTime()
-        Indexer.http(http, server.url("/notify").toString())("at://did:plc:aaaaaaaaaaaaaaaaaaaaaaaa/com.hikeratlas.temp.track/t")
+        Indexer.http(http, server.url("/notify").toString())("at://did:plc:aaaaaaaaaaaaaaaaaaaaaaaa/com.hikeratlas.temp.track/t") {}
         assertTrue("returned at once", System.nanoTime() - started < TimeUnit.SECONDS.toNanos(1))
 
-        Indexer.notifier = { error("indexer trouble") }
+        Indexer.notifier = { _, _ -> error("indexer trouble") }
         Indexer.notify("at://x") // doesn't throw
         Indexer.notifier = Indexer.http(http, "http://127.0.0.1:1/notify") // nothing listening
         Indexer.notify("at://x")

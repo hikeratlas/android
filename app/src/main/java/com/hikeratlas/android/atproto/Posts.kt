@@ -300,7 +300,7 @@ object Posts {
         val uri = r["uri"]?.jsonPrimitive?.contentOrNull
         val cid = r["cid"]?.jsonPrimitive?.contentOrNull
         if (uri == null || cid == null) throw PostException("createRecord failed (no uri and cid in the answer)")
-        Indexer.notify(uri)
+        Indexer.notify(uri, routeKeyOf(record))
         return StrongRef(uri, cid)
     }
 
@@ -319,9 +319,11 @@ object Posts {
         val uri = r["uri"]?.jsonPrimitive?.contentOrNull ?: throw IOException("getRecord gave no uri")
         val cid = r["cid"]?.jsonPrimitive?.contentOrNull ?: throw IOException("getRecord gave no cid")
         // Made by an earlier try whose answer was lost: that try couldn't tell the indexer.
-        Indexer.notify(uri)
+        Indexer.notify(uri, (r["value"] as? JsonObject)?.let(::routeKeyOf))
         return StrongRef(uri, cid)
     }
+
+    private fun routeKeyOf(record: JsonObject) = (record["routeKey"] as? JsonPrimitive)?.takeIf { it.isString }?.content?.takeIf { it.isNotEmpty() }
 
     /**
      * The licence new posts are shared under, as [licenseFor], but a profile
