@@ -179,7 +179,7 @@ internal fun postStatsLine(s: GpxStats): String =
     listOfNotNull(dist(s.distance / 1000.0, 1), s.gain?.let { "↑ ${elev(it.toDouble())}" }, s.duration?.let(::durationText)).joinToString(" · ")
 
 private val TRACK_DAY = DateTimeFormatter.ofPattern("d MMM yyyy", Locale.getDefault())
-private val FORM_DAY = DateTimeFormatter.ofPattern("EEE d MMM yyyy", Locale.getDefault())
+internal val FORM_DAY = DateTimeFormatter.ofPattern("EEE d MMM yyyy", Locale.getDefault())
 
 internal fun trackLabel(t: TrackStore.Track): String =
     listOf(t.name ?: "Track", TRACK_DAY.format(Instant.ofEpochMilli(t.started).atZone(ZoneId.systemDefault()))).joinToString(" · ")
@@ -734,10 +734,10 @@ private fun TrackChoice(t: TrackStore.Track, chosen: Long?, waiting: Boolean, on
 }
 
 @Composable
-private fun Label(s: String) = Text(s, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+internal fun Label(s: String) = Text(s, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
 
 @Composable
-private fun Hint(s: String) = Text(s, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+internal fun Hint(s: String) = Text(s, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
 
 /** A failure, said loudly (as the Units card's). */
 @Composable

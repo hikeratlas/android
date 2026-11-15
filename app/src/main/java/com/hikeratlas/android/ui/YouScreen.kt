@@ -219,7 +219,7 @@ internal fun LicenseCard(license: LicenseActions) {
         scope.launch {
             status = try {
                 license.save(l)
-                "Saved. Posts you've already made keep their existing license."
+                "Saved. Posts you've already made keep theirs; edit a post to change its own."
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -250,7 +250,7 @@ internal fun LicenseCard(license: LicenseActions) {
         error?.let { ErrorBox(it, Modifier.padding(start = 16.dp, end = 16.dp, bottom = 10.dp)) }
         if (failed == null) Text(
             status ?: if (license.current == null && license.readError == null) "Reading your profile…"
-            else "Posts you've already made keep their existing license.",
+            else "Posts you've already made keep theirs; edit a post to change its own.",
             style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 14.dp),
         )

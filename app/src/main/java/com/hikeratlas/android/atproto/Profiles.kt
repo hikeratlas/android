@@ -65,6 +65,11 @@ object Profiles {
         val tags: List<String> = emptyList(),
         val photos: List<Photo> = emptyList(),
         val license: String? = null,
+        /**
+         * The record as read, every field: an edit keeps what it doesn't
+         * change, fields this app doesn't know included (see [Posts.editedReview]).
+         */
+        val value: JsonObject = JsonObject(emptyMap()),
     )
 
     data class Profile(
@@ -97,6 +102,10 @@ object Profiles {
 
         /** Deleting a track deletes the reviews pointing at it too, so none is left pointing at nothing. */
         fun deletion(t: Track) = Deletion(reviews.filter { it.trackUri == t.uri }, listOf(t))
+
+        /** This profile with [r] in place of the review with its URI (edited), in order again. */
+        fun with(r: Review): Profile =
+            copy(reviews = reviews.map { if (it.uri == r.uri) r else it }.sortedByDescending { it.hikedAt ?: it.createdAt })
 
         /** This profile once [d] has gone. */
         fun without(d: Deletion): Profile {
@@ -185,6 +194,7 @@ object Profiles {
             hikedAt = v.str("hikedAt"), routeKey = v.str("routeKey")?.takeIf { it.isNotEmpty() },
             trackUri = (v["track"] as? JsonObject)?.str("uri"),
             tags = tags.take(Posts.MAX_TAGS), photos = photos(v["photos"]), license = v.str("license"),
+            value = v,
         )
     }
 

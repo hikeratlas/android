@@ -249,6 +249,104 @@ object Posts {
         if (photoEntries.isNotEmpty()) put("photos", JsonArray(photoEntries))
     }
 
+    /**
+     * What editing a review can change, as the website's ReviewEdit: its
+     * licence included (from then on: copies already made keep the licence
+     * they came with). [photos] are the record's own photo entries, some
+     * gone or with their alt changed ([withAlt]), so what's in them stays.
+     * When it was posted, its hike and its track stay as they were.
+     */
+    data class ReviewEdit(
+        val text: String,
+        val hikedAt: String? = null,
+        val tags: List<String> = emptyList(),
+        val photos: List<JsonObject> = emptyList(),
+        val license: String? = null,
+    )
+
+    /**
+     * The edited record, as the website's editedReview: [edit]'s fields and
+     * everything else in [value] as it was. The licence is written only when
+     * [edit] gives one, so a review without one stays without; the date,
+     * tags and photos are left out when the edit has none.
+     */
+    fun editedReview(value: JsonObject, edit: ReviewEdit): JsonObject = buildJsonObject {
+        for ((k, v) in value) if (k != "hikedAt" && k != "tags" && k != "photos") put(k, v)
+        put("\$type", REVIEW)
+        put("text", edit.text)
+        value["createdAt"]?.let { put("createdAt", it) }
+        edit.license?.takeIf { it.isNotEmpty() }?.let { put("license", it) }
+        edit.hikedAt?.takeIf { it.isNotEmpty() }?.let { put("hikedAt", it) }
+        if (edit.tags.isNotEmpty()) put("tags", JsonArray(edit.tags.map(::JsonPrimitive)))
+        if (edit.photos.isNotEmpty()) put("photos", JsonArray(edit.photos))
+    }
+
+    /** A review record's photo entries, as they are (the edit form's starting point). */
+    fun photoEntries(value: JsonObject): List<JsonObject> = (value["photos"] as? JsonArray).orEmpty().filterIsInstance<JsonObject>()
+
+    /** A photo entry with [alt] as its description (trimmed, at most [Photos.MAX_ALT]), or none when blank, as the website's dialog saves it. */
+    fun withAlt(entry: JsonObject, alt: String): JsonObject {
+        val a = alt.trim()
+        return if (a.isEmpty()) JsonObject(entry - "alt")
+        else JsonObject(entry + ("alt" to JsonPrimitive(clip(a, Photos.MAX_ALT))))
+    }
+
+    /** The day a datetime falls on in [zone], as the website's localDay; null if it isn't one. */
+    fun localDay(iso: String, zone: ZoneId = ZoneId.systemDefault()): LocalDate? = try {
+        java.time.OffsetDateTime.parse(iso).atZoneSameInstant(zone).toLocalDate()
+    } catch (_: java.time.format.DateTimeParseException) {
+        null
+    }
+
+    /**
+     * An edited review's hikedAt, as the website's dialog: the one it had
+     * while its day is unchanged (so its time isn't moved to noon), [noonOf]
+     * a new day, or none when the day is cleared.
+     */
+    fun editedHikedAt(was: String?, day: LocalDate?, zone: ZoneId = ZoneId.systemDefault()): String? = when {
+        day == null -> null
+        was != null && localDay(was, zone) == day -> was
+        else -> noonOf(day, zone)
+    }
+
+    const val EDIT_CHANGED = "This review changed since you opened it: your profile has been read again. Close this and edit the review again."
+
+    /**
+     * Saves [edit] over [review] with putRecord at the same record key, so
+     * its at:// URI (and the indexer's entry, and anything pointing at it)
+     * stays the same. swapRecord is the CID it was read with, so it fails
+     * ([EDIT_CHANGED]) rather than overwrite a review that changed since.
+     * Online only: an edit needs the current CID. Throws [PostException]
+     * saying what failed; [SignedOutException] if there's no session.
+     */
+    suspend fun editReview(xrpc: Xrpc, did: String, review: Profiles.Review, edit: ReviewEdit): StrongRef {
+        val parts = review.uri.removePrefix("at://").split('/')
+        require(parts.size == 3 && parts[0] == did && parts[1] == REVIEW) { "Not your review" }
+        // Without the record as read, the edit would drop what it doesn't change.
+        require(review.value["createdAt"] != null && review.cid.isNotEmpty()) { "The review wasn't read whole" }
+        val record = editedReview(review.value, edit)
+        val r = try {
+            xrpc.procedure(
+                "com.atproto.repo.putRecord",
+                buildJsonObject {
+                    put("repo", did); put("collection", REVIEW); put("rkey", parts[2])
+                    put("record", record)
+                    put("swapRecord", review.cid)
+                },
+            )
+        } catch (e: XrpcException) {
+            if (e.error == "InvalidSwap") throw PostException(EDIT_CHANGED, e)
+            throw PostException("Saving failed (${e.status})" + (e.message?.takeIf { it != e.error && it != "HTTP ${e.status}" }?.let { ": $it" } ?: ""), e)
+        } catch (e: IOException) {
+            throw PostException("Couldn't reach your account's server, and an edit needs it. What you typed is kept here: try again when you have signal.", e)
+        }
+        val uri = r["uri"]?.jsonPrimitive?.contentOrNull
+        val cid = r["cid"]?.jsonPrimitive?.contentOrNull
+        if (uri == null || cid == null) throw PostException("Saving failed (no uri and cid in the answer)")
+        Indexer.notify(uri, routeKeyOf(record))
+        return StrongRef(uri, cid)
+    }
+
     /** Each photo's JPEG uploaded, in order, and its entry for the record (the website's uploadPhotos). */
     private suspend fun uploadPhotos(xrpc: Xrpc, photos: List<Photo>): List<JsonObject> {
         if (photos.size > Photos.MAX_PHOTOS) throw PostException("Up to ${Photos.MAX_PHOTOS} photos can go with a post")

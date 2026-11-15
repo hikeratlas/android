@@ -60,6 +60,7 @@ class ProfileScreenTest {
         load: suspend () -> Profiles.Profile,
         delete: (suspend (Profiles.Deletion) -> Unit)? = null,
         shown: MutableList<PostedTrack> = mutableListOf(),
+        edit: (suspend (Profiles.Review, Posts.ReviewEdit) -> Posts.StrongRef)? = null,
     ) = ProfileActions(
         load = { load() },
         findHikes = { KeyedSearch(mapOf(key to KeyedHike("p", "Mount Si NRCA", "p/day/0", "Mount Si")), emptySet()) },
@@ -70,6 +71,7 @@ class ProfileScreenTest {
         showTrack = { shown += it },
         shareGpx = { _, _ -> },
         openPhoto = {},
+        edit = edit,
     )
 
     private fun profile(reviews: List<Profiles.Review>, tracks: List<Profiles.Track>) =
@@ -82,6 +84,31 @@ class ProfileScreenTest {
     }
 
     private fun count(text: String) = compose.onAllNodesWithText(text).fetchSemanticsNodes().size
+
+    @Test
+    @Config(qualifiers = "w390dp-h3000dp-xxhdpi")
+    fun yourReviewsHaveEditTracksDont() {
+        val t = track("t1")
+        val p = profile(listOf(review("r1", "With its track.", t), review("r2", "Without.")), listOf(t))
+        compose.setContent {
+            HikerAtlasTheme {
+                ProfileScreen(
+                    ProfileTarget(did, "alice.test"),
+                    actions({ p }, delete = {}, edit = { r, _ -> Posts.StrongRef(r.uri, "new") }), onBack = {},
+                )
+            }
+        }
+        compose.waitUntil(5_000) { count("Mount Si") > 0 }
+        assertEquals(2, count("Edit"))
+        assertEquals(3, count("Delete"))
+    }
+
+    @Test
+    fun someoneElsesReviewsHaveNoEdit() {
+        show(profile(listOf(review("r1", "Without.")), emptyList()))
+        compose.waitUntil(5_000) { count("Mount Si") > 0 }
+        assertEquals(0, count("Edit"))
+    }
 
     @Test
     @Config(qualifiers = "w390dp-h3000dp-xxhdpi")
