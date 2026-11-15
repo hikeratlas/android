@@ -1,6 +1,9 @@
 package com.hikeratlas.android.ui
 
+import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.hasAnyDescendant
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
@@ -27,7 +30,7 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import java.io.IOException
 
-/** Your profile: posts and faves as the website lists them, Delete, Try again, and "See post". */
+/** Your profile: reviews, every track and faves as the website lists them, Delete, Try again, and "See post". */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35], qualifiers = "w390dp-h844dp-xxhdpi", application = android.app.Application::class)
 class ProfileScreenTest {
@@ -55,7 +58,7 @@ class ProfileScreenTest {
 
     private fun actions(
         load: suspend () -> Profiles.Profile,
-        delete: (suspend (Profiles.Post) -> Unit)? = null,
+        delete: (suspend (Profiles.Deletion) -> Unit)? = null,
         shown: MutableList<PostedTrack> = mutableListOf(),
     ) = ProfileActions(
         load = { load() },
@@ -69,58 +72,127 @@ class ProfileScreenTest {
         openPhoto = {},
     )
 
-    private fun profile(posts: List<Profiles.Post>) = Profiles.Profile(did, "alice.test", "https://pds.example", posts, emptyList())
+    private fun profile(reviews: List<Profiles.Review>, tracks: List<Profiles.Track>) =
+        Profiles.Profile(did, "alice.test", "https://pds.example", reviews, tracks, emptyList())
+
+    private fun show(p: Profiles.Profile, delete: (suspend (Profiles.Deletion) -> Unit)? = null, shown: MutableList<PostedTrack> = mutableListOf()) {
+        compose.setContent {
+            HikerAtlasTheme { ProfileScreen(ProfileTarget(did, "alice.test"), actions({ p }, delete, shown), onBack = {}) }
+        }
+    }
+
+    private fun count(text: String) = compose.onAllNodesWithText(text).fetchSemanticsNodes().size
 
     @Test
-    fun aReviewWithItsTrackInYourUnitsAndDeleted() {
+    @Config(qualifiers = "w390dp-h3000dp-xxhdpi")
+    fun reviewsAndEveryTrackListedApart() {
+        val alone = track("alone", null).copy(title = "Evening loop")
+        val t = track("t1")
+        val withTrack = review("r1", "With its track.", t)
+        val without = review("r2", "Without a track.")
+        val missing = review("r3", "Its track is gone.").copy(trackUri = "at://$did/${Posts.TRACK}/gone")
+        show(profile(listOf(withTrack, without, missing), listOf(alone, t)))
+        compose.waitUntil(5_000) { count("Mount Si") > 0 }
+        compose.onNodeWithText("Reviews").assertIsDisplayed()
+        compose.onNodeWithText("3 reviews").assertIsDisplayed()
+        compose.onNodeWithText("Tracks").assertIsDisplayed()
+        compose.onNodeWithText("2 tracks").assertIsDisplayed()
+        compose.onNodeWithText("Evening loop").assertIsDisplayed()
+        // The two tracks, and the one review's track drawn inline: not the others'.
+        assertEquals(3, count("GPX track"))
+    }
+
+    @Test
+    @Config(qualifiers = "w390dp-h3000dp-xxhdpi")
+    fun aReviewDrawsItsTrackInYourUnitsAndDeletingItDeletesBoth() {
         Units.current = Units(DistanceUnit.MI, ElevationUnit.FT)
         val t = track("t1")
-        val post = Profiles.Post("2026-07-01T12:00:00.000Z", review("r1", "Steep but worth it.", t), t)
-        val deleted = mutableListOf<Profiles.Post>()
+        val r = review("r1", "Steep but worth it.", t)
+        val deleted = mutableListOf<Profiles.Deletion>()
         val shown = mutableListOf<PostedTrack>()
-        compose.setContent {
-            HikerAtlasTheme {
-                ProfileScreen(ProfileTarget(did, "alice.test"), actions({ profile(listOf(post)) }, { deleted += it }, shown), onBack = {})
-            }
-        }
-        compose.waitUntil(5_000) { compose.onAllNodesWithText("Mount Si").fetchSemanticsNodes().isNotEmpty() }
+        show(profile(listOf(r), listOf(t)), { deleted += it }, shown)
+        compose.waitUntil(5_000) { count("Mount Si") > 0 }
         compose.onNodeWithText("@alice.test").assertIsDisplayed()
-        compose.onNodeWithText("1 post").assertIsDisplayed()
+        compose.onNodeWithText("1 review").assertIsDisplayed()
+        compose.onNodeWithText("1 track").assertIsDisplayed()
         compose.onNodeWithText("Steep but worth it.").assertIsDisplayed()
         compose.onNodeWithText("Views").assertIsDisplayed()
         compose.onNodeWithText("Mud").assertIsDisplayed()
-        compose.onNodeWithText("4.5 mi · ↑ 2,008 ft · 2 h 5 min").assertIsDisplayed()
-        compose.onNodeWithText("Shared under CC BY 4.0").assertIsDisplayed()
+        // In the review and in Tracks.
+        assertEquals(2, count("4.5 mi · ↑ 2,008 ft · 2 h 5 min"))
+        assertEquals(2, count("Shared under CC BY 4.0"))
 
-        compose.onNodeWithText("Show on map").performClick()
+        // The review's own Show on map: its track.
+        compose.onAllNodesWithText("Show on map")[0].performClick()
         compose.waitUntil(5_000) { shown.isNotEmpty() }
         assertEquals("Track", shown.single().title)
         assertEquals(listOf(listOf(listOf(-121.7, 47.5), listOf(-121.69, 47.51))), shown.single().segments)
 
-        compose.onNodeWithText("Delete").performClick()
-        compose.onNodeWithText("Delete this review and its track?").assertIsDisplayed()
+        // The review's Delete comes first.
+        compose.onAllNodesWithText("Delete")[0].performClick()
+        compose.onNodeWithText("Delete this review?").assertIsDisplayed()
+        compose.onNodeWithText("Deleting this review also deletes its track.").assertIsDisplayed()
         compose.onNodeWithText("Keep").performClick()
         assertTrue(deleted.isEmpty())
-        compose.onNodeWithText("Delete").performClick()
+        compose.onAllNodesWithText("Delete")[0].performClick()
         compose.onAllNodesWithText("Delete").onLast().performClick()
-        compose.waitUntil(5_000) { compose.onAllNodesWithText("Steep but worth it.").fetchSemanticsNodes().isEmpty() }
-        assertEquals(listOf(post), deleted)
+        compose.waitUntil(5_000) { count("Steep but worth it.") == 0 }
+        assertEquals(listOf(Profiles.Deletion(listOf(r), listOf(t))), deleted)
+        assertEquals(0, count("GPX track"))
         compose.onNodeWithText("Nothing posted yet. Open a hike and choose Post to add a review or your track.").assertIsDisplayed()
     }
 
     @Test
+    @Config(qualifiers = "w390dp-h3000dp-xxhdpi")
+    fun deletingATrackAlsoDeletesItsReview() {
+        val t = track("t1")
+        val r = review("r1", "Steep but worth it.", t)
+        val other = review("r2", "Another day.")
+        val deleted = mutableListOf<Profiles.Deletion>()
+        show(profile(listOf(r, other), listOf(t)), { deleted += it })
+        compose.waitUntil(5_000) { count("Mount Si") > 0 }
+        // Reviews' two Deletes, then the track's.
+        compose.onAllNodesWithText("Delete")[2].performClick()
+        compose.onNodeWithText("Delete this track?").assertIsDisplayed()
+        compose.onNodeWithText("Deleting this track also deletes its review.").assertIsDisplayed()
+        compose.onAllNodesWithText("Delete").onLast().performClick()
+        compose.waitUntil(5_000) { count("Steep but worth it.") == 0 }
+        assertEquals(listOf(Profiles.Deletion(listOf(r), listOf(t))), deleted)
+        compose.onNodeWithText("Another day.").assertIsDisplayed()
+        compose.onNodeWithText("1 review").assertIsDisplayed()
+        compose.onNodeWithText("No tracks yet.").assertIsDisplayed()
+    }
+
+    @Test
+    fun aReviewAloneAsksAsBefore() {
+        show(profile(listOf(review("r1", "Steep but worth it.")), emptyList()), {})
+        compose.waitUntil(5_000) { count("Delete") > 0 }
+        compose.onNodeWithText("Delete").performClick()
+        compose.onNodeWithText("Delete this review?").assertIsDisplayed()
+        assertEquals(0, compose.onAllNodesWithText("also deletes", substring = true).fetchSemanticsNodes().size)
+    }
+
+    @Test
+    fun confirmationWording() {
+        val t = track("t")
+        val r = review("r", "x", t)
+        assertEquals("Deleting this review also deletes its track.", Confirming(r.uri, true, Profiles.Deletion(listOf(r), listOf(t))).also)
+        assertEquals("Deleting this track also deletes its review.", Confirming(t.uri, false, Profiles.Deletion(listOf(r), listOf(t))).also)
+        assertNull(Confirming(r.uri, true, Profiles.Deletion(listOf(r), emptyList())).also)
+        assertNull(Confirming(t.uri, false, Profiles.Deletion(emptyList(), listOf(t))).also)
+        assertEquals("Delete this review?", Confirming(r.uri, true, Profiles.Deletion(listOf(r), listOf(t))).title)
+        assertEquals("Delete this track?", Confirming(t.uri, false, Profiles.Deletion(listOf(r), listOf(t))).title)
+    }
+
+    @Test
     fun aDeleteThatFailsSaysSoAndKeepsThePost() {
-        val post = Profiles.Post("2026-07-01T10:00:00.000Z", null, track("t1"))
-        compose.setContent {
-            HikerAtlasTheme {
-                ProfileScreen(ProfileTarget(did, "alice.test"), actions({ profile(listOf(post)) }, { throw IOException("HTTP 502") }), onBack = {})
-            }
-        }
-        compose.waitUntil(5_000) { compose.onAllNodesWithText("Delete").fetchSemanticsNodes().isNotEmpty() }
+        show(profile(emptyList(), listOf(track("t1"))), { throw IOException("HTTP 502") })
+        compose.waitUntil(5_000) { count("Delete") > 0 }
         compose.onNodeWithText("Delete").performClick()
         compose.onNodeWithText("Delete this track?").assertIsDisplayed()
+        assertEquals(0, compose.onAllNodesWithText("also deletes", substring = true).fetchSemanticsNodes().size)
         compose.onAllNodesWithText("Delete").onLast().performClick()
-        compose.waitUntil(5_000) { compose.onAllNodesWithText("Deleting didn't work: HTTP 502").fetchSemanticsNodes().isNotEmpty() }
+        compose.waitUntil(5_000) { count("Deleting didn't work: HTTP 502") > 0 }
         compose.onNodeWithText("GPX track").assertIsDisplayed()
     }
 
@@ -132,7 +204,7 @@ class ProfileScreenTest {
                 ProfileScreen(ProfileTarget(did, "alice.test"), actions({
                     calls++
                     if (calls == 1) throw IOException("HTTP 502 from com.atproto.repo.listRecords")
-                    profile(emptyList())
+                    profile(emptyList(), emptyList())
                 }), onBack = {})
             }
         }
@@ -145,19 +217,18 @@ class ProfileScreenTest {
     }
 
     @Test
-    fun seePostScrollsToAndHighlightsThatPost() {
-        val posts = (0 until 30).map { i ->
-            val t = track("t$i")
-            Profiles.Post("2026-07-%02dT10:00:00.000Z".format(30 - i), review("r$i", "Review $i", t), t)
-        }
-        val posted = TrackStore.Posted(posts[25].track!!.uri, "c", posts[25].review!!.uri, 1)
+    fun seePostLandsOnItsTrackInTracks() {
+        val tracks = (0 until 30).map { i -> track("t$i", routeKey = null).copy(title = "Track $i") }
+        val reviews = tracks.mapIndexed { i, t -> review("r$i", "Review $i", t) }
+        val posted = TrackStore.Posted(tracks[25].uri, "c", reviews[25].uri, 1)
         val target = seePostTarget(did, "alice.test", posted)!!
         compose.setContent {
-            HikerAtlasTheme { ProfileScreen(target, actions({ profile(posts) }), onBack = {}) }
+            HikerAtlasTheme { ProfileScreen(target, actions({ profile(reviews, tracks) }), onBack = {}) }
         }
         compose.waitUntil(5_000) { compose.onAllNodesWithTag("highlighted-post").fetchSemanticsNodes().isNotEmpty() }
-        compose.onNodeWithTag("highlighted-post").assertIsDisplayed()
-        compose.onNodeWithText("Review 25").assertIsDisplayed()
+        // The track's card, below every review, not the review's.
+        compose.onNodeWithTag("highlighted-post").assertIsDisplayed().assert(hasAnyDescendant(hasText("Track 25")))
+        assertEquals(0, count("Review 25"))
         // No Delete where it isn't yours to delete.
         assertTrue(compose.onAllNodesWithText("Delete").fetchSemanticsNodes().isEmpty())
     }
@@ -174,16 +245,15 @@ class ProfileScreenTest {
 
     @Test
     fun aPostsHikeIsGoneOnlyAfterAnExactSearch() {
-        val p = Profiles.Post("2026", review("r", "x", routeKey = gone), null)
         val search = KeyedSearch(emptyMap(), emptySet())
-        assertEquals("Finding the hike…", postTitle(p, HikesFound(null, false, true)))
-        assertEquals("A hike no longer on Hiker Atlas", postTitle(p, HikesFound(search, true, true)))
-        assertEquals("A hike that couldn't be looked up", postTitle(p, HikesFound(KeyedSearch(emptyMap(), setOf(gone)), true, true)))
-        assertEquals("A hike that couldn't be looked up", postTitle(p, HikesFound(null, true, false)))
-        assertEquals("A hike that couldn't be looked up", postTitle(p, HikesFound(search, true, false)))
+        assertEquals("Finding the hike…", postTitle(gone, null, HikesFound(null, false, true)))
+        assertEquals("A hike no longer on Hiker Atlas", postTitle(gone, null, HikesFound(search, true, true)))
+        assertEquals("A hike that couldn't be looked up", postTitle(gone, null, HikesFound(KeyedSearch(emptyMap(), setOf(gone)), true, true)))
+        assertEquals("A hike that couldn't be looked up", postTitle(gone, null, HikesFound(null, true, false)))
+        assertEquals("A hike that couldn't be looked up", postTitle(gone, null, HikesFound(search, true, false)))
         // Without a hike: the track's own title, else as the website.
-        assertEquals("Evening loop", postTitle(Profiles.Post("2026", null, track("t", null).copy(title = "Evening loop")), HikesFound(search, true, true)))
-        assertEquals("A hike", postTitle(Profiles.Post("2026", review("r", "x", routeKey = null), null), HikesFound(search, true, true)))
+        assertEquals("Evening loop", postTitle(null, "Evening loop", HikesFound(search, true, true)))
+        assertEquals("A hike", postTitle(null, null, HikesFound(search, true, true)))
     }
 
     @Test
@@ -220,7 +290,7 @@ class ProfileScreenTest {
         compose.setContent {
             HikerAtlasTheme {
                 ProfileScreen(
-                    ProfileTarget(did, "alice.test"), actions({ profile(emptyList()) }), onBack = {},
+                    ProfileTarget(did, "alice.test"), actions({ profile(emptyList(), emptyList()) }), onBack = {},
                     settings = { UnitsCard(UnitsActions(Units.METRIC, signedIn = true, save = {})) },
                 )
             }

@@ -16,8 +16,8 @@ import java.util.zip.GZIPInputStream
 /**
  * Someone's posts and faves, read straight from their PDS (public records,
  * no session), as the website's profile page (app/routes/$handle.tsx and
- * $handle._index.tsx): reviews joined with the tracks they point at, tracks
- * no review uses on their own, newest hike first. Records are other
+ * $handle._index.tsx): their reviews and, apart, every track, whatever
+ * posted it, each newest first. Records are other
  * people's data, so malformed ones are skipped, as the website's filters
  * skip them, rather than failing the page.
  */
@@ -67,21 +67,52 @@ object Profiles {
         val license: String? = null,
     )
 
-    /** One entry in the list: a review (with its track, if it has one), or a track on its own. */
-    data class Post(val at: String, val review: Review?, val track: Track?) {
-        val uri: String get() = review?.uri ?: track!!.uri
-        val routeKey: String? get() = review?.routeKey ?: track?.routeKey
-        val license: String? get() = review?.license ?: track?.license
-        val photos: List<Photo> get() = (review?.photos.orEmpty() + track?.photos.orEmpty()).take(MAX_PHOTOS)
-    }
-
     data class Profile(
         val did: String,
         val handle: String?,
         val pds: String,
-        val posts: List<Post>,
+        /** Newest hike first: by hikedAt, else when posted. */
+        val reviews: List<Review>,
+        /** Every track, posted alone or with a review, newest first: by startedAt, else when posted. */
+        val tracks: List<Track>,
         val faves: List<Faves.Fave>,
-    )
+    ) {
+        /** The track [r]'s strongRef points at, if it's among this account's tracks (not gone, not someone else's). */
+        fun trackOf(r: Review): Track? = r.trackUri?.let { u -> tracks.firstOrNull { it.uri == u } }
+
+        /**
+         * One post deletes as one: a review, its track, and every other
+         * review pointing at that track. The track goes by its URI even when
+         * it isn't among the loaded tracks (past the first 200), as long as
+         * the URI names this account's own track collection; a strongRef to
+         * anyone else's record is never followed.
+         */
+        fun deletion(r: Review): Deletion {
+            val t = r.trackUri?.takeIf { it.startsWith("at://$did/${Posts.TRACK}/") }
+                ?: return Deletion(listOf(r), emptyList())
+            val loaded = tracks.firstOrNull { it.uri == t }
+            val others = reviews.filter { it.trackUri == t && it.uri != r.uri }
+            return Deletion(listOf(r) + others, listOfNotNull(loaded), if (loaded == null) listOf(t) else emptyList())
+        }
+
+        /** Deleting a track deletes the reviews pointing at it too, so none is left pointing at nothing. */
+        fun deletion(t: Track) = Deletion(reviews.filter { it.trackUri == t.uri }, listOf(t))
+
+        /** This profile once [d] has gone. */
+        fun without(d: Deletion): Profile {
+            val gone = (d.reviews.map { it.uri } + d.tracks.map { it.uri } + d.unloadedTracks).toSet()
+            return copy(reviews = reviews.filter { it.uri !in gone }, tracks = tracks.filter { it.uri !in gone })
+        }
+    }
+
+    /**
+     * What one Delete deletes: a review and its track, or a track and the
+     * reviews pointing at it. [unloadedTracks]: a review's own track that
+     * isn't among the loaded tracks, by URI.
+     */
+    data class Deletion(val reviews: List<Review>, val tracks: List<Track>, val unloadedTracks: List<String> = emptyList()) {
+        val hasTrack get() = tracks.isNotEmpty() || unloadedTracks.isNotEmpty()
+    }
 
     /**
      * [did]'s profile, from [pds]. Throws (IOException, [XrpcException]) if a
@@ -93,7 +124,12 @@ object Profiles {
         val reviews = listRecords(xrpc, did, Posts.REVIEW).mapNotNull(::parseReview)
         // The website shows only faves whose key is a route key (the spike's aren't routes).
         val faves = Faves.list(xrpc, did).filter { isRouteKey(it.key) }
-        return Profile(did, handle, pds, join(reviews, tracks), faves)
+        return Profile(
+            did, handle, pds,
+            reviews.sortedByDescending { it.hikedAt ?: it.createdAt },
+            tracks.sortedByDescending { it.startedAt ?: it.createdAt },
+            faves,
+        )
     }
 
     /**
@@ -121,24 +157,6 @@ object Profiles {
             if (cursor == null || records.size < PAGE) break
         }
         return out.take(max)
-    }
-
-    /**
-     * Reviews with their tracks (by the strongRef's URI, among this
-     * account's tracks), then the tracks no review uses; sorted by when
-     * hiked (the review's hikedAt, else the track's startedAt, else when
-     * posted), newest first, as the website's Overview.
-     */
-    fun join(reviews: List<Review>, tracks: List<Track>): List<Post> {
-        val byUri = tracks.associateBy { it.uri }
-        val used = mutableSetOf<String>()
-        val out = reviews.map { r ->
-            val t = r.trackUri?.let(byUri::get)
-            if (t != null) used += t.uri
-            Post(r.hikedAt ?: t?.startedAt ?: r.createdAt, r, t)
-        }.toMutableList()
-        for (t in tracks) if (t.uri !in used) out += Post(t.startedAt ?: t.createdAt, null, t)
-        return out.sortedByDescending { it.at }
     }
 
     /** A track record, or null where it isn't one the website would show (no createdAt, no GPX blob). */
@@ -171,22 +189,32 @@ object Profiles {
     }
 
     /**
-     * Deletes a post of [did]'s own: the review, then its track (a review
-     * and its track were posted together, and go together, as the website's).
+     * Deletes records of [did]'s own: the reviews first, then the tracks, so
+     * a failure halfway leaves no review pointing at a track that's gone.
+     * Every record is checked to be [did]'s before any is deleted.
      * [onDeleted] hears each record as it goes, so a failure halfway still
      * leaves the phone knowing what's gone.
      */
-    suspend fun delete(xrpc: Xrpc, did: String, post: Post, onDeleted: suspend (Review?, Track?) -> Unit = { _, _ -> }) {
-        post.review?.let { deleteRecord(xrpc, did, it.uri); onDeleted(it, null) }
-        post.track?.let { deleteRecord(xrpc, did, it.uri); onDeleted(null, it) }
+    /** Deletes [d]: reviews first, so none is left pointing at a track that's gone. [onDeleted] hears each (review URI, track URI). */
+    suspend fun delete(xrpc: Xrpc, did: String, d: Deletion, onDeleted: suspend (String?, String?) -> Unit = { _, _ -> }) {
+        val trackUris = d.tracks.map { it.uri } + d.unloadedTracks
+        (d.reviews.map { it.uri } + trackUris).forEach { rkeyOf(did, it) }
+        for (r in d.reviews) { deleteRecord(xrpc, did, r.uri); onDeleted(r.uri, null) }
+        for (t in trackUris) { deleteRecord(xrpc, did, t); onDeleted(null, t) }
+    }
+
+    /** [uri]'s collection and rkey, if it's [did]'s record. */
+    private fun rkeyOf(did: String, uri: String): Pair<String, String> {
+        val parts = uri.removePrefix("at://").split('/')
+        require(parts.size == 3 && parts[0] == did) { "Not your post" }
+        return parts[1] to parts[2]
     }
 
     private suspend fun deleteRecord(xrpc: Xrpc, did: String, uri: String) {
-        val parts = uri.removePrefix("at://").split('/')
-        require(parts.size == 3 && parts[0] == did) { "Not your post" }
+        val (collection, rkey) = rkeyOf(did, uri)
         xrpc.procedure(
             "com.atproto.repo.deleteRecord",
-            buildJsonObject { put("repo", did); put("collection", parts[1]); put("rkey", parts[2]) },
+            buildJsonObject { put("repo", did); put("collection", collection); put("rkey", rkey) },
         )
     }
 
