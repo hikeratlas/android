@@ -43,3 +43,11 @@ internal suspend fun verifyPosted(xrpc: Xrpc, did: String, library: TrackLibrary
     val posted = library.posted(id) ?: return
     if (Posts.exists(xrpc, did, posted.trackUri) == false) library.setPosted(id, null)
 }
+
+/**
+ * Deletes one of your posts (its review and its track), and the phone's
+ * mark on a track posted as it, so that track can be posted again.
+ */
+internal suspend fun deletePost(xrpc: Xrpc, did: String, library: TrackLibrary, post: com.hikeratlas.android.atproto.Profiles.Post) {
+    com.hikeratlas.android.atproto.Profiles.delete(xrpc, did, post) { review, track -> library.postDeleted(track?.uri, review?.uri) }
+}

@@ -123,7 +123,8 @@ fun TrackSummarySheet(
             }
             Chart(detail.profile, onScrub)
             when {
-                posted != null -> PostedRow(posted, onSeePost)
+                // Saved first (the name as typed): the profile opens in place of the map.
+                posted != null -> PostedRow(posted) { onSave(name); onSeePost() }
                 onPost != null -> OutlinedButton(onClick = { onPost(name) }, modifier = Modifier.fillMaxWidth()) { Text("Post this track") }
             }
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -189,6 +190,36 @@ fun TrackPanel(
             confirmButton = { TextButton(onClick = { deleting = false; onDelete() }) { Text("Delete") } },
             dismissButton = { TextButton(onClick = { deleting = false }) { Text("Keep") } },
         )
+    }
+}
+
+/**
+ * A posted track on the map (from a profile): its title, its numbers as its
+ * record has them, its profile from the DEM, and Share (its GPX). Not the
+ * phone's, so no Delete or Post.
+ */
+@Composable
+fun PostedTrackPanel(
+    title: String,
+    facts: String,
+    profile: ElevationProfiler.Profile?,
+    onClose: () -> Unit,
+    onShare: () -> Unit,
+    onScrub: (DoubleArray?) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Surface(shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp), shadowElevation = 8.dp, modifier = modifier.fillMaxWidth()) {
+        Column(Modifier.navigationBarsPadding().padding(start = 20.dp, end = 8.dp, top = 8.dp, bottom = 16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, maxLines = 1)
+                    if (facts.isNotEmpty()) Text(facts, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                IconButton(onClick = onShare) { Icon(Icons.Filled.Share, contentDescription = "Share as GPX") }
+                IconButton(onClick = onClose) { Icon(Icons.Filled.Close, contentDescription = "Close") }
+            }
+            Box(Modifier.padding(end = 12.dp)) { Chart(profile, onScrub) }
+        }
     }
 }
 

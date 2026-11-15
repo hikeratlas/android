@@ -118,6 +118,24 @@ class TrackLibrary(
     }
 
     /**
+     * A post deleted (from the profile): a track posted as [trackUri] is no
+     * longer posted, so it can be posted again; one whose review was
+     * [reviewUri] keeps its track (still up) but not the review.
+     */
+    suspend fun postDeleted(trackUri: String?, reviewUri: String?) {
+        withContext(io) {
+            for (t in store.saved()) {
+                val p = t.posted ?: continue
+                when {
+                    trackUri != null && p.trackUri == trackUri -> store.setPosted(t.id, null)
+                    reviewUri != null && p.reviewUri == reviewUri -> store.setPosted(t.id, p.copy(reviewUri = null))
+                }
+            }
+        }
+        refresh()
+    }
+
+    /**
      * The saved tracks passing within [within] metres of [line] (a hike's):
      * boxes first, from one query, so only the tracks around it are read.
      */

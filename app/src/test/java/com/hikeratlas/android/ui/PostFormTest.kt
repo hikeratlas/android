@@ -45,7 +45,7 @@ class PostFormTest {
 
     private fun actions(post: suspend (PostDraft, (String) -> Unit) -> Unit = { _, _ -> }, license: String = "CC-BY-4.0") = PostActions(
         account, listOf(track), license = { license }, trackStats = { if (it == 7L) stats else null },
-        hikesNear = { emptyList() }, post = post, openProfile = {}, today = { LocalDate.of(2026, 7, 4) },
+        hikesNear = { emptyList() }, post = post, openProfile = { _ -> }, today = { LocalDate.of(2026, 7, 4) },
     )
 
     private fun waitFor(text: String) = compose.waitUntil(5_000) {

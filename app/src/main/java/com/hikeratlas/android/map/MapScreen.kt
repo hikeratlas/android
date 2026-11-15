@@ -118,6 +118,9 @@ fun MapScreen(
     /** A saved track to show (from the Saved tab), until [onViewClosed]. */
     viewTrack: Long? = null,
     onViewClosed: () -> Unit = {},
+    /** A posted track to show (from a profile), until [onPostedClosed]. */
+    viewPosted: com.hikeratlas.android.ui.PostedTrack? = null,
+    onPostedClosed: () -> Unit = {},
     /** An offline area to open (from the Saved tab): its park's or hike's sheet, until [onAreaOpened]. */
     openArea: OfflineAreas.Target? = null,
     onAreaOpened: () -> Unit = {},
@@ -312,7 +315,7 @@ fun MapScreen(
     // A fresh sheet each time one opens, so it starts low however the last was left.
     val sheet = remember(open) { AnchoredDraggableState(Stop.Peek) }
 
-    LaunchedEffect(open, planning, viewTrack) { onSheetOpen(open || planning || viewTrack != null) }
+    LaunchedEffect(open, planning, viewTrack, viewPosted) { onSheetOpen(open || planning || viewTrack != null || viewPosted != null) }
     // Draw the plan as it changes.
     LaunchedEffect(planner.points, planner.coords, planner.pending, style) {
         controller?.showPlan(planner.points, planner.coords, planner.pending)
@@ -439,7 +442,26 @@ fun MapScreen(
     var summary by remember { mutableStateOf<TrackLibrary.Detail?>(null) }
     var viewing by remember { mutableStateOf<TrackLibrary.Detail?>(null) }
     var trackPanelPx by remember { mutableIntStateOf(0) }
-    LaunchedEffect(summary, viewing, style) { controller?.showViewedTrack((summary ?: viewing)?.segments.orEmpty()) }
+    LaunchedEffect(summary, viewing, viewPosted, style) {
+        controller?.showViewedTrack((summary ?: viewing)?.segments ?: viewPosted?.segments.orEmpty())
+    }
+    // A posted track's elevation, from the DEM as for the phone's own tracks.
+    var postedProfile by remember(viewPosted) { mutableStateOf<com.hikeratlas.android.elevation.ElevationProfiler.Profile?>(null) }
+    var postedPanelPx by remember { mutableIntStateOf(0) }
+    LaunchedEffect(viewPosted) {
+        val p = viewPosted ?: return@LaunchedEffect
+        model.close()
+        if (planning) stopPlanning()
+        val line = p.segments.flatten()
+        if (line.size >= 2) postedProfile = withContext(Dispatchers.IO) {
+            try { app.profiler.profile(line) } catch (e: CancellationException) { throw e } catch (e: Exception) { null }
+        }
+    }
+    LaunchedEffect(viewPosted, postedPanelPx) {
+        val p = viewPosted ?: return@LaunchedEffect
+        if (postedPanelPx > 0) controller?.fitLine(p.segments.flatten(), postedPanelPx)
+    }
+    BackHandler(enabled = viewPosted != null && !open && !searching) { onPostedClosed() }
     LaunchedEffect(viewTrack) {
         viewing = null
         val id = viewTrack ?: return@LaunchedEffect
@@ -560,7 +582,7 @@ fun MapScreen(
                     }
                 }
             }
-            if (inView.isNotEmpty() && viewing == null) {
+            if (inView.isNotEmpty() && viewing == null && viewPosted == null) {
                 Surface(
                     shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp),
                     shadowElevation = 8.dp,
@@ -589,7 +611,18 @@ fun MapScreen(
                     modifier = Modifier.align(Alignment.BottomCenter).onSizeChanged { trackPanelPx = it.height },
                     onPost = posts?.let { { postingTrack = v.track.id to v.name } },
                     posted = app.library.tracks.firstOrNull { it.id == v.track.id }?.posted,
-                    onSeePost = { posts?.openProfile?.invoke() },
+                    onSeePost = { posts?.openProfile?.invoke(app.library.tracks.firstOrNull { it.id == v.track.id }?.posted) },
+                )
+            }
+        }
+        viewPosted?.let { p ->
+            if (!open && !planning && viewing == null) {
+                com.hikeratlas.android.track.PostedTrackPanel(
+                    p.title, p.facts, postedProfile,
+                    onClose = onPostedClosed,
+                    onShare = { scope.launch { com.hikeratlas.android.track.shareGpx(context, p.title, p.gpx) } },
+                    onScrub = { pt -> controller?.showHover(pt) },
+                    modifier = Modifier.align(Alignment.BottomCenter).onSizeChanged { postedPanelPx = it.height },
                 )
             }
         }
@@ -659,7 +692,7 @@ fun MapScreen(
                 }
             },
             posted = app.library.tracks.firstOrNull { it.id == id }?.posted,
-            onSeePost = { posts?.openProfile?.invoke() },
+            onSeePost = { posts?.openProfile?.invoke(app.library.tracks.firstOrNull { it.id == id }?.posted) },
         )
     }
 
