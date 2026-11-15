@@ -121,6 +121,8 @@ class HikerAtlasApp : Application(), RecorderHost, OfflineHost, com.hikeratlas.a
             .readTimeout(30, TimeUnit.SECONDS)
             .build()
         com.hikeratlas.android.map.Thumbs.client = http
+        // Tells the indexer about each post, fave or delete right after it's written.
+        com.hikeratlas.android.atproto.Indexer.notifier = com.hikeratlas.android.atproto.Indexer.http(http)
         MapLibre.getInstance(this)
         // Offline areas answer MapLibre's requests with no network too.
         MapConnectivity.install(this)

@@ -51,6 +51,7 @@ object Faves {
                 buildJsonObject { put("repo", did); put("collection", NSID); put("rkey", key) },
             )
         }
+        Indexer.notify("at://$did/$NSID/$key")
     }
 
     /**
