@@ -588,6 +588,8 @@ fun MapScreen(
                     onScrub = { p -> controller?.showHover(p) },
                     modifier = Modifier.align(Alignment.BottomCenter).onSizeChanged { trackPanelPx = it.height },
                     onPost = posts?.let { { postingTrack = v.track.id to v.name } },
+                    posted = app.library.tracks.firstOrNull { it.id == v.track.id }?.posted,
+                    onSeePost = { posts?.openProfile?.invoke() },
                 )
             }
         }
@@ -631,6 +633,8 @@ fun MapScreen(
         )
     }
 
+    // A posted track's post may have been deleted since (on the website, say): then it can be posted again.
+    LaunchedEffect(viewing?.track?.id) { viewing?.track?.id?.let { posts?.verifyPosted?.invoke(it) } }
     summary?.let { d ->
         val id = d.track.id
         TrackSummarySheet(
@@ -645,6 +649,17 @@ fun MapScreen(
             },
             onDiscard = { summary = null; scope.launch { app.library.delete(id) } },
             onScrub = { p -> controller?.showHover(p) },
+            onPost = posts?.let {
+                { name ->
+                    summary = null
+                    scope.launch {
+                        app.library.rename(id, name)
+                        postingTrack = id to (name.trim().ifEmpty { "Track" })
+                    }
+                }
+            },
+            posted = app.library.tracks.firstOrNull { it.id == id }?.posted,
+            onSeePost = { posts?.openProfile?.invoke() },
         )
     }
 

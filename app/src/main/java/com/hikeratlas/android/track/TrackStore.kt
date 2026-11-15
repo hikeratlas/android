@@ -24,7 +24,16 @@ class TrackStore(context: Context, name: String? = "tracks.db") :
         val pausedAt: Long?,
         /** Worked out when it's stopped (null before, or if that didn't finish). */
         val stats: Stats? = null,
+        /** The post it was posted as, if it was: it isn't posted again. */
+        val posted: Posted? = null,
     )
+
+    /**
+     * What a track was posted as: its track record (at:// URI and CID, the
+     * CID so a review can still point at it), the review posted with it if
+     * any, and when.
+     */
+    data class Posted(val trackUri: String, val trackCid: String, val reviewUri: String?, val at: Long)
 
     /** A finished track's numbers, kept for the list. */
     data class Stats(
@@ -50,6 +59,7 @@ class TrackStore(context: Context, name: String? = "tracks.db") :
             )""",
         )
         addStats(db)
+        addPosted(db)
         // alt: above the WGS84 ellipsoid; msl_alt: above sea level; both GPS's own.
         db.execSQL(
             """CREATE TABLE points (
@@ -74,6 +84,14 @@ class TrackStore(context: Context, name: String? = "tracks.db") :
         // (its distance, and the climb from GPS altitudes, not the DEM), so
         // numbers kept from before are worked out again.
         if (oldVersion < 3) db.execSQL("UPDATE tracks SET metres = NULL, elapsed_ms = NULL, moving_ms = NULL, gain = NULL, loss = NULL")
+        if (oldVersion < 4) addPosted(db)
+    }
+
+    // Version 4: what a track was posted as, so it's never posted twice.
+    private fun addPosted(db: SQLiteDatabase) {
+        for (col in listOf("posted_uri TEXT", "posted_cid TEXT", "posted_review TEXT", "posted_at INTEGER")) {
+            db.execSQL("ALTER TABLE tracks ADD COLUMN $col")
+        }
     }
 
     // Version 2: a finished track's numbers.
@@ -119,6 +137,27 @@ class TrackStore(context: Context, name: String? = "tracks.db") :
             "id = ?", arrayOf(track.toString()),
         )
     }
+
+    /** Marks a track posted as [p]; null clears the mark (the post was deleted), so it can be posted again. */
+    fun setPosted(track: Long, p: Posted?) {
+        writableDatabase.update(
+            "tracks",
+            ContentValues().apply {
+                if (p == null) {
+                    for (c in listOf("posted_uri", "posted_cid", "posted_review", "posted_at")) putNull(c)
+                } else {
+                    put("posted_uri", p.trackUri); put("posted_cid", p.trackCid); put("posted_review", p.reviewUri); put("posted_at", p.at)
+                }
+            },
+            "id = ?", arrayOf(track.toString()),
+        )
+    }
+
+    /** Each track's box, [west, south, east, north], from its fixes: to find the ones near a place without reading them all. */
+    fun boxes(): Map<Long, List<Double>> =
+        readableDatabase.rawQuery("SELECT track, MIN(lon), MIN(lat), MAX(lon), MAX(lat) FROM points GROUP BY track", null).use { c ->
+            buildMap { while (c.moveToNext()) put(c.getLong(0), listOf(c.getDouble(1), c.getDouble(2), c.getDouble(3), c.getDouble(4))) }
+        }
 
     fun rename(track: Long, name: String) {
         writableDatabase.update("tracks", ContentValues().apply { put("name", name) }, "id = ?", arrayOf(track.toString()))
@@ -175,6 +214,7 @@ class TrackStore(context: Context, name: String? = "tracks.db") :
         double("metres")?.let { m ->
             Stats(m, longOrNull("elapsed_ms") ?: 0, longOrNull("moving_ms") ?: 0, double("gain"), double("loss"))
         },
+        string("posted_uri")?.let { uri -> Posted(uri, string("posted_cid") ?: "", string("posted_review"), longOrNull("posted_at") ?: 0) },
     )
     private fun Cursor.col(n: String) = getColumnIndexOrThrow(n)
     private fun Cursor.long(n: String) = getLong(col(n))
@@ -184,6 +224,6 @@ class TrackStore(context: Context, name: String? = "tracks.db") :
     private fun Cursor.string(n: String) = col(n).let { if (isNull(it)) null else getString(it) }
 
     private companion object {
-        const val VERSION = 3
+        const val VERSION = 4
     }
 }

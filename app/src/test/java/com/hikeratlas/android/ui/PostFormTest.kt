@@ -15,7 +15,7 @@ import com.hikeratlas.android.atproto.PostException
 import com.hikeratlas.android.atproto.Posts
 import com.hikeratlas.android.routes.KeyedHike
 import com.hikeratlas.android.track.GpxStats
-import com.hikeratlas.android.track.HikeMatch
+import com.hikeratlas.android.track.NearbyHike
 import com.hikeratlas.android.track.TrackStore
 import com.hikeratlas.android.units.Units
 import org.junit.Assert.assertEquals
@@ -45,7 +45,7 @@ class PostFormTest {
 
     private fun actions(post: suspend (PostDraft, (String) -> Unit) -> Unit = { _, _ -> }, license: String = "CC-BY-4.0") = PostActions(
         account, listOf(track), license = { license }, trackStats = { if (it == 7L) stats else null },
-        hikesWalked = { emptyList() }, post = post, openProfile = {}, today = { LocalDate.of(2026, 7, 4) },
+        hikesNear = { emptyList() }, post = post, openProfile = {}, today = { LocalDate.of(2026, 7, 4) },
     )
 
     private fun waitFor(text: String) = compose.waitUntil(5_000) {
@@ -120,20 +120,55 @@ class PostFormTest {
     }
 
     @Test
-    fun theHikesATrackWalkedThenNone() {
+    fun theHikesNearATrackClosestFirstThenNone() {
         var got: PostHike? = PostHike("unset", "")
-        val matches = listOf(
-            HikeMatch("keyA", KeyedHike("p1", "Raging River State Forest", "p1/day/0", "Upper Lake"), 0.97, 4.1),
-            HikeMatch("keyB", KeyedHike("p1", "Raging River State Forest", "p1/day/1", "Lower Lake"), 0.55, 3.0),
+        val near = listOf(
+            NearbyHike("keyA", KeyedHike("p1", "Raging River State Forest", "p1/day/0", "Upper Lake"), 3.0),
+            NearbyHike("keyB", KeyedHike("p1", "Raging River State Forest", "p1/day/1", "Lower Lake"), 420.0),
         )
-        compose.setContent { HikeChooser(MatchState.Ready(matches), onNext = { got = it }, onCancel = {}) }
-        compose.onNodeWithText("Raging River State Forest · follows 97% of it").assertExists()
-        // The best one is chosen to start with.
+        compose.setContent { HikeChooser(MatchState.Ready(near), onNext = { got = it }, onCancel = {}) }
+        compose.onNodeWithText("Raging River State Forest · on your track").assertExists()
+        compose.onNodeWithText("Raging River State Forest · 400 m from your track").assertExists()
+        // The track is on the closest: it's chosen to start with.
         compose.onNodeWithText("Next").performClick()
         assertEquals(PostHike("keyA", "Upper Lake"), got)
         compose.onNodeWithText("None of these").performClick()
         compose.onNodeWithText("Next").performClick()
         assertEquals(null, got)
+    }
+
+    @Test
+    fun noHikeIsGuessedWhenTheTrackIsOnNone() {
+        var got: PostHike? = PostHike("unset", "")
+        val near = listOf(NearbyHike("keyB", KeyedHike("p1", "Raging River State Forest", "p1/day/1", "Lower Lake"), 420.0))
+        compose.setContent { HikeChooser(MatchState.Ready(near), onNext = { got = it }, onCancel = {}) }
+        compose.onNodeWithText("Next").performClick()
+        assertEquals(null, got)
+    }
+
+    private fun t(id: Long, name: String, posted: Boolean = false) = TrackStore.Track(
+        id, 1_783_000_000_000 - id * 86_400_000, 1_783_000_000_000, name, 0, null,
+        posted = if (posted) TrackStore.Posted("at://did:plc:x/${Posts.TRACK}/3tid$id", "bafy", null, 1) else null,
+    )
+
+    @Test
+    fun tracksNearTheHikeComeFirstAndPostedOnesCantBeChosen() {
+        // Newest first, as the library lists them.
+        val tracks = listOf(t(1, "Newest"), t(2, "Near, posted", posted = true), t(3, "Near"), t(4, "Oldest"))
+        val (near, other) = trackGroups(tracks, setOf(2, 3))
+        assertEquals(listOf(2L, 3L), near.map { it.id })
+        assertEquals(listOf(1L, 4L), other.map { it.id })
+        var chosen: Long? = -1
+        compose.setContent { TrackChoices(tracks, setOf(2, 3), null, onChoose = { chosen = it }) }
+        compose.onNodeWithText("Near this hike").assertExists()
+        compose.onNodeWithText("Other tracks").assertExists()
+        compose.onNodeWithText("Already posted").assertExists()
+        compose.onNode(hasText("Near, posted", substring = true)).performClick()
+        assertEquals(-1L, chosen)
+        compose.onNode(hasText("Near ·", substring = true)).performClick()
+        assertEquals(3L, chosen)
+        compose.onNodeWithText("No track").performClick()
+        assertEquals(null, chosen)
     }
 
     @Test

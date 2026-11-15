@@ -91,6 +91,12 @@ object Posts {
         val title: String? = null,
         /** The track as GPX, as the app exports it. */
         val gpx: String? = null,
+        /**
+         * The track, already posted (a review that failed after its track
+         * went up, tried again): the review points at it, and it isn't
+         * posted twice. Takes the place of [gpx].
+         */
+        val track: StrongRef? = null,
     )
 
     /** What was posted. */
@@ -110,22 +116,26 @@ object Posts {
     /**
      * Publishes [post]: the track first (its GPX uploaded, then its record),
      * then the review, pointing at the track just posted. [progress] hears
-     * what's under way, in the website's words. Throws [PostException]
-     * saying what failed; [SignedOutException] if there's no session.
+     * what's under way, in the website's words; [onTrack], the track's
+     * record as soon as it's made (before the review, which may yet fail),
+     * so the phone never posts it again. Throws [PostException] saying what
+     * failed; [SignedOutException] if there's no session.
      */
-    suspend fun publish(xrpc: Xrpc, did: String, post: Post, progress: (String) -> Unit = {}): Published {
+    suspend fun publish(
+        xrpc: Xrpc, did: String, post: Post, progress: (String) -> Unit = {}, onTrack: suspend (StrongRef) -> Unit = {},
+    ): Published {
         val review = post.text.trim().isNotEmpty()
-        require(review || post.gpx != null) { "Nothing to post" }
+        require(review || (post.gpx != null && post.track == null)) { "Nothing to post" }
         progress("Posting…")
         val license = licenseFor(xrpc, did)
-        val track = post.gpx?.let { gpx ->
+        val track = post.track ?: post.gpx?.let { gpx ->
             progress("Uploading your track…")
             val stats = try {
                 TrackMeasure.ofGpx(gpx)
             } catch (e: IllegalArgumentException) {
                 throw PostException(e.message ?: "Not a GPX file", e)
             }
-            publishTrack(xrpc, did, gpx, stats, post.routeKey, post.title, license)
+            publishTrack(xrpc, did, gpx, stats, post.routeKey, post.title, license).also { onTrack(it) }
         }
         val reviewRef = if (review) {
             progress("Posting your review…")
@@ -134,6 +144,26 @@ object Posts {
             null
         }
         return Published(track, reviewRef)
+    }
+
+    /**
+     * Whether the record at [uri] is still in [did]'s repository: false only
+     * when the PDS says there's no such record (400, as the website takes
+     * it); null when it can't be told (another account's record, no
+     * signal, the PDS down), which changes nothing.
+     */
+    suspend fun exists(xrpc: Xrpc, did: String, uri: String): Boolean? {
+        val parts = uri.removePrefix("at://").split('/')
+        if (parts.size != 3 || parts[0] != did) return null
+        return try {
+            xrpc.query("com.atproto.repo.getRecord", mapOf("repo" to did, "collection" to parts[1], "rkey" to parts[2]))
+            true
+        } catch (e: XrpcException) {
+            if (e.status == 400) false else null
+        } catch (e: Exception) {
+            if (e is CancellationException) throw e
+            null
+        }
     }
 
     /** A track record, field for field as the website's publishTrack writes it. */

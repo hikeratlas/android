@@ -3,7 +3,6 @@ package com.hikeratlas.android.ui
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
@@ -26,8 +25,6 @@ import androidx.compose.material.icons.filled.Error
 import androidx.compose.material3.Button
 import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDialog
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
@@ -64,8 +61,9 @@ import com.hikeratlas.android.atproto.AccountState
 import com.hikeratlas.android.atproto.Posts
 import com.hikeratlas.android.atproto.SignedOutException
 import com.hikeratlas.android.track.GpxStats
-import com.hikeratlas.android.track.HikeMatch
+import com.hikeratlas.android.track.NearbyHike
 import com.hikeratlas.android.track.TrackStore
+import com.hikeratlas.android.track.statsLine
 import com.hikeratlas.android.units.dist
 import com.hikeratlas.android.units.elev
 import kotlinx.coroutines.CancellationException
@@ -77,8 +75,8 @@ import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 
-/** A hike a post is about: its key from the build, and its title. */
-data class PostHike(val key: String, val title: String)
+/** A hike a post is about: its key from the build, its title, and its line (for the tracks near it). */
+data class PostHike(val key: String, val title: String, val line: List<List<Double>> = emptyList())
 
 /** What the form posts: a review ([text]), a recorded track ([trackId]), or both. */
 data class PostDraft(
@@ -102,12 +100,16 @@ class PostActions(
     val license: suspend () -> String,
     /** What a recorded track will post: its numbers, as the website measures its GPX. */
     val trackStats: suspend (Long) -> GpxStats?,
-    /** The curated hikes a recorded track walked, best first. */
-    val hikesWalked: suspend (Long) -> List<HikeMatch>,
+    /** The curated hikes near a recorded track, closest first. */
+    val hikesNear: suspend (Long) -> List<NearbyHike>,
+    /** The recorded tracks passing near a hike's line. */
+    val tracksNear: suspend (List<List<Double>>) -> Set<Long> = { emptySet() },
     /** Posts it; [progress] hears what's under way. Throws saying what failed. */
     val post: suspend (draft: PostDraft, progress: (String) -> Unit) -> Unit,
     /** Opens the signed-in account's profile on the website. */
     val openProfile: () -> Unit,
+    /** Checks a posted track's post is still there, and clears the mark if it was deleted. */
+    val verifyPosted: suspend (Long) -> Unit = {},
     val today: () -> LocalDate = { LocalDate.now() },
 )
 
@@ -173,7 +175,7 @@ fun TrackPostDialog(trackId: Long, trackName: String, posts: PostActions, onClos
         var matches by remember(trackId) { mutableStateOf<MatchState>(MatchState.Loading) }
         LaunchedEffect(trackId) {
             matches = try {
-                MatchState.Ready(posts.hikesWalked(trackId))
+                MatchState.Ready(posts.hikesNear(trackId))
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -194,42 +196,55 @@ fun TrackPostDialog(trackId: Long, trackName: String, posts: PostActions, onClos
 sealed interface MatchState {
     data object Loading : MatchState
     data class Failed(val message: String) : MatchState
-    data class Ready(val matches: List<HikeMatch>) : MatchState
+    data class Ready(val matches: List<NearbyHike>) : MatchState
 }
 
-/** Which hike a track was: the ones it walked, best first, or none. (The dialog's content, apart, to test.) */
+/** "On your track", or how far from it: "400 m from your track". */
+internal fun nearText(metres: Double): String =
+    if (metres < 50) "on your track" else "${com.hikeratlas.android.units.elev(Math.round(metres / 50.0) * 50.0)} from your track"
+
+/**
+ * Which hike a track was: every curated hike near it, closest first, or
+ * none. No guessing which it was: the closest is chosen to start with
+ * only when the track is on it. (The dialog's content, apart, to test.)
+ */
 @Composable
 internal fun HikeChooser(state: MatchState, onNext: (PostHike?) -> Unit, onCancel: () -> Unit) {
-    // The best match is chosen to start with; "none" is the empty key.
-    var picked by remember(state) { mutableStateOf((state as? MatchState.Ready)?.matches?.firstOrNull()?.key ?: "") }
+    // "None" is the empty key.
+    var picked by remember(state) {
+        mutableStateOf((state as? MatchState.Ready)?.matches?.firstOrNull()?.takeIf { it.metres < 50 }?.key ?: "")
+    }
     Column(Modifier.padding(vertical = 20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text(
             "Which hike was it?", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold,
             modifier = Modifier.padding(horizontal = 20.dp),
         )
-        when (state) {
-            MatchState.Loading -> Column(Modifier.padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("Finding the curated hikes your track walked…", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                LinearProgressIndicator(Modifier.fillMaxWidth())
-            }
-            is MatchState.Failed -> Text(
-                "Couldn't look for the hikes your track walked (${state.message}). You can post it on its own.",
-                color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(horizontal = 20.dp),
-            )
-            is MatchState.Ready -> {
-                if (state.matches.isEmpty()) Text(
-                    "Your track doesn't follow any curated hike: post it on its own.",
+        // The choices scroll; the buttons stay below them.
+        Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState())) {
+            when (state) {
+                MatchState.Loading -> Column(Modifier.padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Finding the curated hikes near your track…", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    LinearProgressIndicator(Modifier.fillMaxWidth())
+                }
+                is MatchState.Failed -> Text(
+                    "Couldn't look for the hikes near your track (${state.message}). You can post it on its own.",
                     color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(horizontal = 20.dp),
                 )
-                for (m in state.matches) {
-                    Choice(
-                        m.hike.title, listOf(m.hike.parkName, "follows ${Math.round(m.share * 100)}% of it").filter { it.isNotEmpty() }.joinToString(" · "),
-                        picked == m.key,
-                    ) { picked = m.key }
+                is MatchState.Ready -> {
+                    if (state.matches.isEmpty()) Text(
+                        "No curated hike comes within ${com.hikeratlas.android.units.dist(com.hikeratlas.android.track.NEAR_METRES / 1000, 0)} of your track: post it on its own.",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(horizontal = 20.dp),
+                    )
+                    for (m in state.matches) {
+                        Choice(
+                            m.hike.title, listOf(m.hike.parkName, nearText(m.metres)).filter { it.isNotEmpty() }.joinToString(" · "),
+                            picked == m.key,
+                        ) { picked = m.key }
+                    }
                 }
             }
+            if (state !is MatchState.Loading) Choice("None of these", "Post the track on its own, not tied to a hike", picked == "") { picked = "" }
         }
-        if (state !is MatchState.Loading) Choice("None of these", "Post the track on its own, not tied to a hike", picked == "") { picked = "" }
         Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), horizontalArrangement = Arrangement.End) {
             TextButton(onClick = onCancel) { Text("Cancel") }
             Spacer(Modifier.width(8.dp))
@@ -301,6 +316,14 @@ internal fun PostForm(
     var error by remember { mutableStateOf<String?>(null) }
     var done by remember { mutableStateOf(false) }
     var picking by remember { mutableStateOf(false) }
+    // The tracks passing near the hike, offered first.
+    var near by remember { mutableStateOf(emptySet<Long>()) }
+    LaunchedEffect(hike) {
+        val line = hike?.line.orEmpty()
+        if (fixedTrack == null && line.isNotEmpty()) {
+            near = try { posts.tracksNear(line) } catch (e: CancellationException) { throw e } catch (_: Exception) { emptySet() }
+        }
+    }
     LaunchedEffect(Unit) {
         license = try { posts.license() } catch (e: CancellationException) { throw e } catch (_: Exception) { Posts.DEFAULT_LICENSE }
     }
@@ -412,7 +435,7 @@ internal fun PostForm(
                 if (fixedTrack != null) {
                     Text(trackName0 ?: "Track", style = MaterialTheme.typography.bodyLarge)
                 } else {
-                    TrackPicker(posts.tracks, trackId, enabled = busy == null) { trackId = it }
+                    TrackPicker(posts.tracks, near, trackId, enabled = busy == null) { trackId = it }
                 }
                 stats?.let { Text(postStatsLine(it), style = MaterialTheme.typography.bodyMedium) }
                 if (trackId != null) Hint("Your track shows where you went, and when, to anyone.")
@@ -459,23 +482,72 @@ internal fun PostForm(
     }
 }
 
-/** No track, or one of the phone's recorded tracks. */
+/**
+ * The tracks to offer with a hike's post: those passing near it first, then
+ * the others, each newest first (as [tracks] come).
+ */
+internal fun trackGroups(tracks: List<TrackStore.Track>, near: Set<Long>): Pair<List<TrackStore.Track>, List<TrackStore.Track>> =
+    tracks.partition { it.id in near }
+
+/** No track, or one of the phone's recorded tracks, chosen from a list. */
 @Composable
-private fun TrackPicker(tracks: List<TrackStore.Track>, chosen: Long?, enabled: Boolean, onChoose: (Long?) -> Unit) {
+private fun TrackPicker(tracks: List<TrackStore.Track>, near: Set<Long>, chosen: Long?, enabled: Boolean, onChoose: (Long?) -> Unit) {
     var open by remember { mutableStateOf(false) }
-    Box {
-        OutlinedButton(onClick = { open = true }, enabled = enabled && tracks.isNotEmpty()) {
-            Text(tracks.firstOrNull { it.id == chosen }?.let(::trackLabel) ?: if (tracks.isEmpty()) "No recorded tracks" else "No track")
-            Icon(Icons.Filled.ArrowDropDown, contentDescription = null)
-        }
-        DropdownMenu(open, onDismissRequest = { open = false }) {
-            DropdownMenuItem(text = { Text("No track") }, onClick = { open = false; onChoose(null) })
-            for (t in tracks) {
-                DropdownMenuItem(text = { Text(trackLabel(t)) }, onClick = { open = false; onChoose(t.id) })
+    OutlinedButton(onClick = { open = true }, enabled = enabled && tracks.isNotEmpty()) {
+        Text(tracks.firstOrNull { it.id == chosen }?.let(::trackLabel) ?: if (tracks.isEmpty()) "No recorded tracks" else "No track")
+        Icon(Icons.Filled.ArrowDropDown, contentDescription = null)
+    }
+    if (tracks.isEmpty()) Hint("Tracks you record with Hiker Atlas can go with a post.")
+    if (open) {
+        Dialog(onDismissRequest = { open = false }) {
+            Surface(shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.surface) {
+                TrackChoices(tracks, near, chosen, onChoose = { open = false; onChoose(it) })
             }
         }
     }
-    if (tracks.isEmpty()) Hint("Tracks you record with Hiker Atlas can go with a post.")
+}
+
+/**
+ * The tracks to choose from (the picker's content, apart, to test): near
+ * the hike first, then "Other tracks", newest first in each; one already
+ * posted can't be posted again.
+ */
+@Composable
+internal fun TrackChoices(tracks: List<TrackStore.Track>, near: Set<Long>, chosen: Long?, onChoose: (Long?) -> Unit) {
+    val (close, other) = trackGroups(tracks, near)
+    androidx.compose.foundation.lazy.LazyColumn(Modifier.padding(vertical = 12.dp)) {
+        item { Choice("No track", "A review alone", chosen == null) { onChoose(null) } }
+        if (close.isNotEmpty()) item { GroupLabel("Near this hike") }
+        items(close.size) { i -> TrackChoice(close[i], chosen, onChoose) }
+        if (other.isNotEmpty()) item { GroupLabel(if (close.isEmpty()) "Your tracks" else "Other tracks") }
+        items(other.size) { i -> TrackChoice(other[i], chosen, onChoose) }
+    }
+}
+
+@Composable
+private fun GroupLabel(s: String) = Text(
+    s, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold,
+    modifier = Modifier.padding(start = 20.dp, top = 12.dp, bottom = 4.dp),
+)
+
+@Composable
+private fun TrackChoice(t: TrackStore.Track, chosen: Long?, onChoose: (Long?) -> Unit) {
+    val posted = t.posted != null
+    Row(
+        Modifier.fillMaxWidth().selectable(t.id == chosen, enabled = !posted, role = Role.RadioButton) { onChoose(t.id) }
+            .heightIn(min = 56.dp).padding(horizontal = 8.dp, vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        RadioButton(selected = t.id == chosen, onClick = null, enabled = !posted, modifier = Modifier.padding(horizontal = 8.dp))
+        Column {
+            val dim = if (posted) MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f) else MaterialTheme.colorScheme.onSurface
+            Text(trackLabel(t), style = MaterialTheme.typography.bodyLarge, color = dim)
+            Text(
+                if (posted) "Already posted" else t.stats?.let(::statsLine) ?: "",
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
 }
 
 @Composable

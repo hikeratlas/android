@@ -465,7 +465,7 @@ private fun DetailBody(d: Panel.Detail, model: PanelModel, onScrub: (DoubleArray
         // As the website's sheet: before the trip reports. Only a route the
         // build gave a key: posts are tied to the hike by it.
         val key = r.route_key
-        if (posts != null && key != null) com.hikeratlas.android.ui.PostSection(com.hikeratlas.android.ui.PostHike(key, title), posts)
+        if (posts != null && key != null) com.hikeratlas.android.ui.PostSection(com.hikeratlas.android.ui.PostHike(key, title, r.line), posts)
         d.reports?.let { ReportsSection(it, d.selected.dest) }
         // The way there, the route for a GPS app, and a link to it.
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {

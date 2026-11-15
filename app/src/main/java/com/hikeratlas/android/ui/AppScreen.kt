@@ -110,25 +110,16 @@ fun AppScreen(app: HikerAtlasApp, link: Uri? = null, onLinkHandled: () -> Unit =
         tracks = library.tracks,
         license = { com.hikeratlas.android.atproto.Posts.licenseFor(app.account.xrpc, app.account.did ?: throw SignedOutException()) },
         trackStats = { id -> library.gpxText(id)?.let { com.hikeratlas.android.track.TrackMeasure.ofGpx(it) } },
-        hikesWalked = { id ->
-            com.hikeratlas.android.track.hikesWalked(library.lines(id), app.routes.regions(), app.routes.index(), { app.routes.park(it) })
+        hikesNear = { id ->
+            com.hikeratlas.android.track.hikesNear(library.lines(id), app.routes.regions(), app.routes.index(), { app.routes.park(it) })
         },
-        post = { d, progress ->
-            val me = app.account.did ?: throw SignedOutException()
-            val gpx = d.trackId?.let { library.gpxText(it) ?: throw IllegalStateException("That track is no longer on this phone") }
-            com.hikeratlas.android.atproto.Posts.publish(
-                app.account.xrpc, me,
-                com.hikeratlas.android.atproto.Posts.Post(
-                    text = d.text, hikedAt = com.hikeratlas.android.atproto.Posts.noonOf(d.day), tags = d.tags,
-                    routeKey = d.hike?.key, title = d.title, gpx = gpx,
-                ),
-                progress,
-            )
-        },
+        tracksNear = { line -> library.tracksNear(line) },
+        post = { d, progress -> postDraft(app.account.xrpc, app.account.did ?: throw SignedOutException(), library, d, progress) },
         openProfile = {
             val s = accountState as? AccountState.In
             if (s != null) com.hikeratlas.android.map.openUrl(context, "${com.hikeratlas.android.routes.SITE}/@${android.net.Uri.encode(s.handle ?: s.did)}")
         },
+        verifyPosted = { id -> app.account.did?.let { verifyPosted(app.account.xrpc, it, library, id) } },
     )
     // The licence for new posts, read from the profile record when You opens.
     var license by remember(did) { mutableStateOf<String?>(null) }

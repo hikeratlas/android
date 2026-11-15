@@ -76,6 +76,29 @@ class TrackStoreTest {
         }
     }
 
+    /** Version 4 adds what a track was posted as; the tracks, and their numbers, are kept. */
+    @Test
+    fun upgradingToVersion4KeepsTracksUnposted() {
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        val file = context.getDatabasePath("v3.db").apply { parentFile?.mkdirs(); delete() }
+        android.database.sqlite.SQLiteDatabase.openOrCreateDatabase(file, null).use { db ->
+            db.execSQL("CREATE TABLE tracks (id INTEGER PRIMARY KEY AUTOINCREMENT, started INTEGER NOT NULL, ended INTEGER, name TEXT, paused_ms INTEGER NOT NULL DEFAULT 0, paused_at INTEGER, metres REAL, elapsed_ms INTEGER, moving_ms INTEGER, gain REAL, loss REAL)")
+            db.execSQL("CREATE TABLE points (track INTEGER NOT NULL REFERENCES tracks(id) ON DELETE CASCADE, seg INTEGER NOT NULL, t INTEGER NOT NULL, lat REAL NOT NULL, lon REAL NOT NULL, acc REAL, alt REAL, msl_alt REAL, v_acc REAL, speed REAL)")
+            db.execSQL("INSERT INTO tracks (started, ended, name, metres, elapsed_ms, moving_ms, gain, loss) VALUES (100, 900, 'Kept', 1234.0, 800, 700, 210.0, 190.0)")
+            db.version = 3
+        }
+        TrackStore(context, "v3.db").use { store ->
+            val t = store.saved().single()
+            assertEquals(1234.0, t.stats!!.metres, 0.0)
+            assertNull(t.posted)
+            val p = TrackStore.Posted("at://did:plc:x/com.hikeratlas.temp.track/3abc", "bafy", null, 5)
+            store.setPosted(t.id, p)
+            assertEquals(p, store.track(t.id)!!.posted)
+            store.setPosted(t.id, null)
+            assertNull(store.track(t.id)!!.posted)
+        }
+    }
+
     /** A phone with the first version's database keeps its tracks. */
     @Test
     fun upgradesTheFirstVersionsDatabase() {
