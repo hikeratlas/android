@@ -435,6 +435,11 @@ class Outbox(
     /** The posts held for [did] (it signed in again, or back in), waiting again and tried at once. */
     private suspend fun resume(did: String) {
         val ids = lock.withLock {
+            // Only while that account is signed in now: a sign-in seen late
+            // (the watcher starting, or a value it took before a refresh was
+            // refused) mustn't undo a "needs sign-in" just written, which
+            // always follows the sign-out.
+            if ((account.state.value as? AccountState.In)?.did != did) return
             withContext(Dispatchers.IO) {
                 list().filter { it.did == did && (it.state == State.NEEDS_SIGN_IN || it.state == State.OTHER_ACCOUNT) }.map {
                     write(it.copy(state = State.WAITING, error = null, signInNotified = false))
