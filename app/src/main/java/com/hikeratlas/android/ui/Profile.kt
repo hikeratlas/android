@@ -148,6 +148,8 @@ internal fun postTitle(p: Profiles.Post, found: HikesFound): String {
 /**
  * Your profile, as the website's /@handle: Overview (posts, newest hike
  * first, and faved hikes) and, when [settings] is given, Settings.
+ * [waiting]: posts waiting on the phone to go up, listed above the posts;
+ * [refreshKey] changes when one has, so the posts are read again.
  */
 @Composable
 fun ProfileScreen(
@@ -155,6 +157,8 @@ fun ProfileScreen(
     actions: ProfileActions,
     onBack: () -> Unit,
     settings: (@Composable ColumnScope.() -> Unit)? = null,
+    waiting: WaitingActions? = null,
+    refreshKey: Int = 0,
 ) {
     BackHandler(onBack = onBack)
     var tab by remember(target.did) { mutableIntStateOf(0) }
@@ -179,40 +183,48 @@ fun ProfileScreen(
                 content = settings,
             )
         } else {
-            Overview(target, actions)
+            Overview(target, actions, waiting, refreshKey)
         }
     }
 }
 
 @Composable
-private fun Overview(target: ProfileTarget, actions: ProfileActions) {
+private fun Overview(target: ProfileTarget, actions: ProfileActions, waiting: WaitingActions?, refreshKey: Int) {
     var attempt by remember { mutableIntStateOf(0) }
     var load by remember(target.did) { mutableStateOf<ProfileLoad>(ProfileLoad.Loading) }
-    LaunchedEffect(target.did, attempt) {
-        load = ProfileLoad.Loading
+    LaunchedEffect(target.did, attempt, refreshKey) {
+        // Read again as a waiting post went up: the posts shown stay meanwhile, and if it fails.
+        val shown = load as? ProfileLoad.Ready
+        if (shown == null) load = ProfileLoad.Loading
         load = try {
             ProfileLoad.Ready(actions.load(target))
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            ProfileLoad.Failed(e.message ?: e.toString())
+            shown ?: ProfileLoad.Failed(e.message ?: e.toString())
         }
     }
     when (val l = load) {
-        ProfileLoad.Loading -> Text(
-            "Loading…", color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(20.dp),
-        )
-        is ProfileLoad.Failed -> Column(Modifier.padding(20.dp)) {
-            Text("Couldn't load the profile: ${l.message}", color = MaterialTheme.colorScheme.error)
-            TextButton(onClick = { attempt++ }) { Text("Try again") }
+        is ProfileLoad.Ready -> PostList(l.profile, target.highlight, actions, waiting) { load = ProfileLoad.Ready(it) }
+        // Waiting posts show without the profile: it's often without signal that they're looked at.
+        else -> Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
+            waiting?.let { WaitingPosts(it) }
+            if (l is ProfileLoad.Failed) {
+                Column(Modifier.padding(20.dp)) {
+                    Text("Couldn't load the profile: ${l.message}", color = MaterialTheme.colorScheme.error)
+                    TextButton(onClick = { attempt++ }) { Text("Try again") }
+                }
+            } else {
+                Text("Loading…", color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(20.dp))
+            }
         }
-        is ProfileLoad.Ready -> PostList(l.profile, target.highlight, actions) { load = ProfileLoad.Ready(it) }
     }
 }
 
 @Composable
-private fun PostList(profile: Profiles.Profile, highlight: PostRef?, actions: ProfileActions, onChange: (Profiles.Profile) -> Unit) {
+private fun PostList(
+    profile: Profiles.Profile, highlight: PostRef?, actions: ProfileActions, waiting: WaitingActions?, onChange: (Profiles.Profile) -> Unit,
+) {
     val scope = rememberCoroutineScope()
     var found by remember(profile.did) { mutableStateOf(HikesFound(null, false, actions.canFind)) }
     val keys = remember(profile) {
@@ -238,10 +250,12 @@ private fun PostList(profile: Profiles.Profile, highlight: PostRef?, actions: Pr
     var failed by remember { mutableStateOf<Pair<String, String>?>(null) }
     val list = rememberLazyListState()
     val mine = actions.delete != null
-    // "See post": scrolled to it once it's listed. Items before the posts: the header and the count.
+    // "See post": scrolled to it once it's listed. Items before the posts:
+    // the waiting posts, the header and the count.
     val shown = highlight?.let { h -> profile.posts.indexOfFirst(h::matches).takeIf { it >= 0 } }
-    LaunchedEffect(profile.did, shown) { if (shown != null) list.scrollToItem(2 + shown) }
+    LaunchedEffect(profile.did, shown) { if (shown != null) list.scrollToItem(waitingItemCount(waiting) + 2 + shown) }
     LazyColumn(state = list, modifier = Modifier.fillMaxSize()) {
+        waiting?.let { waitingPostsSection(it) }
         item(key = "posts-header") {
             Text(
                 "Hikes", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold,

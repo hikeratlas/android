@@ -43,7 +43,7 @@ class PostFormTest {
         Units.current = Units.METRIC
     }
 
-    private fun actions(post: suspend (PostDraft, (String) -> Unit) -> Unit = { _, _ -> }, license: String = "CC-BY-4.0") = PostActions(
+    private fun actions(post: suspend (PostDraft, (String) -> Unit) -> PostOutcome = { _, _ -> PostOutcome.Posted }, license: String = "CC-BY-4.0") = PostActions(
         account, listOf(track), license = { license }, trackStats = { if (it == 7L) stats else null },
         hikesNear = { emptyList() }, post = post, openProfile = { _ -> }, today = { LocalDate.of(2026, 7, 4) },
     )
@@ -55,7 +55,7 @@ class PostFormTest {
     @Test
     fun aReviewWithTagsIsPostedForTheHike() {
         var got: PostDraft? = null
-        compose.setContent { PostForm(hike, null, actions(post = { d, _ -> got = d }), onClose = {}) }
+        compose.setContent { PostForm(hike, null, actions(post = { d, _ -> got = d; PostOutcome.Posted }), onClose = {}) }
         compose.onNodeWithText("Post").assertIsNotEnabled()
         compose.onNode(hasSetTextAction()).performTextInput("Great views, some mud.")
         compose.onNodeWithText("Views").performScrollTo().performClick()
@@ -88,10 +88,44 @@ class PostFormTest {
         compose.onNodeWithText("Post").assertIsEnabled()
     }
 
+    /** No signal: kept on the phone, and the form says so (#60). */
+    @Test
+    fun withoutSignalItSaysItWillPostWhenOnline() {
+        var opened = false
+        compose.setContent {
+            PostForm(
+                hike, null,
+                PostActions(
+                    account, listOf(track), license = { "CC0-1.0" }, trackStats = { stats }, hikesNear = { emptyList() },
+                    post = { _, _ -> PostOutcome.Queued(WILL_POST) }, openProfile = { opened = true }, today = { LocalDate.of(2026, 7, 4) },
+                ),
+                onClose = {},
+            )
+        }
+        compose.onNode(hasSetTextAction()).performTextInput("Muddy.")
+        compose.onNodeWithText("Post").performClick()
+        waitFor("Saved on your phone")
+        compose.onNodeWithText(WILL_POST).assertExists()
+        compose.onNodeWithText("See your profile").performClick()
+        assertEquals(true, opened)
+    }
+
+    @Test
+    fun aTrackWaitingToPostCantBeChosenAgain() {
+        val tracks = listOf(t(1, "Waiting one"), t(2, "Free one"))
+        var chosen: Long? = -1
+        compose.setContent { TrackChoices(tracks, emptySet(), null, waiting = setOf(1), onChoose = { chosen = it }) }
+        compose.onNodeWithText("Waiting to post").assertExists()
+        compose.onNode(hasText("Waiting one", substring = true)).performClick()
+        assertEquals(-1L, chosen)
+        compose.onNode(hasText("Free one", substring = true)).performClick()
+        assertEquals(2L, chosen)
+    }
+
     @Test
     fun aTrackFromThePhoneGoesWithItsNumbersAndDay() {
         var got: PostDraft? = null
-        compose.setContent { PostForm(null, 7, actions(post = { d, _ -> got = d }), onClose = {}, trackName = "Morning walk") }
+        compose.setContent { PostForm(null, 7, actions(post = { d, _ -> got = d; PostOutcome.Posted }), onClose = {}, trackName = "Morning walk") }
         // A track alone can be posted; its numbers as the record will have them.
         waitFor("2.2 km")
         compose.onNodeWithText("2.2 km · ↑ 88 m · 1 h 22 min").assertExists()
@@ -223,7 +257,7 @@ class PostFormTest {
                 null, 7,
                 PostActions(
                     account, listOf(track), license = { "CC0-1.0" }, trackStats = { stats }, hikesNear = { emptyList() },
-                    post = { d, _ -> got = d }, openProfile = { _ -> }, today = { LocalDate.of(2026, 7, 4) },
+                    post = { d, _ -> got = d; PostOutcome.Posted }, openProfile = { _ -> }, today = { LocalDate.of(2026, 7, 4) },
                     photos = photoActions(discarded), trackGpx = { gpx },
                 ),
                 onClose = {}, trackName = "Morning walk", photoButtons = picks("gps", "timed", "outside", "bare", "broken"),
@@ -264,7 +298,7 @@ class PostFormTest {
                 hike, null,
                 PostActions(
                     account, listOf(track), license = { "CC0-1.0" }, trackStats = { stats }, hikesNear = { emptyList() },
-                    post = { _, _ -> }, openProfile = { _ -> }, photos = photoActions(mutableListOf()), trackGpx = { gpx },
+                    post = { _, _ -> PostOutcome.Posted }, openProfile = { _ -> }, photos = photoActions(mutableListOf()), trackGpx = { gpx },
                 ),
                 onClose = {}, photoButtons = picks("timed"),
             )
