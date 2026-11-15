@@ -64,9 +64,12 @@ class StorageActions(
 fun YouScreen(
     storage: StorageActions? = null,
     account: AccountActions? = null,
+    /**
+     * Units on this phone, shown signed out. Signed in, units and the
+     * licence are your profile's settings, and live in its Settings tab
+     * (as the website's), so there's one place to change them.
+     */
     units: UnitsActions? = null,
-    /** The licence for new posts: only signed in (it's a profile setting). */
-    license: LicenseActions? = null,
 ) {
     val context = LocalContext.current
     var credits by remember { mutableStateOf(false) }
@@ -77,8 +80,7 @@ fun YouScreen(
     ) {
         Text("You", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 4.dp, top = 8.dp))
         if (account != null) AccountCard(account)
-        if (units != null) UnitsCard(units)
-        if (license != null) LicenseCard(license)
+        if (units != null && !units.signedIn) UnitsCard(units)
         if (storage != null) StorageCard(storage)
         Card("About") {
             Item("hikeratlas.com", external = true) { openUrl(context, SITE) }

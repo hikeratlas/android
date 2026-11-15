@@ -93,12 +93,18 @@ fun AppScreen(app: HikerAtlasApp, link: Uri? = null, onLinkHandled: () -> Unit =
     LaunchedEffect(Unit) { offline.checkUpdates() }
     val accountState by app.account.state.collectAsState()
     val did = (accountState as? AccountState.In)?.did
+    val handle = (accountState as? AccountState.In)?.handle
+    // Your profile, open over the You tab (signing out closes it); and a
+    // posted track from it, on the map.
+    var profileTarget by remember(did) { mutableStateOf<ProfileTarget?>(null) }
+    var viewPosted by remember { mutableStateOf<PostedTrack?>(null) }
     val accountActions = AccountActions(
         state = accountState,
         signIn = { app.account.beginSignIn(it) },
         openPage = { openSignInPage(context, it) },
         signOut = { app.account.signOut() },
         clearError = { app.account.clearError() },
+        openProfile = { did?.let { profileTarget = ProfileTarget(it, handle) } },
     )
     val faveActions = FaveActions(
         accountActions,
@@ -115,9 +121,11 @@ fun AppScreen(app: HikerAtlasApp, link: Uri? = null, onLinkHandled: () -> Unit =
         },
         tracksNear = { line -> library.tracksNear(line) },
         post = { d, progress -> postDraft(app.account.xrpc, app.account.did ?: throw SignedOutException(), library, d, progress) },
-        openProfile = {
-            val s = accountState as? AccountState.In
-            if (s != null) com.hikeratlas.android.map.openUrl(context, "${com.hikeratlas.android.routes.SITE}/@${android.net.Uri.encode(s.handle ?: s.did)}")
+        openProfile = { posted ->
+            seePostTarget(did, handle, posted)?.let {
+                profileTarget = it
+                tab = Tab.You
+            }
         },
         verifyPosted = { id -> app.account.did?.let { verifyPosted(app.account.xrpc, it, library, id) } },
     )
@@ -156,6 +164,34 @@ fun AppScreen(app: HikerAtlasApp, link: Uri? = null, onLinkHandled: () -> Unit =
             faved = s
         }
     }
+    val profileActions = ProfileActions(
+        load = { t ->
+            com.hikeratlas.android.atproto.Profiles.loadDid(app.http, com.hikeratlas.android.atproto.Identity(app.http), t.did, t.handle)
+        },
+        findHikes = { keys ->
+            findKeyedHikes(keys, app.routes.regions(), app.routes.index(), { app.routes.park(it) }, { app.routes.parkOnline(it) })
+        },
+        canFind = RouteKeys.available,
+        gpx = { p, t ->
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                com.hikeratlas.android.atproto.Profiles.gpx(com.hikeratlas.android.atproto.Xrpc.public(app.http, p.pds), p.did, t.gpx)
+            }
+        },
+        delete = { post -> deletePost(app.account.xrpc, app.account.did ?: throw SignedOutException(), library, post) },
+        openHike = { h ->
+            viewTrack = null
+            viewPosted = null
+            openArea = OfflineAreas.Target(com.hikeratlas.android.offline.OfflineStore.HIKE, h.id, h.title)
+            tab = Tab.Map
+        },
+        showTrack = { t ->
+            viewTrack = null
+            viewPosted = t
+            tab = Tab.Map
+        },
+        shareGpx = { title, gpx -> scope.launch { com.hikeratlas.android.track.shareGpx(context, title, gpx) } },
+        openPhoto = { com.hikeratlas.android.map.openUrl(context, it) },
+    )
     val tabs = Tab.entries.filter {
         it != Tab.Saved || library.tracks.isNotEmpty() || offline.areas.isNotEmpty() || did != null || tab == Tab.Saved
     }
@@ -173,6 +209,12 @@ fun AppScreen(app: HikerAtlasApp, link: Uri? = null, onLinkHandled: () -> Unit =
             app, onSheetOpen = { sheetOpen = it }, bottomBar = if (tabsShown) barHeight else 0.dp,
             link = link, onLinkHandled = onLinkHandled,
             viewTrack = viewTrack.takeIf { tab == Tab.Map }, onViewClosed = { viewTrack = null },
+            viewPosted = viewPosted.takeIf { tab == Tab.Map },
+            // Back to the profile it came from.
+            onPostedClosed = {
+                viewPosted = null
+                if (profileTarget != null) tab = Tab.You
+            },
             openArea = openArea.takeIf { tab == Tab.Map }, onAreaOpened = { openArea = null },
             onCrumb = { c ->
                 explore = c.path.joinToString("/")
@@ -186,6 +228,7 @@ fun AppScreen(app: HikerAtlasApp, link: Uri? = null, onLinkHandled: () -> Unit =
                 SavedScreen(
                     library.tracks,
                     onOpen = { id ->
+                        viewPosted = null
                         viewTrack = id
                         tab = Tab.Map
                     },
@@ -244,30 +287,42 @@ fun AppScreen(app: HikerAtlasApp, link: Uri? = null, onLinkHandled: () -> Unit =
             }
         }
         if (tab == Tab.You) {
+            val unitsActions = UnitsActions(
+                current = com.hikeratlas.android.units.Units.current,
+                signedIn = accountState is AccountState.In,
+                save = { app.units.set(it) },
+            )
             Box(Modifier.fillMaxSize().padding(bottom = barHeight)) {
-                YouScreen(
-                    StorageActions(
-                        areaCount = { offline.areas.size },
-                        offlineBytes = { offline.bytes() },
-                        mapCacheBytes = { mapCache.bytes() },
-                        deleteAll = { offline.deleteAll() },
-                        clearMapCache = { mapCache.clear() },
-                    ),
-                    accountActions,
-                    UnitsActions(
-                        current = com.hikeratlas.android.units.Units.current,
-                        signedIn = accountState is AccountState.In,
-                        save = { app.units.set(it) },
-                    ),
-                    did?.let { me ->
-                        LicenseActions(license, licenseError) { l ->
-                            com.hikeratlas.android.atproto.ProfileRecord.saveSettings(
-                                app.account.xrpc, me, mapOf("license" to kotlinx.serialization.json.JsonPrimitive(l)),
+                val target = profileTarget
+                if (target != null && did != null) {
+                    ProfileScreen(
+                        target, profileActions, onBack = { profileTarget = null },
+                        // Units and the licence: the profile's settings, here only (one place, as the website's).
+                        settings = {
+                            UnitsCard(unitsActions)
+                            LicenseCard(
+                                LicenseActions(license, licenseError) { l ->
+                                    com.hikeratlas.android.atproto.ProfileRecord.saveSettings(
+                                        app.account.xrpc, did, mapOf("license" to kotlinx.serialization.json.JsonPrimitive(l)),
+                                    )
+                                    license = l
+                                },
                             )
-                            license = l
-                        }
-                    },
-                )
+                        },
+                    )
+                } else {
+                    YouScreen(
+                        StorageActions(
+                            areaCount = { offline.areas.size },
+                            offlineBytes = { offline.bytes() },
+                            mapCacheBytes = { mapCache.bytes() },
+                            deleteAll = { offline.deleteAll() },
+                            clearMapCache = { mapCache.clear() },
+                        ),
+                        accountActions,
+                        unitsActions,
+                    )
+                }
             }
         }
         AnimatedVisibility(

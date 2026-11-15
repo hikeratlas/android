@@ -67,6 +67,8 @@ class AccountActions(
     val openPage: (String) -> Unit,
     val signOut: suspend () -> Unit,
     val clearError: () -> Unit = {},
+    /** Opens your profile (posts, faves, settings); null, not offered. */
+    val openProfile: (() -> Unit)? = null,
 )
 
 /**
@@ -113,6 +115,8 @@ internal fun AccountCard(account: AccountActions) {
                 }, enabled = !signingOut) { Text(if (signingOut) "Signing out…" else "Sign out") }
             }
         }
+        val open = account.openProfile
+        if (account.state is AccountState.In && open != null) ProfileLink(open)
     }
     if (asking) SignInDialog(account, onClose = { asking = false })
 }

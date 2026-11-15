@@ -72,3 +72,18 @@ fun gpxShareIntent(context: android.content.Context, file: java.io.File, title: 
     send.clipData = android.content.ClipData.newRawUri(title, uri)
     return android.content.Intent.createChooser(send, "Share track")
 }
+
+/**
+ * Shares GPX text (a posted track's) through Android's share sheet, which
+ * also offers saving it to a file: written to the cache's gpx/ first, off
+ * the main thread, as the phone's own tracks are.
+ */
+suspend fun shareGpx(context: android.content.Context, title: String, gpx: String) {
+    val file = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+        val dir = java.io.File(context.cacheDir, "gpx").apply { mkdirs() }
+        // Only the one being shared is kept.
+        dir.listFiles()?.forEach { it.delete() }
+        java.io.File(dir, Gpx.fileName(title)).apply { writeText(gpx) }
+    }
+    context.startActivity(gpxShareIntent(context, file, title))
+}

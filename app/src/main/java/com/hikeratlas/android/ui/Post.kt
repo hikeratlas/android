@@ -106,8 +106,8 @@ class PostActions(
     val tracksNear: suspend (List<List<Double>>) -> Set<Long> = { emptySet() },
     /** Posts it; [progress] hears what's under way. Throws saying what failed. */
     val post: suspend (draft: PostDraft, progress: (String) -> Unit) -> Unit,
-    /** Opens the signed-in account's profile on the website. */
-    val openProfile: () -> Unit,
+    /** Opens your profile in the app; at the post a posted track went up as, when given ("See post"). */
+    val openProfile: (TrackStore.Posted?) -> Unit,
     /** Checks a posted track's post is still there, and clears the mark if it was deleted. */
     val verifyPosted: suspend (Long) -> Unit = {},
     val today: () -> LocalDate = { LocalDate.now() },
@@ -344,7 +344,7 @@ internal fun PostForm(
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                 TextButton(onClick = onClose) { Text("Close") }
                 Spacer(Modifier.width(8.dp))
-                Button(onClick = posts.openProfile) { Text("See your profile") }
+                Button(onClick = { onClose(); posts.openProfile(null) }) { Text("See your profile") }
             }
         }
         return

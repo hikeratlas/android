@@ -66,6 +66,10 @@ class FakeAtproto : AutoCloseable {
     private val tids = java.util.concurrent.atomic.AtomicInteger()
     /** The PDS's getRecord answers with this HTTP status (a 5xx: it's down) instead. */
     @Volatile var getRecordFails: Int? = null
+    /** The PDS's listRecords answers with this HTTP status instead. */
+    @Volatile var listFails: Int? = null
+    /** Blobs getBlob serves, by CID (uploads go here too). */
+    val blobsByCid = java.util.concurrent.ConcurrentHashMap<String, ByteArray>()
 
     val pars = CopyOnWriteArrayList<Map<String, String>>()
     val tokenRequests = CopyOnWriteArrayList<Map<String, String>>()
@@ -168,6 +172,10 @@ class FakeAtproto : AutoCloseable {
             return json("""{"resource":"$pdsOrigin","authorization_servers":["${pdsAuthServer ?: authOrigin}"]}""")
         }
         pdsRequests += r
+        // As a PDS: public records and blobs need no session.
+        if (r.headers["Authorization"] == null && r.headers["DPoP"] == null) {
+            return publicRead(r) ?: json("""{"error":"AuthMissing"}""", 401)
+        }
         val token = r.headers["Authorization"]?.removePrefix("DPoP ")
         val proof = r.headers["DPoP"] ?: return json("""{"error":"AuthMissing"}""", 401)
         val payload = verify(proof, r)
@@ -184,18 +192,8 @@ class FakeAtproto : AutoCloseable {
                 .addHeader("DPoP-Nonce", pdsNonce)
                 .body("""{"error":"InvalidToken","message":"\"exp\" claim timestamp check failed"}""").build()
         }
+        publicRead(r)?.let { return it }
         return when (path) {
-            "/xrpc/com.atproto.repo.describeRepo" -> json("""{"handle":"$handle","did":"$did"}""")
-            "/xrpc/com.atproto.repo.getRecord" -> {
-                val key = "${r.url.queryParameter("collection")}/${r.url.queryParameter("rkey")}"
-                val value = records[key]
-                when {
-                    getRecordFails != null -> json("""{"error":"InternalServerError"}""", getRecordFails!!)
-                    r.url.queryParameter("repo") == did && value != null ->
-                        json("""{"uri":"at://$did/$key","cid":"bafy-$key","value":$value}""")
-                    else -> json("""{"error":"RecordNotFound","message":"Could not locate record"}""", 400)
-                }
-            }
             "/xrpc/com.atproto.repo.createRecord" -> {
                 val body = Json.parseToJsonElement(r.body!!.utf8()).jsonObject
                 val rkey = body["rkey"]?.jsonPrimitive?.content
@@ -229,28 +227,51 @@ class FakeAtproto : AutoCloseable {
                 records.remove("${body["collection"]!!.jsonPrimitive.content}/${body["rkey"]!!.jsonPrimitive.content}")
                 json("{}")
             }
-            "/xrpc/com.atproto.repo.listRecords" -> {
-                // By record key, as a PDS lists them; the cursor is the last key given.
-                val collection = r.url.queryParameter("collection")!!
-                val limit = r.url.queryParameter("limit")?.toInt() ?: 50
-                val after = r.url.queryParameter("cursor")
-                val page = records.keys.filter { it.startsWith("$collection/") }.map { it.removePrefix("$collection/") }
-                    .sorted().filter { after == null || it > after }.take(limit)
-                val list = page.joinToString(",") { k ->
-                    """{"uri":"at://$did/$collection/$k","cid":"bafy-$k","value":${records["$collection/$k"]}}"""
-                }
-                val cursor = if (page.size == limit) ""","cursor":"${page.last()}"""" else ""
-                json("""{"records":[$list]$cursor}""")
-            }
             "/xrpc/com.atproto.repo.uploadBlob" -> {
                 val bytes = r.body!!.toByteArray()
                 blobs += r.headers["Content-Type"] to bytes
+                blobsByCid["bafkrei-${blobs.size}"] = bytes
                 json(
                     """{"blob":${blobAnswer ?: """{"${'$'}type":"blob","ref":{"${'$'}link":"bafkrei-${blobs.size}"},"mimeType":"${r.headers["Content-Type"]}","size":${bytes.size}}"""}}""",
                 )
             }
             else -> json("""{"error":"MethodNotImplemented"}""", 501)
         }
+    }
+
+    /** Reads anyone may make, signed in or not: describeRepo, getRecord, listRecords, getBlob; null for any other. */
+    private fun publicRead(r: RecordedRequest): MockResponse? = when (r.url.encodedPath) {
+        "/xrpc/com.atproto.repo.describeRepo" -> json("""{"handle":"$handle","did":"$did"}""")
+        "/xrpc/com.atproto.repo.getRecord" -> {
+            val key = "${r.url.queryParameter("collection")}/${r.url.queryParameter("rkey")}"
+            val value = records[key]
+            when {
+                getRecordFails != null -> json("""{"error":"InternalServerError"}""", getRecordFails!!)
+                r.url.queryParameter("repo") == did && value != null ->
+                    json("""{"uri":"at://$did/$key","cid":"bafy-$key","value":$value}""")
+                else -> json("""{"error":"RecordNotFound","message":"Could not locate record"}""", 400)
+            }
+        }
+        "/xrpc/com.atproto.repo.listRecords" -> {
+            // By record key, as a PDS lists them; the cursor is the last key given.
+            val collection = r.url.queryParameter("collection")!!
+            val limit = r.url.queryParameter("limit")?.toInt() ?: 50
+            val after = r.url.queryParameter("cursor")
+            val page = records.keys.filter { it.startsWith("$collection/") }.map { it.removePrefix("$collection/") }
+                .sorted().filter { after == null || it > after }.take(limit)
+            val list = page.joinToString(",") { k ->
+                """{"uri":"at://$did/$collection/$k","cid":"bafy-$k","value":${records["$collection/$k"]}}"""
+            }
+            val cursor = if (page.size == limit) ""","cursor":"${page.last()}"""" else ""
+            if (listFails != null) json("""{"error":"InternalServerError"}""", listFails!!)
+            else json("""{"records":[$list]$cursor}""")
+        }
+        "/xrpc/com.atproto.sync.getBlob" -> {
+            val bytes = blobsByCid[r.url.queryParameter("cid")]
+            if (r.url.queryParameter("did") == did && bytes != null) MockResponse.Builder().code(200).body(okio.Buffer().write(bytes)).build()
+            else json("""{"error":"BlobNotFound","message":"Blob not found"}""", 400)
+        }
+        else -> null
     }
 
     /** Answers use_dpop_nonce unless the proof carries the current nonce; else [ok], given the proof's key. */
