@@ -19,6 +19,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListScope
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
@@ -71,12 +73,12 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /**
- * A post to show, from "See post" on a posted track: the one whose track
- * or review is this.
+ * A post to show, from "See post" on a posted track: the profile lands on
+ * its track, in Tracks (every posted track is listed there, with a review
+ * or not).
  */
 data class PostRef(val trackUri: String?, val reviewUri: String?) {
-    fun matches(p: Profiles.Post) =
-        (trackUri != null && p.track?.uri == trackUri) || (reviewUri != null && p.review?.uri == reviewUri)
+    fun matches(t: Profiles.Track) = trackUri != null && t.uri == trackUri
 
     companion object {
         fun of(posted: TrackStore.Posted) = PostRef(posted.trackUri, posted.reviewUri)
@@ -97,8 +99,8 @@ class ProfileActions(
     /** False where keys can't be searched at all (no H3 here): nothing is then said to be gone. */
     val canFind: Boolean,
     val gpx: suspend (Profiles.Profile, Profiles.Track) -> String,
-    /** Deletes one of your own posts; null where the profile isn't yours (no Delete). */
-    val delete: (suspend (Profiles.Post) -> Unit)?,
+    /** Deletes one of your own posts (a review and its track, or a track and its reviews); null where the profile isn't yours (no Delete). */
+    val delete: (suspend (Profiles.Deletion) -> Unit)?,
     val openHike: (KeyedHike) -> Unit,
     val showTrack: (PostedTrack) -> Unit,
     val shareGpx: (title: String, gpx: String) -> Unit,
@@ -133,9 +135,9 @@ internal fun gpxLines(text: String, n: Int = 400): List<List<List<Double>>> {
     return segs.map { s -> s.filterIndexed { i, _ -> i % step == 0 || i == s.size - 1 }.map { listOf(it.lon, it.lat) } }
 }
 
-/** A post's title: its hike's, or why there's none. */
-internal fun postTitle(p: Profiles.Post, found: HikesFound): String {
-    val key = p.routeKey ?: return p.track?.title?.takeIf { it.isNotBlank() } ?: "A hike"
+/** A review's or track's title: its hike's, or why there's none; without a hike, [own] (a track's title). */
+internal fun postTitle(routeKey: String?, own: String?, found: HikesFound): String {
+    val key = routeKey ?: return own?.takeIf { it.isNotBlank() } ?: "A hike"
     found.search?.found?.get(key)?.let { return it.title }
     return when {
         !found.done -> "Finding the hike…"
@@ -146,8 +148,8 @@ internal fun postTitle(p: Profiles.Post, found: HikesFound): String {
 }
 
 /**
- * Your profile, as the website's /@handle: Overview (posts, newest hike
- * first, and faved hikes) and, when [settings] is given, Settings.
+ * Your profile, as the website's /@handle: Overview (reviews, every track,
+ * and faved hikes) and, when [settings] is given, Settings.
  * [waiting]: posts waiting on the phone to go up, listed above the posts;
  * [refreshKey] changes when one has, so the posts are read again.
  */
@@ -221,6 +223,19 @@ private fun Overview(target: ProfileTarget, actions: ProfileActions, waiting: Wa
     }
 }
 
+/** What a Delete asks before deleting: what goes with the post. */
+internal data class Confirming(val uri: String, val isReview: Boolean, val deletion: Profiles.Deletion) {
+    val title get() = if (isReview) "Delete this review?" else "Delete this track?"
+    /** Said only when more goes than the post itself. */
+    val also: String?
+        get() = when {
+            isReview && deletion.tracks.isNotEmpty() -> "Deleting this review also deletes its track."
+            !isReview && deletion.reviews.size == 1 -> "Deleting this track also deletes its review."
+            !isReview && deletion.reviews.size > 1 -> "Deleting this track also deletes its reviews."
+            else -> null
+        }
+}
+
 @Composable
 private fun PostList(
     profile: Profiles.Profile, highlight: PostRef?, actions: ProfileActions, waiting: WaitingActions?, onChange: (Profiles.Profile) -> Unit,
@@ -228,7 +243,8 @@ private fun PostList(
     val scope = rememberCoroutineScope()
     var found by remember(profile.did) { mutableStateOf(HikesFound(null, false, actions.canFind)) }
     val keys = remember(profile) {
-        (profile.faves.map { it.key } + profile.posts.mapNotNull { it.routeKey }).filter(Profiles::isRouteKey).distinct()
+        (profile.faves.map { it.key } + profile.reviews.mapNotNull { it.routeKey } + profile.tracks.mapNotNull { it.routeKey })
+            .filter(Profiles::isRouteKey).distinct()
     }
     LaunchedEffect(keys) {
         if (keys.isEmpty() || !actions.canFind) {
@@ -243,45 +259,62 @@ private fun PostList(
             HikesFound(null, true, false)
         }
     }
-    // Thumbnails' lines, by track URI, read once.
+    // Thumbnails' lines, by track URI, read once: a review's track and the same track in Tracks share one.
     val lines = remember(profile.did) { mutableStateMapOf<String, List<List<List<Double>>>>() }
-    var confirming by remember { mutableStateOf<Profiles.Post?>(null) }
-    var deleting by remember { mutableStateOf<String?>(null) }
+    var confirming by remember { mutableStateOf<Confirming?>(null) }
+    // The URIs of the records being deleted, so the review and its track both say so.
+    var deleting by remember { mutableStateOf<Set<String>>(emptySet()) }
     var failed by remember { mutableStateOf<Pair<String, String>?>(null) }
     val list = rememberLazyListState()
     val mine = actions.delete != null
-    // "See post": scrolled to it once it's listed. Items before the posts:
-    // the waiting posts, the header and the count.
-    val shown = highlight?.let { h -> profile.posts.indexOfFirst(h::matches).takeIf { it >= 0 } }
-    LaunchedEffect(profile.did, shown) { if (shown != null) list.scrollToItem(waitingItemCount(waiting) + 2 + shown) }
+    val empty = profile.reviews.isEmpty() && profile.tracks.isEmpty()
+    // "See post": scrolled to its track once it's listed. Items before the
+    // tracks: the waiting posts, Reviews' header and count, the reviews, and
+    // Tracks' header and count.
+    val shown = highlight?.let { h -> profile.tracks.indexOfFirst(h::matches).takeIf { it >= 0 } }
+    LaunchedEffect(profile.did, shown) {
+        if (shown != null) list.scrollToItem(waitingItemCount(waiting) + 2 + profile.reviews.size + 2 + shown)
+    }
     LazyColumn(state = list, modifier = Modifier.fillMaxSize()) {
         waiting?.let { waitingPostsSection(it) }
-        item(key = "posts-header") {
-            Text(
-                "Hikes", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold,
-                modifier = Modifier.padding(start = 20.dp, top = 16.dp, bottom = 4.dp),
+        if (empty) {
+            sectionHeader("posts", "Hikes")
+            sectionNote(
+                "posts",
+                if (mine) "Nothing posted yet. Open a hike and choose Post to add a review or your track." else "Nothing posted yet.",
             )
-        }
-        item(key = "posts-count") {
-            val n = profile.posts.size
-            Text(
-                when {
-                    n > 0 -> "$n ${if (n == 1) "post" else "posts"}"
-                    mine -> "Nothing posted yet. Open a hike and choose Post to add a review or your track."
-                    else -> "Nothing posted yet."
-                },
-                style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(start = 20.dp, end = 20.dp, bottom = 8.dp),
-            )
-        }
-        itemsIndexed(profile.posts, key = { _, p -> "post-${p.uri}" }) { i, p ->
-            PostCard(
-                profile, p, found, actions, lines,
-                highlighted = i == shown,
-                deleting = deleting == p.uri,
-                error = failed?.takeIf { it.first == p.uri }?.second,
-                onDelete = { confirming = p },
-            )
+        } else {
+            sectionHeader("reviews", "Reviews")
+            sectionNote("reviews", count(profile.reviews.size, "review", "No reviews yet."))
+            items(profile.reviews, key = { "review-${it.uri}" }) { r ->
+                PostCard(
+                    profile, r.routeKey, null, r.hikedAt ?: r.createdAt, r.license, found, actions,
+                    highlighted = false,
+                    deleting = r.uri in deleting,
+                    error = failed?.takeIf { it.first == r.uri }?.second,
+                    onDelete = { confirming = Confirming(r.uri, true, profile.deletion(r)) },
+                ) {
+                    r.tags.takeIf { it.isNotEmpty() }?.let { Tags(it) }
+                    Text(r.text, style = MaterialTheme.typography.bodyMedium)
+                    if (r.photos.isNotEmpty()) PhotoGrid(profile, r.photos, actions)
+                    // Its track drawn here too: the profile is a full page, as the website's.
+                    profile.trackOf(r)?.let { TrackBox(profile, it, actions, lines) }
+                }
+            }
+            sectionHeader("tracks", "Tracks")
+            sectionNote("tracks", count(profile.tracks.size, "track", "No tracks yet."))
+            itemsIndexed(profile.tracks, key = { _, t -> "track-${t.uri}" }) { i, t ->
+                PostCard(
+                    profile, t.routeKey, t.title, t.startedAt ?: t.createdAt, t.license, found, actions,
+                    highlighted = i == shown,
+                    deleting = t.uri in deleting,
+                    error = failed?.takeIf { it.first == t.uri }?.second,
+                    onDelete = { confirming = Confirming(t.uri, false, profile.deletion(t)) },
+                ) {
+                    if (t.photos.isNotEmpty()) PhotoGrid(profile, t.photos, actions)
+                    TrackBox(profile, t, actions, lines)
+                }
+            }
         }
         favedHikesSection(
             FavedState.Ready(
@@ -291,31 +324,28 @@ private fun PostList(
         )
         item(key = "end") { Box(Modifier.padding(bottom = 24.dp)) }
     }
-    confirming?.let { p ->
-        val what = when {
-            p.review != null && p.track != null -> "this review and its track"
-            p.review != null -> "this review"
-            else -> "this track"
-        }
+    confirming?.let { c ->
         AlertDialog(
             onDismissRequest = { confirming = null },
-            title = { Text("Delete $what?") },
+            title = { Text(c.title) },
+            text = c.also?.let { { Text(it) } },
             confirmButton = {
                 TextButton(onClick = {
                     confirming = null
                     val del = actions.delete ?: return@TextButton
-                    deleting = p.uri
+                    val uris = (c.deletion.reviews.map { it.uri } + c.deletion.tracks.map { it.uri }).toSet()
+                    deleting = uris
                     failed = null
                     scope.launch {
                         try {
-                            del(p)
-                            onChange(profile.copy(posts = profile.posts.filter { it.uri != p.uri }))
+                            del(c.deletion)
+                            onChange(profile.without(c.deletion))
                         } catch (e: CancellationException) {
                             throw e
                         } catch (e: Exception) {
-                            failed = p.uri to "Deleting didn't work: ${e.message ?: e}"
+                            failed = c.uri to "Deleting didn't work: ${e.message ?: e}"
                         } finally {
-                            deleting = null
+                            deleting = emptySet()
                         }
                     }
                 }) { Text("Delete") }
@@ -325,21 +355,53 @@ private fun PostList(
     }
 }
 
+private fun count(n: Int, one: String, none: String) = if (n == 0) none else "$n ${if (n == 1) one else one + "s"}"
+
+private fun LazyListScope.sectionHeader(key: String, title: String) = item(key = "$key-header") {
+    Text(
+        title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold,
+        modifier = Modifier.padding(start = 20.dp, top = 16.dp, bottom = 4.dp),
+    )
+}
+
+private fun LazyListScope.sectionNote(key: String, text: String) = item(key = "$key-count") {
+    Text(
+        text, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(start = 20.dp, end = 20.dp, bottom = 8.dp),
+    )
+}
+
 @OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun Tags(tags: List<String>) {
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        for (g in tags) {
+            Text(
+                TAG_LABEL[g] ?: g, style = MaterialTheme.typography.labelMedium, color = Color(0xFF14532D),
+                modifier = Modifier.background(Color(0xFFF0FDF4), RoundedCornerShape(50)).padding(horizontal = 10.dp, vertical = 3.dp),
+            )
+        }
+    }
+}
+
+/** A review or a track: its hike and day, [body], its licence, and Delete. */
 @Composable
 private fun PostCard(
     profile: Profiles.Profile,
-    p: Profiles.Post,
+    routeKey: String?,
+    ownTitle: String?,
+    at: String,
+    license: String?,
     found: HikesFound,
     actions: ProfileActions,
-    lines: MutableMap<String, List<List<List<Double>>>>,
     highlighted: Boolean,
     deleting: Boolean,
     error: String?,
     onDelete: () -> Unit,
+    body: @Composable ColumnScope.() -> Unit,
 ) {
     val muted = MaterialTheme.colorScheme.onSurfaceVariant
-    val hike = p.routeKey?.let { found.search?.found?.get(it) }
+    val hike = routeKey?.let { found.search?.found?.get(it) }
     val shape = RoundedCornerShape(12.dp)
     Column(
         Modifier.padding(horizontal = 16.dp, vertical = 6.dp).fillMaxWidth()
@@ -351,31 +413,17 @@ private fun PostCard(
     ) {
         Column {
             Text(
-                postTitle(p, found), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold,
-                color = if (hike != null || p.routeKey == null) MaterialTheme.colorScheme.onSurface else muted,
+                postTitle(routeKey, ownTitle, found), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold,
+                color = if (hike != null || routeKey == null) MaterialTheme.colorScheme.onSurface else muted,
                 modifier = if (hike != null) Modifier.clickable { actions.openHike(hike) } else Modifier,
             )
-            val sub = listOfNotNull(hike?.parkName?.takeIf { it.isNotEmpty() }, faveDay(p.at).takeIf { it.isNotEmpty() }).joinToString(" · ")
+            val sub = listOfNotNull(hike?.parkName?.takeIf { it.isNotEmpty() }, faveDay(at).takeIf { it.isNotEmpty() }).joinToString(" · ")
             if (sub.isNotEmpty()) Text(sub, style = MaterialTheme.typography.bodySmall, color = muted)
         }
-        p.review?.tags?.takeIf { it.isNotEmpty() }?.let { tags ->
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                for (g in tags) {
-                    Text(
-                        TAG_LABEL[g] ?: g, style = MaterialTheme.typography.labelMedium, color = Color(0xFF14532D),
-                        modifier = Modifier.background(Color(0xFFF0FDF4), RoundedCornerShape(50)).padding(horizontal = 10.dp, vertical = 3.dp),
-                    )
-                }
-            }
-        }
-        p.review?.let { Text(it.text, style = MaterialTheme.typography.bodyMedium) }
-        val photos = p.photos
-        if (photos.isNotEmpty()) PhotoGrid(profile, photos, actions)
-        p.track?.let { TrackBox(profile, it, actions, lines) }
+        body()
         Row(verticalAlignment = Alignment.CenterVertically) {
-            val lic = p.license
             Text(
-                "Shared under ${Posts.LICENSE_LABEL[lic ?: "hikeratlas-only"] ?: lic}${if (lic == null) " (no licence given)" else ""}",
+                "Shared under ${Posts.LICENSE_LABEL[license ?: "hikeratlas-only"] ?: license}${if (license == null) " (no licence given)" else ""}",
                 style = MaterialTheme.typography.bodySmall, color = muted, modifier = Modifier.weight(1f),
             )
             if (actions.delete != null) {

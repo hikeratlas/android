@@ -64,7 +64,7 @@ class WaitingPostsTest {
                     ProfileTarget(did, "alice.test"),
                     actions {
                         loads++
-                        Profiles.Profile(did, "alice.test", "https://pds.example", emptyList(), emptyList())
+                        Profiles.Profile(did, "alice.test", "https://pds.example", emptyList(), emptyList(), emptyList())
                     },
                     onBack = {},
                     waiting = WaitingActions(entries, active = "1", retry = { retried += it }, discard = { discarded += it; entries = entries.filter { e -> e.id != it } }),

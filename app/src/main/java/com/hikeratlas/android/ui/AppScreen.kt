@@ -211,7 +211,7 @@ fun AppScreen(app: HikerAtlasApp, link: Uri? = null, onLinkHandled: () -> Unit =
                 com.hikeratlas.android.atproto.Profiles.gpx(com.hikeratlas.android.atproto.Xrpc.public(app.http, p.pds), p.did, t.gpx)
             }
         },
-        delete = { post -> deletePost(app.account.xrpc, app.account.did ?: throw SignedOutException(), library, post) },
+        delete = { d -> deletePost(app.account.xrpc, app.account.did ?: throw SignedOutException(), library, d) },
         openHike = { h ->
             viewTrack = null
             viewPosted = null
