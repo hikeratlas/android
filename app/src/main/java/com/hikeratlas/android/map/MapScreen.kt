@@ -130,6 +130,8 @@ fun MapScreen(
     faves: com.hikeratlas.android.ui.FaveActions? = null,
     /** Posting reviews and tracks, from hikes' sheets and recorded tracks: none, not offered. */
     posts: com.hikeratlas.android.ui.PostActions? = null,
+    /** Other hikers' posts on hikes' sheets, from the indexer: none, not shown. */
+    hikers: com.hikeratlas.android.ui.HikerActions? = null,
 ) {
     val context = LocalContext.current
     val density = LocalDensity.current.density
@@ -648,7 +650,7 @@ fun MapScreen(
                         faves = faves,
                     )
                 },
-                body = { PanelBody(model, posts) { p -> controller?.showHover(p) } },
+                body = { PanelBody(model, posts, hikers) { p -> controller?.showHover(p) } },
             )
         }
     }

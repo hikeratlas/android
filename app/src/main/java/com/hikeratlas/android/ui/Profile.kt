@@ -296,7 +296,7 @@ private fun PostList(
                 ) {
                     r.tags.takeIf { it.isNotEmpty() }?.let { Tags(it) }
                     Text(r.text, style = MaterialTheme.typography.bodyMedium)
-                    if (r.photos.isNotEmpty()) PhotoGrid(profile, r.photos, actions)
+                    if (r.photos.isNotEmpty()) PhotoGrid(profile.pds, profile.did, r.photos, actions.openPhoto)
                     // Its track drawn here too: the profile is a full page, as the website's.
                     profile.trackOf(r)?.let { TrackBox(profile, it, actions, lines) }
                 }
@@ -311,7 +311,7 @@ private fun PostList(
                     error = failed?.takeIf { it.first == t.uri }?.second,
                     onDelete = { confirming = Confirming(t.uri, false, profile.deletion(t)) },
                 ) {
-                    if (t.photos.isNotEmpty()) PhotoGrid(profile, t.photos, actions)
+                    if (t.photos.isNotEmpty()) PhotoGrid(profile.pds, profile.did, t.photos, actions.openPhoto)
                     TrackBox(profile, t, actions, lines)
                 }
             }
@@ -371,9 +371,10 @@ private fun LazyListScope.sectionNote(key: String, text: String) = item(key = "$
     )
 }
 
+/** A review's tags, as the website's green pills. */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun Tags(tags: List<String>) {
+internal fun Tags(tags: List<String>) {
     FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         for (g in tags) {
             Text(
@@ -438,16 +439,17 @@ private fun PostCard(
 
 private val TAG_LABEL = Posts.TAGS.toMap()
 
+/** A post's photos, three to a row, from [did]'s PDS; tapped, at full size. */
 @Composable
-private fun PhotoGrid(profile: Profiles.Profile, photos: List<Profiles.Photo>, actions: ProfileActions) {
+internal fun PhotoGrid(pds: String, did: String, photos: List<Profiles.Photo>, openPhoto: (String) -> Unit) {
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         for (row in photos.chunked(3)) {
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 for (ph in row) {
-                    val url = Profiles.blobUrl(profile.pds, profile.did, ph.image.cid)
+                    val url = Profiles.blobUrl(pds, did, ph.image.cid)
                     Box(
                         Modifier.weight(1f).aspectRatio(1f).background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(8.dp))
-                            .clickable { actions.openPhoto(url) }
+                            .clickable { openPhoto(url) }
                             .semantics { contentDescription = ph.alt?.takeIf { it.isNotBlank() } ?: "Photo" },
                     ) {
                         RemoteThumb(url, Modifier.fillMaxSize())
@@ -459,16 +461,29 @@ private fun PhotoGrid(profile: Profiles.Profile, photos: List<Profiles.Photo>, a
     }
 }
 
-/** A track's line, its numbers, and its GPX: on the map, or saved or shared. */
 @Composable
-private fun TrackBox(profile: Profiles.Profile, t: Profiles.Track, actions: ProfileActions, lines: MutableMap<String, List<List<List<Double>>>>) {
+private fun TrackBox(profile: Profiles.Profile, t: Profiles.Track, actions: ProfileActions, lines: MutableMap<String, List<List<List<Double>>>>) =
+    TrackBox(t, { actions.gpx(profile, t) }, actions.showTrack, actions.shareGpx, lines)
+
+/**
+ * A track's line, its numbers, and its GPX: on the map, or saved or shared.
+ * [gpx] reads it from its author's PDS; [lines] keeps thumbnails by URI.
+ */
+@Composable
+internal fun TrackBox(
+    t: Profiles.Track,
+    gpx: suspend () -> String,
+    showTrack: (PostedTrack) -> Unit,
+    shareGpx: (title: String, gpx: String) -> Unit,
+    lines: MutableMap<String, List<List<List<Double>>>>,
+) {
     val scope = rememberCoroutineScope()
     var busy by remember { mutableStateOf<String?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(t.uri) {
         if (t.uri in lines) return@LaunchedEffect
         try {
-            val text = actions.gpx(profile, t)
+            val text = gpx()
             lines[t.uri] = withContext(Dispatchers.Default) { gpxLines(text) }
         } catch (e: CancellationException) {
             throw e
@@ -483,7 +498,7 @@ private fun TrackBox(profile: Profiles.Profile, t: Profiles.Track, actions: Prof
         error = null
         scope.launch {
             try {
-                f(actions.gpx(profile, t))
+                f(gpx())
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -505,10 +520,10 @@ private fun TrackBox(profile: Profiles.Profile, t: Profiles.Track, actions: Prof
                 TextButton(onClick = {
                     withGpx("map") { gpx ->
                         val segs = TrackMeasure.parse(gpx).map { s -> s.map { listOf(it.lon, it.lat) } }
-                        actions.showTrack(PostedTrack(title, facts, segs, gpx))
+                        showTrack(PostedTrack(title, facts, segs, gpx))
                     }
                 }, enabled = busy == null) { Text(if (busy == "map") "Loading…" else "Show on map") }
-                TextButton(onClick = { withGpx("share") { actions.shareGpx(title, it) } }, enabled = busy == null) {
+                TextButton(onClick = { withGpx("share") { shareGpx(title, it) } }, enabled = busy == null) {
                     Text(if (busy == "share") "Loading…" else "Share GPX")
                 }
             }

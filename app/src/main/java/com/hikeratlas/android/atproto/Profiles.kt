@@ -199,8 +199,10 @@ object Profiles {
     suspend fun delete(xrpc: Xrpc, did: String, d: Deletion, onDeleted: suspend (String?, String?) -> Unit = { _, _ -> }) {
         val trackUris = d.tracks.map { it.uri } + d.unloadedTracks
         (d.reviews.map { it.uri } + trackUris).forEach { rkeyOf(did, it) }
-        for (r in d.reviews) { deleteRecord(xrpc, did, r.uri); onDeleted(r.uri, null) }
-        for (t in trackUris) { deleteRecord(xrpc, did, t); onDeleted(null, t) }
+        for (r in d.reviews) { deleteRecord(xrpc, did, r.uri, r.routeKey); onDeleted(r.uri, null) }
+        for (t in d.tracks) { deleteRecord(xrpc, did, t.uri, t.routeKey); onDeleted(null, t.uri) }
+        // Not loaded, so its route isn't known: the review's, which it was posted with.
+        for (t in d.unloadedTracks) { deleteRecord(xrpc, did, t, d.reviews.firstOrNull()?.routeKey); onDeleted(null, t) }
     }
 
     /** [uri]'s collection and rkey, if it's [did]'s record. */
@@ -210,13 +212,31 @@ object Profiles {
         return parts[1] to parts[2]
     }
 
-    private suspend fun deleteRecord(xrpc: Xrpc, did: String, uri: String) {
+    private suspend fun deleteRecord(xrpc: Xrpc, did: String, uri: String, routeKey: String?) {
         val (collection, rkey) = rkeyOf(did, uri)
         xrpc.procedure(
             "com.atproto.repo.deleteRecord",
             buildJsonObject { put("repo", did); put("collection", collection); put("rkey", rkey) },
         )
-        Indexer.notify(uri)
+        Indexer.notify(uri, routeKey)
+    }
+
+    /**
+     * The track record at [uri], read from [xrpc] (its author's PDS): a
+     * review's track that isn't among those loaded. Null if it isn't a track
+     * URI, or it's gone, unreadable or malformed.
+     */
+    suspend fun getTrack(xrpc: Xrpc, uri: String): Track? {
+        val (repo, collection, rkey) = IndexerClient.parseAtUri(uri) ?: return null
+        if (collection != Posts.TRACK) return null
+        return try {
+            val r = xrpc.query("com.atproto.repo.getRecord", mapOf("repo" to repo, "collection" to collection, "rkey" to rkey))
+            parseTrack(r)?.takeIf { it.uri == uri }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            null
+        }
     }
 
     /** A blob's public URL on its PDS (com.atproto.sync.getBlob), as the website's blobUrl: for photos. */

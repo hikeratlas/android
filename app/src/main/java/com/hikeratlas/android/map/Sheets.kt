@@ -292,6 +292,8 @@ fun PanelBody(
     model: PanelModel,
     /** Posting reviews and tracks, from a hike's sheet; none where it's not offered. */
     posts: com.hikeratlas.android.ui.PostActions? = null,
+    /** Other hikers' posts, from the indexer, on a hike's sheet; none where it's not offered. */
+    hikers: com.hikeratlas.android.ui.HikerActions? = null,
     onScrub: (DoubleArray?) -> Unit,
 ) {
     when (val p = model.panel) {
@@ -308,7 +310,7 @@ fun PanelBody(
                 for (item in shown) RouteRow(item) { model.openRoute(item.park, item.id, hint = HikeHint(item.title, item.meta)) }
             }
         }
-        is Panel.Detail -> DetailBody(p, model, onScrub, posts)
+        is Panel.Detail -> DetailBody(p, model, onScrub, posts, hikers)
         is Panel.Trail -> TrailBody(p, model, onScrub)
         else -> {}
     }
@@ -371,16 +373,24 @@ private fun RouteRow(item: RouteItem, onClick: () -> Unit) {
 }
 
 @Composable
-private fun DetailBody(d: Panel.Detail, model: PanelModel, onScrub: (DoubleArray?) -> Unit, posts: com.hikeratlas.android.ui.PostActions?) {
+private fun DetailBody(
+    d: Panel.Detail, model: PanelModel, onScrub: (DoubleArray?) -> Unit,
+    posts: com.hikeratlas.android.ui.PostActions?, hikerActions: com.hikeratlas.android.ui.HikerActions?,
+) {
     val context = LocalContext.current
     val r = d.selected.route
     val title = d.selected.title
+    // Only a route the build gave a key: posts are tied to the hike by it.
+    val key = r.route_key
+    val hikers = if (hikerActions != null && key != null) com.hikeratlas.android.ui.rememberRouteHikers(key, hikerActions) else null
     Column(Modifier.padding(horizontal = 20.dp).padding(top = 4.dp, bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
         StatTiles(r, d.selected.kind)
         val sac = r.max_sac ?: 0
         if (sac > 0) {
             Text(SAC_WORDS[sac] ?: "SAC T$sac", style = MaterialTheme.typography.bodySmall)
         }
+        // Near the top, as the website's: what other hikers have posted.
+        hikers?.let { com.hikeratlas.android.ui.RouteCounts(it) }
         if (r.scramble) {
             Text(
                 "Includes scrambling (SAC T4, alpine hiking): expect to use your hands on rock, exposed sections, and possibly snow. Some sections may need route-finding.",
@@ -462,10 +472,9 @@ private fun DetailBody(d: Panel.Detail, model: PanelModel, onScrub: (DoubleArray
                 LinkRow("The walk in", null) { model.openRoute(park, "$park/base/$i") }
             }
         }
-        // As the website's sheet: before the trip reports. Only a route the
-        // build gave a key: posts are tied to the hike by it.
-        val key = r.route_key
+        // As the website's sheet: before the trip reports.
         if (posts != null && key != null) com.hikeratlas.android.ui.PostSection(com.hikeratlas.android.ui.PostHike(key, title, r.line), posts)
+        hikers?.let { h -> com.hikeratlas.android.ui.FromHikers(h) { t -> hikerActions?.showTrack?.invoke(t, d.selected.id, title) } }
         d.reports?.let { ReportsSection(it, d.selected.dest) }
         // The way there, the route for a GPS app, and a link to it.
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
