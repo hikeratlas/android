@@ -189,4 +189,102 @@ class PostFormTest {
         assertEquals("hikeratlas-only", saved)
         compose.onNodeWithText("Nothing beyond Hiker Atlas showing them").assertIsSelected()
     }
+
+    private val gpx = javaClass.getResource("/photos/locate.gpx")!!.readText()
+
+    /** A stand-in for the system's pickers: a button giving these photos. */
+    private fun picks(vararg names: String): @androidx.compose.runtime.Composable (Int, Boolean, (List<PhotoInput>) -> Unit) -> Unit =
+        { room, enabled, onPicked ->
+            androidx.compose.material3.Button(onClick = { onPicked(names.take(room).map { PhotoInput(android.net.Uri.parse("test:$it")) }) }, enabled = enabled) {
+                androidx.compose.material3.Text("Pick test photos")
+            }
+        }
+
+    private fun photoActions(discarded: MutableList<String>) = PhotoActions(
+        prepare = { input ->
+            when (val n = input.uri.schemeSpecificPart) {
+                "gps" -> Posts.Photo(n, takenAt = "2026-07-02T15:02:30.000Z", lat = 47.0, lon = -121.0)
+                // In the track's first stretch; long before it.
+                "timed" -> Posts.Photo(n, takenAt = "2026-07-02T15:02:30.000Z")
+                "outside" -> Posts.Photo(n, takenAt = "2026-06-01T12:00:00.000Z")
+                "bare" -> Posts.Photo(n)
+                else -> throw IOException("Not an image Android can read")
+            }
+        },
+        discard = { discarded += it.file },
+    )
+
+    @Test
+    fun eachPhotoSaysWhereItsLocationComesFrom() {
+        var got: PostDraft? = null
+        val discarded = mutableListOf<String>()
+        compose.setContent {
+            PostForm(
+                null, 7,
+                PostActions(
+                    account, listOf(track), license = { "CC0-1.0" }, trackStats = { stats }, hikesNear = { emptyList() },
+                    post = { d, _ -> got = d }, openProfile = { _ -> }, today = { LocalDate.of(2026, 7, 4) },
+                    photos = photoActions(discarded), trackGpx = { gpx },
+                ),
+                onClose = {}, trackName = "Morning walk", photoButtons = picks("gps", "timed", "outside", "bare", "broken"),
+            )
+        }
+        waitFor("2.2 km")
+        compose.onNodeWithText("Pick test photos").performScrollTo().performClick()
+        waitFor("Can't read this photo")
+        compose.onNodeWithText("Location from the photo").assertExists()
+        compose.onNodeWithText("Placed on your track by its time").assertExists()
+        compose.onNodeWithText("No location (not taken during your track)").assertExists()
+        compose.onNodeWithText("No location").assertExists()
+        // Track alone: they go on it.
+        compose.onNodeWithText("They go on your track.").assertExists()
+        // One that can't be read holds the post, until it's removed.
+        compose.onNodeWithText("Post").assertIsNotEnabled()
+        compose.onNode(androidx.compose.ui.test.hasContentDescription("Remove photo 5")).performScrollTo().performClick()
+        compose.onNodeWithText("Can't read this photo").assertDoesNotExist()
+        compose.onNode(androidx.compose.ui.test.hasContentDescription("Remove photo 4")).performScrollTo().performClick()
+        assertEquals(listOf("bare"), discarded)
+        compose.onNode(androidx.compose.ui.test.hasContentDescription("Description of photo 1")).performScrollTo().performTextInput("  The lake  ")
+        compose.onNodeWithText("Post").assertIsEnabled().performClick()
+        waitFor("Posted")
+        assertEquals(
+            listOf(
+                Posts.Photo("gps", alt = "The lake", takenAt = "2026-07-02T15:02:30.000Z", lat = 47.0, lon = -121.0),
+                Posts.Photo("timed", takenAt = "2026-07-02T15:02:30.000Z"),
+                Posts.Photo("outside", takenAt = "2026-06-01T12:00:00.000Z"),
+            ),
+            got!!.photos,
+        )
+    }
+
+    @Test
+    fun withoutATrackAPhotoWithATimeAsksForOne() {
+        compose.setContent {
+            PostForm(
+                hike, null,
+                PostActions(
+                    account, listOf(track), license = { "CC0-1.0" }, trackStats = { stats }, hikesNear = { emptyList() },
+                    post = { _, _ -> }, openProfile = { _ -> }, photos = photoActions(mutableListOf()), trackGpx = { gpx },
+                ),
+                onClose = {}, photoButtons = picks("timed"),
+            )
+        }
+        compose.onNodeWithText("Pick test photos").performScrollTo().performClick()
+        waitFor("No location (add your track to place it)")
+        compose.onNodeWithText("Photos go with a review or a track: write a few words, or choose your track.").assertExists()
+        compose.onNodeWithText("Post").assertIsNotEnabled()
+        // The review's field comes first; the photo's description after.
+        compose.onAllNodes(hasSetTextAction())[0].performTextInput("Lovely.")
+        compose.onNodeWithText("They go on your review.").assertExists()
+    }
+
+    @Test
+    fun whereTextAsTheWebsites() {
+        assertEquals("Reading…", whereText(PhotoItem(1), gpx))
+        assertEquals("Can't read this photo", whereText(PhotoItem(1, failed = "x"), gpx))
+        assertEquals("No location", whereText(PhotoItem(1, Posts.Photo("f")), gpx))
+        assertEquals("Placed on your track by its time", whereText(PhotoItem(1, Posts.Photo("f", takenAt = "2026-07-02T16:05:00.000Z")), gpx))
+        // In the track's 40-minute stop: not placed.
+        assertEquals("No location (not taken during your track)", whereText(PhotoItem(1, Posts.Photo("f", takenAt = "2026-07-02T15:40:00.000Z")), gpx))
+    }
 }

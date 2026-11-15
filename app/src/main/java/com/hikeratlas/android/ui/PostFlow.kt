@@ -1,5 +1,6 @@
 package com.hikeratlas.android.ui
 
+import com.hikeratlas.android.atproto.Photos
 import com.hikeratlas.android.atproto.Posts
 import com.hikeratlas.android.atproto.Xrpc
 import com.hikeratlas.android.track.TrackLibrary
@@ -19,12 +20,19 @@ internal suspend fun postDraft(
     val already = id?.let { library.posted(it) }
     if (already != null && d.text.isBlank()) return
     val gpx = if (id != null && already == null) library.gpxText(id) ?: throw IllegalStateException("That track is no longer on this phone") else null
+    // Photos without GPS placed by their time on the track, as the website
+    // does as it posts; the track's GPX is read for that even when it went
+    // up already (a review tried again).
+    val photos = if (d.photos.isEmpty()) emptyList() else {
+        val track = gpx ?: id?.let { library.gpxText(it) }
+        d.photos.map { Photos.placed(it, track) }
+    }
     var mark = already
     val published = Posts.publish(
         xrpc, did,
         Posts.Post(
             text = d.text, hikedAt = Posts.noonOf(d.day), tags = d.tags, routeKey = d.hike?.key, title = d.title, gpx = gpx,
-            track = already?.let { Posts.StrongRef(it.trackUri, it.trackCid) },
+            track = already?.let { Posts.StrongRef(it.trackUri, it.trackCid) }, photos = photos,
         ),
         progress,
         onTrack = { ref ->

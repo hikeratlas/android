@@ -1,5 +1,6 @@
 package com.hikeratlas.android.ui
 
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
@@ -21,6 +22,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Error
 import androidx.compose.material3.Button
 import androidx.compose.material3.DatePicker
@@ -29,6 +31,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -40,8 +43,10 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -49,6 +54,11 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -58,6 +68,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.hikeratlas.android.atproto.AccountState
+import com.hikeratlas.android.atproto.Photos
 import com.hikeratlas.android.atproto.Posts
 import com.hikeratlas.android.atproto.SignedOutException
 import com.hikeratlas.android.track.GpxStats
@@ -88,7 +99,39 @@ data class PostDraft(
     val tags: List<String>,
     val day: LocalDate,
     val trackId: Long?,
+    /** Prepared, with their descriptions; placed on the track as they're posted. */
+    val photos: List<Posts.Photo> = emptyList(),
 )
+
+/** Photos for the form: prepared into the app's storage as they're added, dropped when removed or done with. */
+class PhotoActions(
+    /** Reads a picked or taken photo, prepares it (within 2 MB, EXIF kept) and keeps it on the phone. Throws if it can't. */
+    val prepare: suspend (PhotoInput) -> Posts.Photo,
+    val discard: (Posts.Photo) -> Unit,
+    /** A small upright copy, for the form; null if there's none. */
+    val thumbnail: suspend (Posts.Photo) -> ImageBitmap? = { null },
+)
+
+/** A photo in the form: being read ([photo] and [failed] null), ready, or unreadable. */
+internal data class PhotoItem(val key: Long, val photo: Posts.Photo? = null, val failed: String? = null, val alt: String = "")
+
+/**
+ * Where a photo's location comes from, as the website's form says it: the
+ * photo's own GPS, else its time on the track ([gpx], the track attached,
+ * if any).
+ */
+internal fun whereText(p: PhotoItem, gpx: String?): String {
+    val photo = p.photo
+    return when {
+        p.failed != null -> "Can't read this photo"
+        photo == null -> "Reading…"
+        photo.lat != null -> "Location from the photo"
+        photo.takenAt != null && gpx != null && Photos.locate(gpx, photo.takenAt) != null -> "Placed on your track by its time"
+        photo.takenAt != null && gpx != null -> "No location (not taken during your track)"
+        photo.takenAt != null -> "No location (add your track to place it)"
+        else -> "No location"
+    }
+}
 
 /** Posting reviews and tracks, from a hike's sheet or a recorded track. */
 class PostActions(
@@ -110,6 +153,10 @@ class PostActions(
     val openProfile: (TrackStore.Posted?) -> Unit,
     /** Checks a posted track's post is still there, and clears the mark if it was deleted. */
     val verifyPosted: suspend (Long) -> Unit = {},
+    /** Photos, if the form offers them. */
+    val photos: PhotoActions? = null,
+    /** A recorded track's GPX, for placing photos on it by their time. */
+    val trackGpx: suspend (Long) -> String? = { null },
     val today: () -> LocalDate = { LocalDate.now() },
 )
 
@@ -145,7 +192,7 @@ fun PostSection(hike: PostHike, posts: PostActions) {
     ) {
         Column(Modifier.weight(1f)) {
             Text("Hiked it?", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
-            Text("Post a review or your track.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text("Post a review, photos or your track.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         OutlinedButton(
             onClick = { posts.account.clearError(); open = true },
@@ -303,6 +350,9 @@ internal fun PostForm(
     onClose: () -> Unit,
     trackName: String? = null,
     onBusy: (Boolean) -> Unit = {},
+    /** Choosing and taking photos (apart, so a test can stand in for the system's pickers). */
+    photoButtons: @Composable (room: Int, enabled: Boolean, onPicked: (List<PhotoInput>) -> Unit) -> Unit =
+        { room, enabled, onPicked -> PhotoButtons(room, enabled, onPicked) },
 ) {
     val scope = rememberCoroutineScope()
     val today = remember { posts.today() }
@@ -316,6 +366,15 @@ internal fun PostForm(
     var error by remember { mutableStateOf<String?>(null) }
     var done by remember { mutableStateOf(false) }
     var picking by remember { mutableStateOf(false) }
+    val photos = remember { mutableStateListOf<PhotoItem>() }
+    var nextPhoto by remember { mutableLongStateOf(0L) }
+    // The track's GPX, for placing photos on it.
+    var gpx by remember { mutableStateOf<String?>(null) }
+    // Photos still on the phone when the form goes (cancelled, or posted:
+    // uploaded) aren't needed any more.
+    DisposableEffect(Unit) {
+        onDispose { photos.forEach { p -> p.photo?.let { posts.photos?.discard?.invoke(it) } } }
+    }
     // The tracks passing near the hike, offered first.
     var near by remember { mutableStateOf(emptySet<Long>()) }
     LaunchedEffect(hike) {
@@ -330,9 +389,11 @@ internal fun PostForm(
     LaunchedEffect(trackId) {
         val id = trackId
         stats = null
+        gpx = null
         if (id == null) return@LaunchedEffect
         val s = try { posts.trackStats(id) } catch (e: CancellationException) { throw e } catch (_: Exception) { null }
         stats = s
+        if (posts.photos != null) gpx = try { posts.trackGpx(id) } catch (e: CancellationException) { throw e } catch (_: Exception) { null }
         // The day it started, as the website takes it from a GPX file.
         s?.startedAt?.let { day = Instant.parse(it).atZone(ZoneId.systemDefault()).toLocalDate() }
     }
@@ -353,14 +414,38 @@ internal fun PostForm(
     val trackName0 = trackName ?: posts.tracks.firstOrNull { it.id == trackId }?.name
     val title = hike?.title ?: trackName0 ?: "Your track"
     val review = text.trim().isNotEmpty()
-    val canPost = (review || trackId != null) && text.length <= Posts.MAX_TEXT && busy == null
+    // Every photo ready: one still being read, or unreadable, holds the post.
+    val canPost = (review || trackId != null) && text.length <= Posts.MAX_TEXT && busy == null && photos.all { it.photo != null }
+    fun addPhotos(inputs: List<PhotoInput>) {
+        val actions = posts.photos ?: return
+        for (input in inputs.take(Photos.MAX_PHOTOS - photos.size)) {
+            val key = nextPhoto++
+            photos.add(PhotoItem(key))
+            scope.launch {
+                val result = try {
+                    Result.success(actions.prepare(input))
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    Result.failure(e)
+                }
+                val i = photos.indexOfFirst { it.key == key }
+                when {
+                    // Removed while it was being read.
+                    i < 0 -> result.getOrNull()?.let(actions.discard)
+                    else -> photos[i] = result.fold({ photos[i].copy(photo = it) }, { photos[i].copy(failed = it.message ?: it.toString()) })
+                }
+            }
+        }
+    }
     fun post() {
         error = null
         busy = "Posting…"
         onBusy(true)
         scope.launch {
             try {
-                posts.post(PostDraft(hike, hike?.title ?: trackName0 ?: "Track", text, tags.toList(), day, trackId)) { busy = it }
+                val ready = photos.mapNotNull { p -> p.photo?.copy(alt = p.alt.trim().take(Photos.MAX_ALT).ifEmpty { null }) }
+                posts.post(PostDraft(hike, hike?.title ?: trackName0 ?: "Track", text, tags.toList(), day, trackId, ready)) { busy = it }
                 done = true
             } catch (e: CancellationException) {
                 throw e
@@ -430,6 +515,34 @@ internal fun PostForm(
                 }
             }
 
+            posts.photos?.let { actions ->
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Label("Photos")
+                    PhotoList(
+                        photos, gpx, actions, enabled = busy == null,
+                        onAlt = { key, alt -> photos.indexOfFirst { it.key == key }.takeIf { it >= 0 }?.let { photos[it] = photos[it].copy(alt = alt) } },
+                        onRemove = { key ->
+                            val i = photos.indexOfFirst { it.key == key }
+                            if (i >= 0) photos.removeAt(i).photo?.let(actions.discard)
+                        },
+                    )
+                    photoButtons(Photos.MAX_PHOTOS - photos.size, busy == null, ::addPhotos)
+                    if (photos.size >= Photos.MAX_PHOTOS) Hint("Up to ${Photos.MAX_PHOTOS} photos.")
+                    Hint(
+                        "Photos keep where and when they were taken (their EXIF), so others can see the place. " +
+                            "Photos without a location are placed by their time on your track.",
+                    )
+                    // Which record they go on, as the website's: the review, or the track posted alone.
+                    if (photos.isNotEmpty()) Hint(
+                        when {
+                            review -> "They go on your review."
+                            trackId != null -> "They go on your track."
+                            else -> "Photos go with a review or a track: write a few words, or choose your track."
+                        },
+                    )
+                }
+            }
+
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Label("Your track")
                 if (fixedTrack != null) {
@@ -479,6 +592,47 @@ internal fun PostForm(
             },
             dismissButton = { TextButton(onClick = { picking = false }) { Text("Cancel") } },
         ) { DatePicker(state) }
+    }
+}
+
+/** The form's photos: each a thumbnail, its description, where its location comes from, and Remove. */
+@Composable
+internal fun PhotoList(
+    photos: List<PhotoItem>, gpx: String?, actions: PhotoActions, enabled: Boolean,
+    onAlt: (Long, String) -> Unit, onRemove: (Long) -> Unit,
+) {
+    photos.forEachIndexed { i, p ->
+        Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+            var thumb by remember(p.photo?.file) { mutableStateOf<ImageBitmap?>(null) }
+            LaunchedEffect(p.photo?.file) {
+                val photo = p.photo ?: return@LaunchedEffect
+                thumb = try { actions.thumbnail(photo) } catch (e: CancellationException) { throw e } catch (_: Exception) { null }
+            }
+            val shape = RoundedCornerShape(8.dp)
+            val t = thumb
+            if (t != null) {
+                Image(t, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.size(56.dp).clip(shape))
+            } else {
+                Spacer(Modifier.size(56.dp).background(MaterialTheme.colorScheme.surfaceVariant, shape))
+            }
+            Column(Modifier.weight(1f).padding(start = 8.dp)) {
+                OutlinedTextField(
+                    p.alt, { onAlt(p.key, it.take(Photos.MAX_ALT)) },
+                    placeholder = { Text("Describe it (for people who can't see it)") },
+                    singleLine = true, enabled = enabled,
+                    modifier = Modifier.fillMaxWidth().semantics { contentDescription = "Description of photo ${i + 1}" },
+                )
+                // Worked out again only when the photo or the track changes (it reads the GPX), not as its description is typed.
+                val where = remember(p.photo, p.failed, gpx) { whereText(p, gpx) }
+                Text(
+                    where, style = MaterialTheme.typography.bodySmall,
+                    color = if (p.failed != null) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            IconButton(onClick = { onRemove(p.key) }, enabled = enabled) {
+                Icon(Icons.Filled.Close, contentDescription = "Remove photo ${i + 1}")
+            }
+        }
     }
 }
 

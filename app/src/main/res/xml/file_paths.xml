@@ -1,5 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- What FileProvider may hand to other apps: exported GPX files only. -->
+<!--
+  What FileProvider may hand to other apps: exported GPX files, and the
+  file a camera app writes a photo for a post into.
+-->
 <paths>
     <cache-path name="gpx" path="gpx/" />
+    <files-path name="camera" path="camera/" />
 </paths>

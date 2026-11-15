@@ -1,0 +1,91 @@
+[
+  {
+    "when": "2026-07-02T15:02:30.000Z",
+    "what": "between two points: halfway",
+    "at": {
+      "lon": -121.7995,
+      "lat": 47.5005
+    }
+  },
+  {
+    "when": "2026-07-02T15:05:00.000Z",
+    "what": "on a point",
+    "at": {
+      "lon": -121.799,
+      "lat": 47.501
+    }
+  },
+  {
+    "when": "2026-07-02T15:12:30.000Z",
+    "what": "between points 15 minutes apart",
+    "at": {
+      "lon": -121.798,
+      "lat": 47.501999999999995
+    }
+  },
+  {
+    "when": "2026-07-02T15:40:00.000Z",
+    "what": "in a 40-minute gap: not placed",
+    "at": null
+  },
+  {
+    "when": "2026-07-02T14:50:00.000Z",
+    "what": "10 minutes before the start: the start",
+    "at": {
+      "lon": -121.8,
+      "lat": 47.5
+    }
+  },
+  {
+    "when": "2026-07-02T14:49:59.000Z",
+    "what": "over 10 minutes before the start: not placed",
+    "at": null
+  },
+  {
+    "when": "2026-07-03T09:20:00.000Z",
+    "what": "10 minutes after the end: the end",
+    "at": {
+      "lon": -121.78,
+      "lat": 47.52
+    }
+  },
+  {
+    "when": "2026-07-03T09:20:00.001Z",
+    "what": "over 10 minutes after the end: not placed",
+    "at": null
+  },
+  {
+    "when": "2026-07-03T09:05:00.000Z",
+    "what": "between points sorted by time",
+    "at": {
+      "lon": -121.785,
+      "lat": 47.515
+    }
+  },
+  {
+    "when": "2026-07-03T09:00:00.000Z",
+    "what": "two points at the same time",
+    "at": {
+      "lon": -121.79,
+      "lat": 47.51
+    }
+  },
+  {
+    "when": "2026-07-02T23:00:00.000Z",
+    "what": "overnight, between the days: not placed",
+    "at": null
+  },
+  {
+    "when": "2026-07-02T08:02:30-07:00",
+    "what": "a time with an offset",
+    "at": {
+      "lon": -121.7995,
+      "lat": 47.5005
+    }
+  },
+  {
+    "when": "not a time",
+    "what": "not a time: not placed",
+    "at": null
+  }
+]
