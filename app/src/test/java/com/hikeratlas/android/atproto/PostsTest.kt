@@ -195,4 +195,81 @@ class PostsTest {
         val tags = creates().single()["record"]!!.jsonObject["tags"] as JsonArray
         assertEquals(Posts.MAX_TAGS, tags.size)
     }
+
+    // The photos website-photo-records.json was made with: one with GPS, a
+    // time and a description; one with only a time; one placed on a track
+    // (no EXIF), its microdegrees rounded as Math.round.
+    private fun photos(): List<Posts.Photo> {
+        fun file(name: String) = java.io.File.createTempFile("photo", ".jpg").apply {
+            deleteOnExit()
+            writeBytes(this@PostsTest.javaClass.getResource("/photos/$name")!!.readBytes())
+        }.path
+        return listOf(
+            Posts.Photo(file("gps-offset.jpg"), alt = "Rainier from the summit", takenAt = "2026-07-02T17:15:30.000Z", lat = 47.487500000000004, lon = -121.7234, offsetKnown = true),
+            Posts.Photo(file("local.jpg"), takenAt = "2026-03-08T07:30:00.000Z"),
+            Posts.Photo(file("no-exif.jpg"), alt = "  ", lat = -33.8568125, lon = 151.2152995),
+        )
+    }
+
+    private val websitePhotos = Json.parseToJsonElement(text("/photos/website-photo-records.json")).jsonObject
+
+    @Test
+    fun photosOnAReviewAsTheWebsiteWritesThem() = runBlocking {
+        Posts.publish(
+            account.xrpc, fake.did,
+            Posts.Post(text = "Great views.", hikedAt = "2026-07-02T19:00:00.000Z", routeKey = key, photos = photos()),
+        )
+        val sent = websitePhotos["review"]!!.jsonArray.map { it.jsonObject }
+        // Each photo's JPEG uploaded as it is, in order, then the record.
+        val uploads = sent.filter { it["contentType"] != null }
+        assertEquals(uploads.size, fake.blobs.size)
+        for ((i, u) in uploads.withIndex()) {
+            assertEquals("image/jpeg", fake.blobs[i].first)
+            assertEquals(u["size"]!!.jsonPrimitive.content.toInt(), fake.blobs[i].second.size)
+        }
+        assertTrue(fake.blobs[0].second.contentEquals(javaClass.getResource("/photos/gps-offset.jpg")!!.readBytes()))
+        val web = sent.last()["body"]!!.jsonObject["record"]!!.jsonObject
+        val ours = creates().single()["record"]!!.jsonObject
+        assertEquals(undated(web, true), undated(ours))
+        assertEquals(web.keys.toList(), ours.keys.toList())
+        assertEquals(web["photos"], ours["photos"])
+        // Field for field, in the website's order.
+        for ((w, o) in web["photos"]!!.jsonArray.zip(ours["photos"]!!.jsonArray)) assertEquals(w.jsonObject.keys.toList(), o.jsonObject.keys.toList())
+    }
+
+    @Test
+    fun photosGoOnATrackPostedAloneAndOnTheReviewOtherwise() = runBlocking {
+        Posts.publish(account.xrpc, fake.did, Posts.Post(title = "Mount Si", gpx = gpx, photos = photos()))
+        val web = websitePhotos["track"]!!.jsonArray.last().jsonObject["body"]!!.jsonObject["record"]!!.jsonObject
+        val track = creates().single()["record"]!!.jsonObject
+        // The GPX's blob first (gzipped here as Java does, so not compared), then the photos'.
+        assertEquals(listOf("application/gzip", "image/jpeg", "image/jpeg", "image/jpeg"), fake.blobs.map { it.first })
+        assertEquals(web["photos"], track["photos"])
+        assertEquals(web.keys.toList().filter { it != "createdAt" }, track.keys.toList().filter { it != "createdAt" })
+
+        // With a review, they go on the review alone.
+        fake.pdsRequests.clear()
+        Posts.publish(account.xrpc, fake.did, Posts.Post(text = "Great views.", title = "Mount Si", gpx = gpx, photos = photos()))
+        val (t, r) = creates().map { it["record"]!!.jsonObject }
+        assertNull(t["photos"])
+        assertEquals(3, r["photos"]!!.jsonArray.size)
+    }
+
+    @Test
+    fun aPhotoNoLongerOnThePhoneSaysSo() = runBlocking {
+        try {
+            Posts.publish(account.xrpc, fake.did, Posts.Post(text = "Hi", photos = listOf(Posts.Photo("/no/such/photo.jpg"))))
+            fail("posted")
+        } catch (e: PostException) {
+            assertEquals("A photo is no longer on this phone", e.message)
+        }
+        assertTrue(creates().isEmpty())
+    }
+
+    @Test
+    fun aDescriptionKeepsToTheLexicon() {
+        val image = kotlinx.serialization.json.buildJsonObject { }
+        val alt = Photos.record(image, Posts.Photo("f", alt = "x".repeat(1200)))["alt"]!!.jsonPrimitive.content
+        assertEquals(Photos.MAX_ALT, alt.length)
+    }
 }

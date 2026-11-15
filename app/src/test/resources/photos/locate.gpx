@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<gpx xmlns="http://www.topografix.com/GPX/1/1" version="1.1" creator="Hiker Atlas">
+  <trk><name>Two days</name>
+    <trkseg>
+      <trkpt lat="47.5000000" lon="-121.8000000"><ele>200</ele><time>2026-07-02T15:00:00Z</time></trkpt>
+      <trkpt lat="47.5010000" lon="-121.7990000"><ele>210</ele><time>2026-07-02T15:05:00Z</time></trkpt>
+      <trkpt lat="47.5030000" lon="-121.7970000"><ele>230</ele><time>2026-07-02T15:20:00Z</time></trkpt>
+      <!-- A long stop: 40 minutes between these two. -->
+      <trkpt lat="47.5040000" lon="-121.7960000"><ele>240</ele><time>2026-07-02T16:00:00Z</time></trkpt>
+      <trkpt lat="47.5050000" lon="-121.7950000"><ele>250</ele><time>2026-07-02T16:10:00Z</time></trkpt>
+      <!-- No time: left out of placing. -->
+      <trkpt lat="48.0000000" lon="-122.0000000"><ele>250</ele></trkpt>
+    </trkseg>
+    <!-- Points out of order in the file, sorted by time first. -->
+    <trkseg>
+      <trkpt lat="47.5200000" lon="-121.7800000"><time>2026-07-03T09:10:00Z</time></trkpt>
+      <trkpt lat="47.5100000" lon="-121.7900000"><time>2026-07-03T09:00:00Z</time></trkpt>
+      <trkpt lat="47.5100000" lon="-121.7900000"><time>2026-07-03T09:00:00Z</time></trkpt>
+    </trkseg>
+  </trk>
+</gpx>

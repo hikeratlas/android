@@ -198,8 +198,10 @@ class FakeAtproto : AutoCloseable {
                 val body = Json.parseToJsonElement(r.body!!.utf8()).jsonObject
                 val rkey = body["rkey"]?.jsonPrimitive?.content
                 val key = "${body["collection"]?.jsonPrimitive?.content}/$rkey"
+                val invalid = body["record"]?.jsonObject?.let(::invalidPhotos)
                 when {
                     createFails != null -> json(createFails!!.second, createFails!!.first)
+                    invalid != null -> json("""{"error":"InvalidRecord","message":"Invalid record: $invalid"}""", 400)
                     // As a PDS: a TID it makes (here, in order), kept like any other record.
                     rkey == null -> {
                         val tid = "3tid${tids.incrementAndGet()}"
@@ -237,6 +239,29 @@ class FakeAtproto : AutoCloseable {
             }
             else -> json("""{"error":"MethodNotImplemented"}""", 501)
         }
+    }
+
+    /**
+     * What's wrong with a record's photos by the lexicon (defs#photo, and the
+     * review's and track's photos arrays), as a PDS that validates records
+     * would refuse it; null when they're fine.
+     */
+    private fun invalidPhotos(record: JsonObject): String? {
+        val photos = record["photos"] as? kotlinx.serialization.json.JsonArray ?: return null
+        val max = if (record["\$type"]?.jsonPrimitive?.content == "com.hikeratlas.temp.review") 20 else 50
+        if (photos.size > max) return "more than $max photos"
+        for (p in photos.map { it.jsonObject }) {
+            val image = p["image"]?.jsonObject ?: return "a photo without its image"
+            if (image["mimeType"]?.jsonPrimitive?.content !in listOf("image/jpeg", "image/png", "image/webp")) return "a photo of type ${image["mimeType"]}"
+            if (image["size"]!!.jsonPrimitive.long > 2_000_000) return "a photo over 2 MB"
+            p["alt"]?.let { if (it.jsonPrimitive.content.length > 1000) return "a description over 1000 graphemes" }
+            p["at"]?.jsonObject?.let { at ->
+                for (k in listOf("lat", "lon")) if (at[k]?.jsonPrimitive?.content?.toLongOrNull() == null) return "at.$k not an integer"
+            }
+            val extra = p.keys - setOf("image", "alt", "takenAt", "at")
+            if (extra.isNotEmpty()) return "unknown photo fields $extra"
+        }
+        return null
     }
 
     /** Reads anyone may make, signed in or not: describeRepo, getRecord, listRecords, getBlob; null for any other. */

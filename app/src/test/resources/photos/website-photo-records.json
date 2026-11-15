@@ -1,0 +1,167 @@
+{
+  "review": [
+    {
+      "path": "/xrpc/com.atproto.repo.uploadBlob",
+      "contentType": "image/jpeg",
+      "size": 944
+    },
+    {
+      "path": "/xrpc/com.atproto.repo.uploadBlob",
+      "contentType": "image/jpeg",
+      "size": 734
+    },
+    {
+      "path": "/xrpc/com.atproto.repo.uploadBlob",
+      "contentType": "image/jpeg",
+      "size": 648
+    },
+    {
+      "path": "/xrpc/com.atproto.repo.createRecord",
+      "body": {
+        "repo": "did:plc:abcdefghijklmnopqrstuvwx",
+        "collection": "com.hikeratlas.temp.review",
+        "record": {
+          "$type": "com.hikeratlas.temp.review",
+          "text": "Great views.",
+          "createdAt": "<createdAt>",
+          "license": "CC0-1.0",
+          "hikedAt": "2026-07-02T19:00:00.000Z",
+          "routeKey": "1E57E06gbDEBBBICDGF.tn3dBnAuR_Q",
+          "photos": [
+            {
+              "image": {
+                "$type": "blob",
+                "ref": {
+                  "$link": "bafkrei-1"
+                },
+                "mimeType": "image/jpeg",
+                "size": 944
+              },
+              "alt": "Rainier from the summit",
+              "takenAt": "2026-07-02T17:15:30.000Z",
+              "at": {
+                "lat": 47487500,
+                "lon": -121723400
+              }
+            },
+            {
+              "image": {
+                "$type": "blob",
+                "ref": {
+                  "$link": "bafkrei-2"
+                },
+                "mimeType": "image/jpeg",
+                "size": 734
+              },
+              "takenAt": "2026-03-08T07:30:00.000Z"
+            },
+            {
+              "image": {
+                "$type": "blob",
+                "ref": {
+                  "$link": "bafkrei-3"
+                },
+                "mimeType": "image/jpeg",
+                "size": 648
+              },
+              "at": {
+                "lat": -33856812,
+                "lon": 151215300
+              }
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "track": [
+    {
+      "path": "/xrpc/com.atproto.repo.uploadBlob",
+      "contentType": "application/gzip",
+      "size": 7712
+    },
+    {
+      "path": "/xrpc/com.atproto.repo.uploadBlob",
+      "contentType": "image/jpeg",
+      "size": 944
+    },
+    {
+      "path": "/xrpc/com.atproto.repo.uploadBlob",
+      "contentType": "image/jpeg",
+      "size": 734
+    },
+    {
+      "path": "/xrpc/com.atproto.repo.uploadBlob",
+      "contentType": "image/jpeg",
+      "size": 648
+    },
+    {
+      "path": "/xrpc/com.atproto.repo.createRecord",
+      "body": {
+        "repo": "did:plc:abcdefghijklmnopqrstuvwx",
+        "collection": "com.hikeratlas.temp.track",
+        "record": {
+          "$type": "com.hikeratlas.temp.track",
+          "gpx": {
+            "$type": "blob",
+            "ref": {
+              "$link": "bafkrei-1"
+            },
+            "mimeType": "application/gzip",
+            "size": 7712
+          },
+          "createdAt": "<createdAt>",
+          "license": "CC0-1.0",
+          "startedAt": "2026-07-02T13:46:43.000Z",
+          "duration": 4928,
+          "distance": 2204,
+          "gain": 88,
+          "title": "Mount Si",
+          "photos": [
+            {
+              "image": {
+                "$type": "blob",
+                "ref": {
+                  "$link": "bafkrei-2"
+                },
+                "mimeType": "image/jpeg",
+                "size": 944
+              },
+              "alt": "Rainier from the summit",
+              "takenAt": "2026-07-02T17:15:30.000Z",
+              "at": {
+                "lat": 47487500,
+                "lon": -121723400
+              }
+            },
+            {
+              "image": {
+                "$type": "blob",
+                "ref": {
+                  "$link": "bafkrei-3"
+                },
+                "mimeType": "image/jpeg",
+                "size": 734
+              },
+              "takenAt": "2026-03-08T07:30:00.000Z"
+            },
+            {
+              "image": {
+                "$type": "blob",
+                "ref": {
+                  "$link": "bafkrei-4"
+                },
+                "mimeType": "image/jpeg",
+                "size": 648
+              },
+              "at": {
+                "lat": -33856812,
+                "lon": 151215300
+              }
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

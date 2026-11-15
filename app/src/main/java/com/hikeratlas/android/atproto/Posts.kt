@@ -3,6 +3,8 @@ package com.hikeratlas.android.atproto
 import com.hikeratlas.android.track.GpxStats
 import com.hikeratlas.android.track.TrackMeasure
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
@@ -12,6 +14,7 @@ import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import java.io.ByteArrayOutputStream
+import java.io.File
 import java.io.IOException
 import java.text.BreakIterator
 import java.time.Instant
@@ -31,8 +34,9 @@ class PostException(message: String, cause: Throwable? = null) : Exception(messa
  * records in the user's own repository, keyed by TIDs the PDS makes
  * (createRecord with no rkey), so someone can post any number for the same
  * hike, tied to it by its route key. A track's GPX is a blob uploaded
- * gzipped to the same PDS. Each post records the licence it was made
- * under, from the profile's setting at the time.
+ * gzipped to the same PDS, as are its photos (on the review, or on the
+ * track posted alone: see [Photos]). Each post records the licence it was
+ * made under, from the profile's setting at the time.
  */
 object Posts {
     const val TRACK = "com.hikeratlas.temp.track"
@@ -97,6 +101,28 @@ object Posts {
          * posted twice. Takes the place of [gpx].
          */
         val track: StrongRef? = null,
+        /**
+         * On the review, or on the track when it's posted alone, as the
+         * website's PostDialog: placed already ([Photos.placed]).
+         */
+        val photos: List<Photo> = emptyList(),
+    )
+
+    /**
+     * A photo for a post, as [Photos.Store] keeps it: the prepared JPEG's
+     * [file] on the phone (uploaded as it is), and where and when it was
+     * taken, from its EXIF or, for [lat] and [lon], its time on the track.
+     */
+    @Serializable
+    data class Photo(
+        val file: String,
+        val alt: String? = null,
+        /** As JavaScript's toISOString. */
+        val takenAt: String? = null,
+        val lat: Double? = null,
+        val lon: Double? = null,
+        /** Whether [takenAt] came with its time zone (EXIF often has local time only). */
+        val offsetKnown: Boolean = false,
     )
 
     /** What was posted. */
@@ -135,11 +161,11 @@ object Posts {
             } catch (e: IllegalArgumentException) {
                 throw PostException(e.message ?: "Not a GPX file", e)
             }
-            publishTrack(xrpc, did, gpx, stats, post.routeKey, post.title, license).also { onTrack(it) }
+            publishTrack(xrpc, did, gpx, stats, post.routeKey, post.title, license, if (review) emptyList() else post.photos).also { onTrack(it) }
         }
         val reviewRef = if (review) {
             progress("Posting your review…")
-            publishReview(xrpc, did, post.text.trim(), post.hikedAt, post.routeKey, track, post.tags, license)
+            publishReview(xrpc, did, post.text.trim(), post.hikedAt, post.routeKey, track, post.tags, license, post.photos)
         } else {
             null
         }
@@ -169,10 +195,12 @@ object Posts {
     /** A track record, field for field as the website's publishTrack writes it. */
     suspend fun publishTrack(
         xrpc: Xrpc, did: String, gpx: String, s: GpxStats, routeKey: String?, title: String?, license: String,
+        photos: List<Photo> = emptyList(),
     ): StrongRef {
         val bytes = gzip(gpx)
         if (bytes.size > MAX_GPX_BYTES) throw PostException("The track is too big to post (over 10 MB, compressed)")
         val blob = uploadBlob(xrpc, bytes, "application/gzip")
+        val photoEntries = uploadPhotos(xrpc, photos)
         val record = buildJsonObject {
             put("\$type", TRACK)
             put("gpx", blob)
@@ -182,8 +210,9 @@ object Posts {
             s.duration?.let { put("duration", it) }
             put("distance", s.distance)
             s.gain?.let { put("gain", it) }
-            title?.let(::clip)?.takeIf { it.isNotEmpty() }?.let { put("title", it) }
+            title?.let { clip(it) }?.takeIf { it.isNotEmpty() }?.let { put("title", it) }
             routeKey?.takeIf { it.isNotEmpty() }?.let { put("routeKey", it) }
+            if (photoEntries.isNotEmpty()) put("photos", JsonArray(photoEntries))
         }
         return create(xrpc, did, TRACK, record)
     }
@@ -191,7 +220,9 @@ object Posts {
     /** A review record, field for field as the website's publishReview writes it. */
     suspend fun publishReview(
         xrpc: Xrpc, did: String, text: String, hikedAt: String?, routeKey: String?, track: StrongRef?, tags: List<String>, license: String,
+        photos: List<Photo> = emptyList(),
     ): StrongRef {
+        val photoEntries = uploadPhotos(xrpc, photos)
         val record = buildJsonObject {
             put("\$type", REVIEW)
             put("text", text)
@@ -201,8 +232,24 @@ object Posts {
             routeKey?.takeIf { it.isNotEmpty() }?.let { put("routeKey", it) }
             track?.let { put("track", buildJsonObject { put("uri", it.uri); put("cid", it.cid) }) }
             if (tags.isNotEmpty()) put("tags", JsonArray(tags.take(MAX_TAGS).map(::JsonPrimitive)))
+            if (photoEntries.isNotEmpty()) put("photos", JsonArray(photoEntries))
         }
         return create(xrpc, did, REVIEW, record)
+    }
+
+    /** Each photo's JPEG uploaded, in order, and its entry for the record (the website's uploadPhotos). */
+    private suspend fun uploadPhotos(xrpc: Xrpc, photos: List<Photo>): List<JsonObject> {
+        if (photos.size > Photos.MAX_PHOTOS) throw PostException("Up to ${Photos.MAX_PHOTOS} photos can go with a post")
+        return photos.map { p ->
+            val bytes = try {
+                withContext(Dispatchers.IO) { File(p.file).readBytes() }
+            } catch (e: IOException) {
+                throw PostException("A photo is no longer on this phone", e)
+            }
+            // Prepared to fit already; a PDS would refuse one that doesn't.
+            if (bytes.size > Photos.MAX_BYTES) throw PostException("A photo is too big to post (over 2 MB)")
+            Photos.record(uploadBlob(xrpc, bytes, "image/jpeg"), p)
+        }
     }
 
     /** uploadBlob: the blob reference the PDS gives, for the record. */
@@ -252,11 +299,11 @@ object Posts {
     fun noonOf(day: LocalDate, zone: ZoneId = ZoneId.systemDefault()): String =
         ISO.format(day.atTime(LocalTime.NOON).atZone(zone).toInstant())
 
-    /** At most [MAX_TITLE] graphemes, as the lexicon allows. */
-    internal fun clip(title: String): String {
+    /** At most [max] graphemes (a title's [MAX_TITLE]), as the lexicon allows. */
+    internal fun clip(title: String, max: Int = MAX_TITLE): String {
         val chars = BreakIterator.getCharacterInstance().apply { setText(title) }
         var end = 0
-        repeat(MAX_TITLE) {
+        repeat(max) {
             val next = chars.next()
             if (next == BreakIterator.DONE) return title
             end = next

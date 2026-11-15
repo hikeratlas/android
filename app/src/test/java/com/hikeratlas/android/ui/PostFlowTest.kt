@@ -15,6 +15,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import okhttp3.OkHttpClient
@@ -149,5 +150,47 @@ class PostFlowTest {
     fun deletingAPostedTrackSaysItsPostStaysUp() {
         assertEquals("It's deleted from this phone. Your post on Hiker Atlas stays up.", com.hikeratlas.android.track.deletedText(TrackStore.Posted("u", "c", null, 1)))
         assertEquals("It's deleted from this phone.", com.hikeratlas.android.track.deletedText(null))
+    }
+
+    private fun photoFile(name: String) = java.io.File(context.cacheDir, "post-$name").apply {
+        writeBytes(this@PostFlowTest.javaClass.getResource("/photos/$name")!!.readBytes())
+    }.path
+
+    @Test
+    fun aPhotoWithoutGpsIsPlacedOnTheTrackByItsTime() = runBlocking {
+        val id = recorded()
+        // 12.5 s in: between the third and fourth points (5 s apart).
+        val bare = Posts.Photo(photoFile("no-exif.jpg"), takenAt = com.hikeratlas.android.track.TrackMeasure.iso(1_783_000_012_500))
+        val own = Posts.Photo(photoFile("gps-offset.jpg"), takenAt = "2026-07-02T17:15:30.000Z", lat = 47.4875, lon = -121.7234)
+        val far = Posts.Photo(photoFile("local.jpg"), takenAt = "2026-03-08T07:30:00.000Z")
+        postDraft(account.xrpc, fake.did, library(), draft(id).copy(photos = listOf(bare, own, far)), {})
+        // A track alone: its photos are on it.
+        val photos = fake.records.entries.single { it.key.startsWith(Posts.TRACK) }.value["photos"]!!.jsonArray.map { it.jsonObject }
+        val at = photos[0]["at"]!!.jsonObject
+        assertEquals(47_450_500.0, at["lat"]!!.jsonPrimitive.content.toDouble(), 1.0)
+        assertEquals(-121_800_000L, at["lon"]!!.jsonPrimitive.content.toLong())
+        // Its own location kept; one taken months before isn't placed.
+        assertEquals(47_487_500L, photos[1]["at"]!!.jsonObject["lat"]!!.jsonPrimitive.content.toLong())
+        assertNull(photos[2]["at"])
+    }
+
+    @Test
+    fun photosAreStillPlacedWhenTheReviewIsTriedAgainAfterItsTrackWentUp() = runBlocking {
+        val id = recorded()
+        val lib = library()
+        val bare = Posts.Photo(photoFile("no-exif.jpg"), takenAt = com.hikeratlas.android.track.TrackMeasure.iso(1_783_000_012_500))
+        val failing = { s: String ->
+            if (s == "Posting your review…") fake.createFails = 400 to """{"error":"InvalidRecord","message":"no"}"""
+        }
+        try {
+            postDraft(account.xrpc, fake.did, lib, draft(id, "Lovely.").copy(photos = listOf(bare)), failing)
+            fail("posted")
+        } catch (_: PostException) {
+        }
+        fake.createFails = null
+        postDraft(account.xrpc, fake.did, lib, draft(id, "Lovely.").copy(photos = listOf(bare)), {})
+        val review = fake.records.entries.single { it.key.startsWith(Posts.REVIEW) }.value
+        assertNotNull(review["photos"]!!.jsonArray.single().jsonObject["at"])
+        assertNull(fake.records.entries.single { it.key.startsWith(Posts.TRACK) }.value["photos"])
     }
 }

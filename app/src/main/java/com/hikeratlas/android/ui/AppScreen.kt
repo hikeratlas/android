@@ -38,6 +38,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
@@ -111,6 +112,27 @@ fun AppScreen(app: HikerAtlasApp, link: Uri? = null, onLinkHandled: () -> Unit =
         isFaved = { key -> Faves.isFaved(app.account.xrpc, app.account.did ?: throw SignedOutException(), key) },
         setFave = { key, on -> Faves.set(app.account.xrpc, app.account.did ?: throw SignedOutException(), key, on) },
     )
+    val photoStore = remember { com.hikeratlas.android.atproto.Photos.Store(java.io.File(context.filesDir, "photos")) }
+    val photoActions = remember(photoStore) {
+        PhotoActions(
+            prepare = { input ->
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    try {
+                        photoStore.save(PhotoSources.read(context, input.uri), input.capturedAt)
+                    } finally {
+                        // The camera's file: prepared into the store now.
+                        if (input.temporary) input.uri.path?.let { java.io.File(it).delete() }
+                    }
+                }
+            },
+            discard = { p -> scope.launch(kotlinx.coroutines.Dispatchers.IO) { photoStore.discard(p) } },
+            thumbnail = { p ->
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    com.hikeratlas.android.atproto.Photos.thumbnail(java.io.File(p.file), 168)?.asImageBitmap()
+                }
+            },
+        )
+    }
     val postActions = PostActions(
         accountActions,
         tracks = library.tracks,
@@ -128,6 +150,8 @@ fun AppScreen(app: HikerAtlasApp, link: Uri? = null, onLinkHandled: () -> Unit =
             }
         },
         verifyPosted = { id -> app.account.did?.let { verifyPosted(app.account.xrpc, it, library, id) } },
+        photos = photoActions,
+        trackGpx = { id -> library.gpxText(id) },
     )
     // The licence for new posts, read from the profile record when You opens.
     var license by remember(did) { mutableStateOf<String?>(null) }
