@@ -198,23 +198,30 @@ object Posts {
         photos: List<Photo> = emptyList(),
     ): StrongRef {
         val bytes = gzip(gpx)
-        if (bytes.size > MAX_GPX_BYTES) throw PostException("The track is too big to post (over 10 MB, compressed)")
+        if (bytes.size > MAX_GPX_BYTES) throw PostException(TOO_BIG)
         val blob = uploadBlob(xrpc, bytes, "application/gzip")
         val photoEntries = uploadPhotos(xrpc, photos)
-        val record = buildJsonObject {
-            put("\$type", TRACK)
-            put("gpx", blob)
-            put("createdAt", now())
-            put("license", license)
-            s.startedAt?.let { put("startedAt", it) }
-            s.duration?.let { put("duration", it) }
-            put("distance", s.distance)
-            s.gain?.let { put("gain", it) }
-            title?.let { clip(it) }?.takeIf { it.isNotEmpty() }?.let { put("title", it) }
-            routeKey?.takeIf { it.isNotEmpty() }?.let { put("routeKey", it) }
-            if (photoEntries.isNotEmpty()) put("photos", JsonArray(photoEntries))
-        }
-        return create(xrpc, did, TRACK, record)
+        return create(xrpc, did, TRACK, trackRecord(blob, s, routeKey, title, license, photoEntries))
+    }
+
+    const val TOO_BIG = "The track is too big to post (over 10 MB, compressed)"
+
+    /** A track record's fields, with its GPX's [blob] and photos' entries already uploaded. [createdAt]: now, unless given. */
+    fun trackRecord(
+        blob: JsonObject, s: GpxStats, routeKey: String?, title: String?, license: String, photoEntries: List<JsonObject>,
+        createdAt: String? = null,
+    ): JsonObject = buildJsonObject {
+        put("\$type", TRACK)
+        put("gpx", blob)
+        put("createdAt", createdAt ?: now())
+        put("license", license)
+        s.startedAt?.let { put("startedAt", it) }
+        s.duration?.let { put("duration", it) }
+        put("distance", s.distance)
+        s.gain?.let { put("gain", it) }
+        title?.let { clip(it) }?.takeIf { it.isNotEmpty() }?.let { put("title", it) }
+        routeKey?.takeIf { it.isNotEmpty() }?.let { put("routeKey", it) }
+        if (photoEntries.isNotEmpty()) put("photos", JsonArray(photoEntries))
     }
 
     /** A review record, field for field as the website's publishReview writes it. */
@@ -223,18 +230,23 @@ object Posts {
         photos: List<Photo> = emptyList(),
     ): StrongRef {
         val photoEntries = uploadPhotos(xrpc, photos)
-        val record = buildJsonObject {
-            put("\$type", REVIEW)
-            put("text", text)
-            put("createdAt", now())
-            put("license", license)
-            hikedAt?.takeIf { it.isNotEmpty() }?.let { put("hikedAt", it) }
-            routeKey?.takeIf { it.isNotEmpty() }?.let { put("routeKey", it) }
-            track?.let { put("track", buildJsonObject { put("uri", it.uri); put("cid", it.cid) }) }
-            if (tags.isNotEmpty()) put("tags", JsonArray(tags.take(MAX_TAGS).map(::JsonPrimitive)))
-            if (photoEntries.isNotEmpty()) put("photos", JsonArray(photoEntries))
-        }
-        return create(xrpc, did, REVIEW, record)
+        return create(xrpc, did, REVIEW, reviewRecord(text, hikedAt, routeKey, track, tags, license, photoEntries))
+    }
+
+    /** A review record's fields, its photos' entries already uploaded. [createdAt]: now, unless given. */
+    fun reviewRecord(
+        text: String, hikedAt: String?, routeKey: String?, track: StrongRef?, tags: List<String>, license: String,
+        photoEntries: List<JsonObject>, createdAt: String? = null,
+    ): JsonObject = buildJsonObject {
+        put("\$type", REVIEW)
+        put("text", text)
+        put("createdAt", createdAt ?: now())
+        put("license", license)
+        hikedAt?.takeIf { it.isNotEmpty() }?.let { put("hikedAt", it) }
+        routeKey?.takeIf { it.isNotEmpty() }?.let { put("routeKey", it) }
+        track?.let { put("track", buildJsonObject { put("uri", it.uri); put("cid", it.cid) }) }
+        if (tags.isNotEmpty()) put("tags", JsonArray(tags.take(MAX_TAGS).map(::JsonPrimitive)))
+        if (photoEntries.isNotEmpty()) put("photos", JsonArray(photoEntries))
     }
 
     /** Each photo's JPEG uploaded, in order, and its entry for the record (the website's uploadPhotos). */
@@ -253,7 +265,7 @@ object Posts {
     }
 
     /** uploadBlob: the blob reference the PDS gives, for the record. */
-    private suspend fun uploadBlob(xrpc: Xrpc, bytes: ByteArray, mimeType: String): JsonObject {
+    suspend fun uploadBlob(xrpc: Xrpc, bytes: ByteArray, mimeType: String): JsonObject {
         val r = try {
             xrpc.upload("com.atproto.repo.uploadBlob", bytes, mimeType)
         } catch (e: XrpcException) {
@@ -264,11 +276,20 @@ object Posts {
         return r["blob"] as? JsonObject ?: throw PostException("Uploading a file failed (no blob in the answer)")
     }
 
-    private suspend fun create(xrpc: Xrpc, did: String, collection: String, record: JsonObject): StrongRef {
+    /**
+     * createRecord: under [rkey] when given (the phone's own TID, so a
+     * retry can find what an earlier try made: see [find]), else under a
+     * TID the PDS makes, as the website does.
+     */
+    suspend fun create(xrpc: Xrpc, did: String, collection: String, record: JsonObject, rkey: String? = null): StrongRef {
         val r = try {
             xrpc.procedure(
                 "com.atproto.repo.createRecord",
-                buildJsonObject { put("repo", did); put("collection", collection); put("record", record) },
+                buildJsonObject {
+                    put("repo", did); put("collection", collection)
+                    rkey?.let { put("rkey", it) }
+                    put("record", record)
+                },
             )
         } catch (e: XrpcException) {
             // As the website's: "createRecord failed (400): <the PDS's message>".
@@ -280,6 +301,39 @@ object Posts {
         val cid = r["cid"]?.jsonPrimitive?.contentOrNull
         if (uri == null || cid == null) throw PostException("createRecord failed (no uri and cid in the answer)")
         return StrongRef(uri, cid)
+    }
+
+    /**
+     * The record at [collection]/[rkey] in [did]'s repository, if there is
+     * one: null when the PDS says there's no such record. Network trouble
+     * is an IOException, as anything else the PDS says is an XrpcException.
+     */
+    suspend fun find(xrpc: Xrpc, did: String, collection: String, rkey: String): StrongRef? {
+        val r = try {
+            xrpc.query("com.atproto.repo.getRecord", mapOf("repo" to did, "collection" to collection, "rkey" to rkey))
+        } catch (e: XrpcException) {
+            if (e.status == 400) return null
+            throw e
+        }
+        val uri = r["uri"]?.jsonPrimitive?.contentOrNull ?: throw IOException("getRecord gave no uri")
+        val cid = r["cid"]?.jsonPrimitive?.contentOrNull ?: throw IOException("getRecord gave no cid")
+        return StrongRef(uri, cid)
+    }
+
+    /**
+     * The licence new posts are shared under, as [licenseFor], but a profile
+     * that can't be read for want of signal (or a session) throws, rather
+     * than passing for unset: a post waiting on the phone mustn't go up
+     * under the wrong licence.
+     */
+    suspend fun licenseStrict(xrpc: Xrpc, did: String): String {
+        val l = try {
+            (ProfileRecord.read(xrpc, did)?.get("license") as? JsonPrimitive)?.takeIf { it.isString }?.content
+        } catch (e: XrpcException) {
+            // The PDS answered, and won't give it: as the website, the default.
+            null
+        }
+        return if (l != null && l in LICENSES) l else DEFAULT_LICENSE
     }
 
     private fun unreachable(e: IOException) =

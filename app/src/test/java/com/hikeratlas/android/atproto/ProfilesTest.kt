@@ -7,7 +7,7 @@ import com.hikeratlas.android.track.TrackStore
 import com.hikeratlas.android.ui.PostDraft
 import com.hikeratlas.android.ui.PostHike
 import com.hikeratlas.android.ui.deletePost
-import com.hikeratlas.android.ui.postDraft
+import com.hikeratlas.android.ui.sendDraft
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -176,7 +176,9 @@ class ProfilesTest {
                 store.end(id, 1_783_000_100_000)
                 val other = store.start(1_783_100_000_000).also { store.end(it, 1_783_100_100_000) }
                 store.setPosted(other, TrackStore.Posted("at://${fake.did}/${Posts.TRACK}/elsewhere", "c", null, 1))
-                postDraft(account.xrpc, fake.did, lib, PostDraft(PostHike("k", "Mount Si"), "Mount Si", "Lovely.", emptyList(), LocalDate.of(2026, 7, 2), id), {})
+                androidx.work.testing.WorkManagerTestInitHelper.initializeTestWorkManager(context)
+                val outbox = com.hikeratlas.android.outbox.Outbox(context, account, lib)
+                sendDraft(outbox, fake.did, fake.handle, lib, PostDraft(PostHike("k", "Mount Si"), "Mount Si", "Lovely.", emptyList(), LocalDate.of(2026, 7, 2), id), {})
                 assertNotNull(lib.posted(id))
 
                 val post = Profiles.loadDid(http, Identity(http, fake.config()), fake.did).posts.single()

@@ -24,6 +24,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Error
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDialog
@@ -147,8 +148,11 @@ class PostActions(
     val hikesNear: suspend (Long) -> List<NearbyHike>,
     /** The recorded tracks passing near a hike's line. */
     val tracksNear: suspend (List<List<Double>>) -> Set<Long> = { emptySet() },
-    /** Posts it; [progress] hears what's under way. Throws saying what failed. */
-    val post: suspend (draft: PostDraft, progress: (String) -> Unit) -> Unit,
+    /**
+     * Posts it, or keeps it on the phone to go up later (no signal);
+     * [progress] hears what's under way. Throws saying what failed.
+     */
+    val post: suspend (draft: PostDraft, progress: (String) -> Unit) -> PostOutcome,
     /** Opens your profile in the app; at the post a posted track went up as, when given ("See post"). */
     val openProfile: (TrackStore.Posted?) -> Unit,
     /** Checks a posted track's post is still there, and clears the mark if it was deleted. */
@@ -158,6 +162,8 @@ class PostActions(
     /** A recorded track's GPX, for placing photos on it by their time. */
     val trackGpx: suspend (Long) -> String? = { null },
     val today: () -> LocalDate = { LocalDate.now() },
+    /** The recorded tracks in a post waiting to go up: not offered again. */
+    val waitingTracks: Set<Long> = emptySet(),
 )
 
 /** "2 h 5 min", as the website shows a track's duration. */
@@ -213,6 +219,17 @@ fun PostSection(hike: PostHike, posts: PostActions) {
 fun TrackPostDialog(trackId: Long, trackName: String, posts: PostActions, onClose: () -> Unit) {
     if (posts.account.state !is AccountState.In) {
         SignInDialog(posts.account, onClose = onClose, why = "Sign in to post your track.")
+        return
+    }
+    if (trackId in posts.waitingTracks) {
+        // Posted twice it mustn't be: it's going up already.
+        AlertDialog(
+            onDismissRequest = onClose,
+            title = { Text("Waiting to post") },
+            text = { Text("This track is in a post waiting to go up. See Waiting posts on your profile.") },
+            confirmButton = { TextButton(onClick = { onClose(); posts.openProfile(null) }) { Text("See it") } },
+            dismissButton = { TextButton(onClick = onClose) { Text("Close") } },
+        )
         return
     }
     var chosen by remember(trackId) { mutableStateOf(false) }
@@ -365,6 +382,8 @@ internal fun PostForm(
     var busy by remember { mutableStateOf<String?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
     var done by remember { mutableStateOf(false) }
+    // Kept on the phone to go up later: what to say about it.
+    var queued by remember { mutableStateOf<String?>(null) }
     var picking by remember { mutableStateOf(false) }
     val photos = remember { mutableStateListOf<PhotoItem>() }
     var nextPhoto by remember { mutableLongStateOf(0L) }
@@ -400,8 +419,9 @@ internal fun PostForm(
 
     if (done) {
         Column(Modifier.fillMaxWidth().padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text("Posted", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-            Text("Thanks! It's on your profile, and in your own account for any app to show.")
+            val later = queued
+            Text(if (later != null) "Saved on your phone" else "Posted", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+            Text(later ?: "Thanks! It's on your profile, and in your own account for any app to show.")
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                 TextButton(onClick = onClose) { Text("Close") }
                 Spacer(Modifier.width(8.dp))
@@ -445,7 +465,8 @@ internal fun PostForm(
         scope.launch {
             try {
                 val ready = photos.mapNotNull { p -> p.photo?.copy(alt = p.alt.trim().take(Photos.MAX_ALT).ifEmpty { null }) }
-                posts.post(PostDraft(hike, hike?.title ?: trackName0 ?: "Track", text, tags.toList(), day, trackId, ready)) { busy = it }
+                val outcome = posts.post(PostDraft(hike, hike?.title ?: trackName0 ?: "Track", text, tags.toList(), day, trackId, ready)) { busy = it }
+                queued = (outcome as? PostOutcome.Queued)?.message
                 done = true
             } catch (e: CancellationException) {
                 throw e
@@ -548,7 +569,7 @@ internal fun PostForm(
                 if (fixedTrack != null) {
                     Text(trackName0 ?: "Track", style = MaterialTheme.typography.bodyLarge)
                 } else {
-                    TrackPicker(posts.tracks, near, trackId, enabled = busy == null) { trackId = it }
+                    TrackPicker(posts.tracks, near, trackId, enabled = busy == null, waiting = posts.waitingTracks) { trackId = it }
                 }
                 stats?.let { Text(postStatsLine(it), style = MaterialTheme.typography.bodyMedium) }
                 if (trackId != null) Hint("Your track shows where you went, and when, to anyone.")
@@ -645,7 +666,9 @@ internal fun trackGroups(tracks: List<TrackStore.Track>, near: Set<Long>): Pair<
 
 /** No track, or one of the phone's recorded tracks, chosen from a list. */
 @Composable
-private fun TrackPicker(tracks: List<TrackStore.Track>, near: Set<Long>, chosen: Long?, enabled: Boolean, onChoose: (Long?) -> Unit) {
+private fun TrackPicker(
+    tracks: List<TrackStore.Track>, near: Set<Long>, chosen: Long?, enabled: Boolean, waiting: Set<Long>, onChoose: (Long?) -> Unit,
+) {
     var open by remember { mutableStateOf(false) }
     OutlinedButton(onClick = { open = true }, enabled = enabled && tracks.isNotEmpty()) {
         Text(tracks.firstOrNull { it.id == chosen }?.let(::trackLabel) ?: if (tracks.isEmpty()) "No recorded tracks" else "No track")
@@ -655,7 +678,7 @@ private fun TrackPicker(tracks: List<TrackStore.Track>, near: Set<Long>, chosen:
     if (open) {
         Dialog(onDismissRequest = { open = false }) {
             Surface(shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.surface) {
-                TrackChoices(tracks, near, chosen, onChoose = { open = false; onChoose(it) })
+                TrackChoices(tracks, near, chosen, waiting = waiting, onChoose = { open = false; onChoose(it) })
             }
         }
     }
@@ -664,17 +687,19 @@ private fun TrackPicker(tracks: List<TrackStore.Track>, near: Set<Long>, chosen:
 /**
  * The tracks to choose from (the picker's content, apart, to test): near
  * the hike first, then "Other tracks", newest first in each; one already
- * posted can't be posted again.
+ * posted, or [waiting] to post, can't be posted again.
  */
 @Composable
-internal fun TrackChoices(tracks: List<TrackStore.Track>, near: Set<Long>, chosen: Long?, onChoose: (Long?) -> Unit) {
+internal fun TrackChoices(
+    tracks: List<TrackStore.Track>, near: Set<Long>, chosen: Long?, waiting: Set<Long> = emptySet(), onChoose: (Long?) -> Unit,
+) {
     val (close, other) = trackGroups(tracks, near)
     androidx.compose.foundation.lazy.LazyColumn(Modifier.padding(vertical = 12.dp)) {
         item { Choice("No track", "A review alone", chosen == null) { onChoose(null) } }
         if (close.isNotEmpty()) item { GroupLabel("Near this hike") }
-        items(close.size) { i -> TrackChoice(close[i], chosen, onChoose) }
+        items(close.size) { i -> TrackChoice(close[i], chosen, close[i].id in waiting, onChoose) }
         if (other.isNotEmpty()) item { GroupLabel(if (close.isEmpty()) "Your tracks" else "Other tracks") }
-        items(other.size) { i -> TrackChoice(other[i], chosen, onChoose) }
+        items(other.size) { i -> TrackChoice(other[i], chosen, other[i].id in waiting, onChoose) }
     }
 }
 
@@ -685,8 +710,8 @@ private fun GroupLabel(s: String) = Text(
 )
 
 @Composable
-private fun TrackChoice(t: TrackStore.Track, chosen: Long?, onChoose: (Long?) -> Unit) {
-    val posted = t.posted != null
+private fun TrackChoice(t: TrackStore.Track, chosen: Long?, waiting: Boolean, onChoose: (Long?) -> Unit) {
+    val posted = t.posted != null || waiting
     Row(
         Modifier.fillMaxWidth().selectable(t.id == chosen, enabled = !posted, role = Role.RadioButton) { onChoose(t.id) }
             .heightIn(min = 56.dp).padding(horizontal = 8.dp, vertical = 4.dp),
@@ -697,7 +722,11 @@ private fun TrackChoice(t: TrackStore.Track, chosen: Long?, onChoose: (Long?) ->
             val dim = if (posted) MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f) else MaterialTheme.colorScheme.onSurface
             Text(trackLabel(t), style = MaterialTheme.typography.bodyLarge, color = dim)
             Text(
-                if (posted) "Already posted" else t.stats?.let(::statsLine) ?: "",
+                when {
+                    t.posted != null -> "Already posted"
+                    waiting -> "Waiting to post"
+                    else -> t.stats?.let(::statsLine) ?: ""
+                },
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }

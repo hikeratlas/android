@@ -70,6 +70,8 @@ fun YouScreen(
      * (as the website's), so there's one place to change them.
      */
     units: UnitsActions? = null,
+    /** Posts waiting to go up: listed here signed out, else on your profile (linked to from here). */
+    waiting: WaitingActions? = null,
 ) {
     val context = LocalContext.current
     var credits by remember { mutableStateOf(false) }
@@ -80,6 +82,15 @@ fun YouScreen(
     ) {
         Text("You", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 4.dp, top = 8.dp))
         if (account != null) AccountCard(account)
+        if (waiting != null && waiting.entries.isNotEmpty()) {
+            val open = account?.openProfile
+            if (account?.state is com.hikeratlas.android.atproto.AccountState.In && open != null) {
+                val n = waiting.entries.size
+                Card("Waiting to post") { Item("$n ${if (n == 1) "post" else "posts"} waiting to go up", "See them on your profile", onClick = open) }
+            } else {
+                WaitingPosts(waiting)
+            }
+        }
         if (units != null && !units.signedIn) UnitsCard(units)
         if (storage != null) StorageCard(storage)
         Card("About") {

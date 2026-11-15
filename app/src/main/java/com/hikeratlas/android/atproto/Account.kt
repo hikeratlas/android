@@ -33,6 +33,9 @@ sealed interface AccountState {
     data class In(val did: String, val handle: String?, val avatar: String?) : AccountState
 }
 
+/** Another account than [wanted] is signed in ([signedIn]): see [Account.xrpcAs]. */
+class OtherAccountException(val wanted: String, val signedIn: String) : Exception("Signed in as another account")
+
 /** Signing in didn't work: [message] is what to tell the user. */
 class SignInException(message: String, cause: Throwable? = null) : Exception(message, cause)
 
@@ -159,6 +162,28 @@ class Account(
 
     /** The signed-in account's DID, or null. */
     val did: String? get() = stored?.did
+
+    /** [did], once the saved session has been read (at start, it may not have been yet). */
+    suspend fun currentDid(): String? {
+        restored.await()
+        return stored?.did
+    }
+
+    /**
+     * Calls as [did] only: each request checks the session is still that
+     * account's, and throws [OtherAccountException] if another account is
+     * signed in by then, so a post made as one account never goes up as
+     * another (its tokens never even go with it).
+     */
+    fun xrpcAs(did: String): Xrpc = Xrpc(http, null, object : XrpcAuth {
+        override val nonces get() = auth.nonces
+        override fun key(s: Stored) = auth.key(s)
+        override suspend fun fresh() = auth.fresh().also { check(it) }
+        override suspend fun refresh(used: Stored) = auth.refresh(used).also { check(it) }
+        private fun check(s: Stored) {
+            if (s.did != did) throw OtherAccountException(did, s.did)
+        }
+    })
 
     /**
      * Starts signing in: at Bluesky ([AtConfig.BLUESKY], whose page asks

@@ -112,7 +112,16 @@ fun AppScreen(app: HikerAtlasApp, link: Uri? = null, onLinkHandled: () -> Unit =
         isFaved = { key -> Faves.isFaved(app.account.xrpc, app.account.did ?: throw SignedOutException(), key) },
         setFave = { key, on -> Faves.set(app.account.xrpc, app.account.did ?: throw SignedOutException(), key, on) },
     )
-    val photoStore = remember { com.hikeratlas.android.atproto.Photos.Store(java.io.File(context.filesDir, "photos")) }
+    val photoStore = app.photoStore
+    val outbox = app.outbox
+    val waitingEntries by outbox.entries.collectAsState()
+    val waitingActive by outbox.active.collectAsState()
+    val postedCount by outbox.posted.collectAsState()
+    val waitingActions = WaitingActions(
+        waitingEntries, waitingActive,
+        retry = { id -> scope.launch { outbox.retry(id) } },
+        discard = { id -> scope.launch { outbox.discard(id) } },
+    )
     val photoActions = remember(photoStore) {
         PhotoActions(
             prepare = { input ->
@@ -142,7 +151,7 @@ fun AppScreen(app: HikerAtlasApp, link: Uri? = null, onLinkHandled: () -> Unit =
             com.hikeratlas.android.track.hikesNear(library.lines(id), app.routes.regions(), app.routes.index(), { app.routes.park(it) })
         },
         tracksNear = { line -> library.tracksNear(line) },
-        post = { d, progress -> postDraft(app.account.xrpc, app.account.did ?: throw SignedOutException(), library, d, progress) },
+        post = { d, progress -> sendDraft(outbox, app.account.did ?: throw SignedOutException(), handle, library, d, progress) },
         openProfile = { posted ->
             seePostTarget(did, handle, posted)?.let {
                 profileTarget = it
@@ -152,6 +161,7 @@ fun AppScreen(app: HikerAtlasApp, link: Uri? = null, onLinkHandled: () -> Unit =
         verifyPosted = { id -> app.account.did?.let { verifyPosted(app.account.xrpc, it, library, id) } },
         photos = photoActions,
         trackGpx = { id -> library.gpxText(id) },
+        waitingTracks = waitingEntries.mapNotNull { it.trackId }.toSet(),
     )
     // The licence for new posts, read from the profile record when You opens.
     var license by remember(did) { mutableStateOf<String?>(null) }
@@ -333,6 +343,8 @@ fun AppScreen(app: HikerAtlasApp, link: Uri? = null, onLinkHandled: () -> Unit =
                                 },
                             )
                         },
+                        waiting = waitingActions,
+                        refreshKey = postedCount,
                     )
                 } else {
                     YouScreen(
@@ -345,6 +357,7 @@ fun AppScreen(app: HikerAtlasApp, link: Uri? = null, onLinkHandled: () -> Unit =
                         ),
                         accountActions,
                         unitsActions,
+                        waiting = waitingActions,
                     )
                 }
             }

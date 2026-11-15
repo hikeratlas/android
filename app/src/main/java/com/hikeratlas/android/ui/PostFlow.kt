@@ -1,24 +1,39 @@
 package com.hikeratlas.android.ui
 
 import com.hikeratlas.android.atproto.Photos
+import com.hikeratlas.android.atproto.PostException
 import com.hikeratlas.android.atproto.Posts
 import com.hikeratlas.android.atproto.Xrpc
+import com.hikeratlas.android.outbox.Outbox
 import com.hikeratlas.android.track.TrackLibrary
-import com.hikeratlas.android.track.TrackStore
+
+/** What became of a post sent from the form. */
+sealed interface PostOutcome {
+    data object Posted : PostOutcome
+    /** Kept on the phone to go up later: [message] says when. */
+    data class Queued(val message: String) : PostOutcome
+}
+
+const val WILL_POST = "Will post when you're online. Until then it's under Waiting posts on your profile."
+const val WILL_POST_SIGNED_IN = "Will post once you sign in again (You tab). Until then it's under Waiting posts on your profile."
 
 /**
- * Posts what the form holds, as [did]. A track is marked posted on the
- * phone as soon as its record is made, so it's never posted twice: if the
- * review then fails, trying again points the review at the track already
- * posted.
+ * Posts what the form holds, as [did], by way of the [outbox]: saved on the
+ * phone first, then up at once. Every post takes this one way, signal or
+ * not, so a post cut off halfway (signal lost, the app killed) is never
+ * lost or posted twice: it carries on from where it got to. A network
+ * error leaves it waiting for signal; a refusal (a 4xx) takes it back out
+ * of the outbox and throws, so the form, which kept its contents, can say
+ * why and let it be tried again. A track is marked posted on the phone as
+ * soon as its record is made, so it's never posted twice: if the review
+ * then fails, trying again points the review at the track already posted.
  */
-internal suspend fun postDraft(
-    xrpc: Xrpc, did: String, library: TrackLibrary, d: PostDraft, progress: (String) -> Unit,
-    now: () -> Long = System::currentTimeMillis,
-) {
+internal suspend fun sendDraft(
+    outbox: Outbox, did: String, handle: String?, library: TrackLibrary, d: PostDraft, progress: (String) -> Unit,
+): PostOutcome {
     val id = d.trackId
     val already = id?.let { library.posted(it) }
-    if (already != null && d.text.isBlank()) return
+    if (already != null && d.text.isBlank()) return PostOutcome.Posted
     val gpx = if (id != null && already == null) library.gpxText(id) ?: throw IllegalStateException("That track is no longer on this phone") else null
     // Photos without GPS placed by their time on the track, as the website
     // does as it posts; the track's GPX is read for that even when it went
@@ -27,23 +42,28 @@ internal suspend fun postDraft(
         val track = gpx ?: id?.let { library.gpxText(it) }
         d.photos.map { Photos.placed(it, track) }
     }
-    var mark = already
-    val published = Posts.publish(
-        xrpc, did,
+    progress("Posting…")
+    val entry = outbox.add(
+        did, handle, d.title,
         Posts.Post(
             text = d.text, hikedAt = Posts.noonOf(d.day), tags = d.tags, routeKey = d.hike?.key, title = d.title, gpx = gpx,
             track = already?.let { Posts.StrongRef(it.trackUri, it.trackCid) }, photos = photos,
         ),
-        progress,
-        onTrack = { ref ->
-            if (id != null) {
-                mark = TrackStore.Posted(ref.uri, ref.cid, null, now())
-                library.setPosted(id, mark)
-            }
-        },
+        trackId = id,
     )
-    val m = mark
-    if (id != null && m != null && published.review != null) library.setPosted(id, m.copy(reviewUri = published.review.uri))
+    return when (val o = outbox.upload(entry.id, progress = progress)) {
+        Outbox.Outcome.Posted, Outbox.Outcome.Gone -> PostOutcome.Posted
+        is Outbox.Outcome.Waiting -> {
+            outbox.schedule(entry.id)
+            PostOutcome.Queued(WILL_POST)
+        }
+        Outbox.Outcome.NeedsSignIn -> PostOutcome.Queued(WILL_POST_SIGNED_IN)
+        Outbox.Outcome.OtherAccount -> PostOutcome.Queued("Will post once ${handle?.let { "@$it" } ?: "that account"} signs in again.")
+        is Outbox.Outcome.Failed -> {
+            outbox.discard(entry.id)
+            throw PostException(o.message)
+        }
+    }
 }
 
 /** A posted track whose track record is gone (deleted, on the website say) can be posted again. */

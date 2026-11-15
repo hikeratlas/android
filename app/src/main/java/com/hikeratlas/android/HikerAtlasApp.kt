@@ -31,7 +31,7 @@ import org.maplibre.android.MapLibre
 import org.maplibre.android.module.http.HttpRequestUtil
 import java.util.concurrent.TimeUnit
 
-class HikerAtlasApp : Application(), RecorderHost, OfflineHost {
+class HikerAtlasApp : Application(), RecorderHost, OfflineHost, com.hikeratlas.android.outbox.OutboxHost {
     /** For our own requests: the style, and PMTiles range reads. */
     lateinit var http: OkHttpClient
         private set
@@ -69,6 +69,12 @@ class HikerAtlasApp : Application(), RecorderHost, OfflineHost {
             com.hikeratlas.android.atproto.KeystoreDpopKeys(), scope = appScope,
         )
     }
+
+    /** Photos prepared for the post form, kept until it's done with them. */
+    val photoStore by lazy { com.hikeratlas.android.atproto.Photos.Store(java.io.File(filesDir, "photos")) }
+
+    /** Posts waiting on the phone to go up (every post goes this way: see ui/PostFlow.kt). */
+    override val outbox by lazy { com.hikeratlas.android.outbox.Outbox(this, account, library, photoStore) }
 
     /** The units distances and heights show in: the profile's when signed in, else this phone's. */
     val units by lazy {
@@ -134,6 +140,8 @@ class HikerAtlasApp : Application(), RecorderHost, OfflineHost {
         // The saved session, restored (in the background) at launch, and its units.
         account
         units
+        // Waiting posts: cleaned up, rescheduled, and resumed on sign-in.
+        outbox.start(appScope)
     }
 
     private companion object {

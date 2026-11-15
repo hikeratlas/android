@@ -68,6 +68,13 @@ class FakeAtproto : AutoCloseable {
     @Volatile var getRecordFails: Int? = null
     /** The PDS's listRecords answers with this HTTP status instead. */
     @Volatile var listFails: Int? = null
+    /**
+     * Answers a signed-in PDS request with this instead, when it gives one
+     * (a 503: no signal, as the app takes it), before doing anything.
+     */
+    @Volatile var fault: ((RecordedRequest) -> MockResponse?)? = null
+    /** Does what a request asks, then answers 503, as when the connection drops before the answer comes. */
+    @Volatile var loseAnswer: ((RecordedRequest) -> Boolean)? = null
     /** Blobs getBlob serves, by CID (uploads go here too). */
     val blobsByCid = java.util.concurrent.ConcurrentHashMap<String, ByteArray>()
 
@@ -192,7 +199,12 @@ class FakeAtproto : AutoCloseable {
                 .addHeader("DPoP-Nonce", pdsNonce)
                 .body("""{"error":"InvalidToken","message":"\"exp\" claim timestamp check failed"}""").build()
         }
-        publicRead(r)?.let { return it }
+        fault?.invoke(r)?.let { return it }
+        val answer = publicRead(r) ?: write(r, path)
+        return if (loseAnswer?.invoke(r) == true) json("""{"error":"InternalServerError"}""", 503) else answer
+    }
+
+    private fun write(r: RecordedRequest, path: String): MockResponse {
         return when (path) {
             "/xrpc/com.atproto.repo.createRecord" -> {
                 val body = Json.parseToJsonElement(r.body!!.utf8()).jsonObject

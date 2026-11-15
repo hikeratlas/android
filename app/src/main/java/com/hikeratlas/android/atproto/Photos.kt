@@ -183,11 +183,17 @@ object Photos {
     }
 
     /**
-     * Prepared photos kept in the app's own storage until they're posted, so
-     * a post can wait on the phone and go up later (#60): each a JPEG file
-     * in [dir], its details in the [Posts.Photo] that names it.
+     * Prepared photos kept in the app's own storage while the post form
+     * has them: each a JPEG file in [dir], its details in the [Posts.Photo]
+     * that names it. A post saved to go up later takes copies of its own
+     * (the outbox's), so the form drops these when it closes.
      */
     class Store(private val dir: File, private val zone: () -> ZoneId = { ZoneId.systemDefault() }) {
+        // The files handed to forms open in this process. A queued post
+        // takes copies of its photos (see Outbox), so any other file here is
+        // left from a form that went with the process: see [cleanOrphans].
+        private val live = java.util.Collections.synchronizedSet(mutableSetOf<String>())
+
         /**
          * Prepares [bytes] and keeps them. [capturedAt]: when a photo just
          * taken with the camera was taken, for one whose EXIF doesn't say.
@@ -196,6 +202,8 @@ object Photos {
             val p = prepare(bytes, zone())
             dir.mkdirs()
             val f = File(dir, "${UUID.randomUUID()}.jpg")
+            // Live before the file exists, so a clean-up running meanwhile never takes it.
+            live += f.path
             f.writeBytes(p.bytes)
             val fallback = p.takenAt == null && capturedAt != null
             return Posts.Photo(
@@ -209,6 +217,18 @@ object Photos {
         fun discard(p: Posts.Photo) {
             val f = File(p.file)
             if (f.parentFile?.canonicalPath == dir.canonicalPath) f.delete()
+            live -= p.file
+        }
+
+        /**
+         * Deletes the photos no form holds: left by a form open when the app
+         * was killed. Only files older than [minAgeMs], in case one is being
+         * written by another way in.
+         */
+        fun cleanOrphans(now: Long = System.currentTimeMillis(), minAgeMs: Long = 60_000) {
+            dir.listFiles()?.forEach { f ->
+                if (f.isFile && f.path !in live && now - f.lastModified() >= minAgeMs) f.delete()
+            }
         }
     }
 }
