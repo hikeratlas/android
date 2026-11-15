@@ -216,6 +216,7 @@ object Profiles {
             "com.atproto.repo.deleteRecord",
             buildJsonObject { put("repo", did); put("collection", collection); put("rkey", rkey) },
         )
+        Indexer.notify(uri)
     }
 
     /** A blob's public URL on its PDS (com.atproto.sync.getBlob), as the website's blobUrl: for photos. */

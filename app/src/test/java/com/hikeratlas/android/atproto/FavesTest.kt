@@ -42,8 +42,30 @@ class FavesTest {
 
     @After
     fun tearDown() {
+        Indexer.notifier = {}
         scope.cancel()
         fake.close()
+    }
+
+    // Each write tells the indexer its record's URI once, so it shows on hike sheets at once (website#160).
+    @Test
+    fun everyWriteNotifiesTheIndexer() = runBlocking {
+        val heard = java.util.Collections.synchronizedList(mutableListOf<String>())
+        Indexer.notifier = { heard += it }
+        val fave = "at://${fake.did}/${Faves.NSID}/$key"
+        Faves.set(account.xrpc, fake.did, key, true)
+        Faves.set(account.xrpc, fake.did, key, false)
+        assertEquals(listOf(fave, fave), heard)
+
+        heard.clear()
+        val record = kotlinx.serialization.json.buildJsonObject { put("\$type", kotlinx.serialization.json.JsonPrimitive(Posts.REVIEW)); put("text", kotlinx.serialization.json.JsonPrimitive("x")); put("createdAt", kotlinx.serialization.json.JsonPrimitive("2026-11-15T00:00:00.000Z")) }
+        val made = Posts.create(account.xrpc, fake.did, Posts.REVIEW, record, rkey = "3lbaaaaaaaaaa")
+        // A retry finding what a lost answer made tells it too.
+        val found = Posts.find(account.xrpc, fake.did, Posts.REVIEW, "3lbaaaaaaaaaa")!!
+        assertEquals(made.uri, found.uri)
+        val p = Profiles.Profile(fake.did, null, fake.pdsOrigin, listOf(Profiles.Review(made.uri, made.cid, "x", "2026")), emptyList(), emptyList())
+        Profiles.delete(account.xrpc, fake.did, p.deletion(p.reviews.single()))
+        assertEquals(listOf(made.uri, made.uri, made.uri), heard)
     }
 
     private fun calls(nsid: String) = fake.pdsRequests.filter { it.url.encodedPath == "/xrpc/$nsid" }
