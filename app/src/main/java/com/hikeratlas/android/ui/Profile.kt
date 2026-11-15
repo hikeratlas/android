@@ -71,6 +71,8 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 
 /**
  * A post to show, from "See post" on a posted track: the profile lands on
@@ -106,6 +108,12 @@ class ProfileActions(
     val shareGpx: (title: String, gpx: String) -> Unit,
     /** A photo at full size (in the browser, as the website links it). */
     val openPhoto: (String) -> Unit,
+    /**
+     * Saves an edit of one of your own reviews over it (putRecord, swapping
+     * the CID read), giving its new address; null where the profile isn't
+     * yours (no Edit).
+     */
+    val edit: (suspend (Profiles.Review, Posts.ReviewEdit) -> Posts.StrongRef)? = null,
 )
 
 internal sealed interface ProfileLoad {
@@ -149,7 +157,8 @@ internal fun postTitle(routeKey: String?, own: String?, found: HikesFound): Stri
 
 /**
  * Your profile, as the website's /@handle: Overview (reviews, every track,
- * and faved hikes) and, when [settings] is given, Settings.
+ * and faved hikes; your reviews can be edited, your posts deleted) and,
+ * when [settings] is given, Settings.
  * [waiting]: posts waiting on the phone to go up, listed above the posts;
  * [refreshKey] changes when one has, so the posts are read again.
  */
@@ -207,7 +216,7 @@ private fun Overview(target: ProfileTarget, actions: ProfileActions, waiting: Wa
         }
     }
     when (val l = load) {
-        is ProfileLoad.Ready -> PostList(l.profile, target.highlight, actions, waiting) { load = ProfileLoad.Ready(it) }
+        is ProfileLoad.Ready -> PostList(l.profile, target.highlight, actions, waiting, onReload = { attempt++ }) { load = ProfileLoad.Ready(it) }
         // Waiting posts show without the profile: it's often without signal that they're looked at.
         else -> Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
             waiting?.let { WaitingPosts(it) }
@@ -238,7 +247,12 @@ internal data class Confirming(val uri: String, val isReview: Boolean, val delet
 
 @Composable
 private fun PostList(
-    profile: Profiles.Profile, highlight: PostRef?, actions: ProfileActions, waiting: WaitingActions?, onChange: (Profiles.Profile) -> Unit,
+    profile: Profiles.Profile,
+    highlight: PostRef?,
+    actions: ProfileActions,
+    waiting: WaitingActions?,
+    onReload: () -> Unit = {},
+    onChange: (Profiles.Profile) -> Unit,
 ) {
     val scope = rememberCoroutineScope()
     var found by remember(profile.did) { mutableStateOf(HikesFound(null, false, actions.canFind)) }
@@ -265,6 +279,10 @@ private fun PostList(
     // The URIs of the records being deleted, so the review and its track both say so.
     var deleting by remember { mutableStateOf<Set<String>>(emptySet()) }
     var failed by remember { mutableStateOf<Pair<String, String>?>(null) }
+    // The review being edited, as it was when Edit was pressed: its CID is
+    // what the save swaps, so a profile read again meanwhile can't make it
+    // overwrite a change it hasn't shown.
+    var editing by remember { mutableStateOf<Profiles.Review?>(null) }
     val list = rememberLazyListState()
     val mine = actions.delete != null
     val empty = profile.reviews.isEmpty() && profile.tracks.isEmpty()
@@ -293,6 +311,7 @@ private fun PostList(
                     deleting = r.uri in deleting,
                     error = failed?.takeIf { it.first == r.uri }?.second,
                     onDelete = { confirming = Confirming(r.uri, true, profile.deletion(r)) },
+                    onEdit = actions.edit?.let { { editing = r } },
                 ) {
                     r.tags.takeIf { it.isNotEmpty() }?.let { Tags(it) }
                     Text(r.text, style = MaterialTheme.typography.bodyMedium)
@@ -323,6 +342,23 @@ private fun PostList(
             onOpen = actions.openHike, onRetry = {},
         )
         item(key = "end") { Box(Modifier.padding(bottom = 24.dp)) }
+    }
+    val edit = actions.edit
+    val edited = editing
+    if (edit != null && edited != null) {
+        EditReviewDialog(edited, profile.pds, profile.did, save = { e ->
+            try {
+                val ref = edit(edited, e)
+                // Shown as saved, from what was written, at once.
+                val record = Posts.editedReview(edited.value, e)
+                Profiles.parseReview(buildJsonObject { put("uri", ref.uri); put("cid", ref.cid); put("value", record) })
+                    ?.let { onChange(profile.with(it)) }
+            } catch (x: com.hikeratlas.android.atproto.PostException) {
+                // Changed meanwhile: read it again, so the next edit starts from what's there now.
+                if ((x.cause as? com.hikeratlas.android.atproto.XrpcException)?.error == "InvalidSwap") onReload()
+                throw x
+            }
+        }, onClose = { editing = null })
     }
     confirming?.let { c ->
         AlertDialog(
@@ -385,7 +421,7 @@ internal fun Tags(tags: List<String>) {
     }
 }
 
-/** A review or a track: its hike and day, [body], its licence, and Delete. */
+/** A review or a track: its hike and day, [body], its licence, Edit (your reviews) and Delete. */
 @Composable
 private fun PostCard(
     profile: Profiles.Profile,
@@ -399,6 +435,7 @@ private fun PostCard(
     deleting: Boolean,
     error: String?,
     onDelete: () -> Unit,
+    onEdit: (() -> Unit)? = null,
     body: @Composable ColumnScope.() -> Unit,
 ) {
     val muted = MaterialTheme.colorScheme.onSurfaceVariant
@@ -427,6 +464,7 @@ private fun PostCard(
                 "Shared under ${Posts.LICENSE_LABEL[license ?: "hikeratlas-only"] ?: license}${if (license == null) " (no licence given)" else ""}",
                 style = MaterialTheme.typography.bodySmall, color = muted, modifier = Modifier.weight(1f),
             )
+            if (onEdit != null) TextButton(onClick = onEdit, enabled = !deleting) { Text("Edit") }
             if (actions.delete != null) {
                 TextButton(onClick = onDelete, enabled = !deleting) {
                     Text(if (deleting) "Deleting…" else "Delete", color = if (deleting) muted else MaterialTheme.colorScheme.error)

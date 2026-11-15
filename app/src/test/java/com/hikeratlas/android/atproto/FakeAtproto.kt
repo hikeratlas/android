@@ -57,6 +57,11 @@ class FakeAtproto : AutoCloseable {
      * deleteRecord removes them.
      */
     val records = java.util.concurrent.ConcurrentHashMap<String, JsonObject>()
+    /** Records' CIDs once putRecord has replaced them, by "collection/rkey" (before that, "bafy-<key>"). */
+    private val cids = java.util.concurrent.ConcurrentHashMap<String, String>()
+    private val versions = java.util.concurrent.atomic.AtomicInteger()
+    /** The CID a record has now: a new one each time putRecord writes it, as a real PDS's. */
+    fun cidOf(key: String) = cids[key] ?: "bafy-$key"
     /** Blobs uploaded: their Content-Type and bytes. */
     val blobs = CopyOnWriteArrayList<Pair<String?, ByteArray>>()
     /** uploadBlob answers with this blob (JSON) instead of one made up from the upload. */
@@ -232,13 +237,27 @@ class FakeAtproto : AutoCloseable {
             "/xrpc/com.atproto.repo.putRecord" -> {
                 val body = Json.parseToJsonElement(r.body!!.utf8()).jsonObject
                 val key = "${body["collection"]!!.jsonPrimitive.content}/${body["rkey"]!!.jsonPrimitive.content}"
-                records[key] = body["record"]!!.jsonObject
-                json("""{"uri":"at://$did/$key","cid":"bafy-$key"}""")
+                val swap = body["swapRecord"]?.jsonPrimitive?.content
+                val invalid = body["record"]?.jsonObject?.let(::invalidPhotos)
+                when {
+                    // As a PDS: swapRecord must be the record's current CID (and the record there).
+                    swap != null && (!records.containsKey(key) || cidOf(key) != swap) ->
+                        json("""{"error":"InvalidSwap","message":"Record was at ${if (records.containsKey(key)) cidOf(key) else "null"}"}""", 400)
+                    invalid != null -> json("""{"error":"InvalidRecord","message":"Invalid record: $invalid"}""", 400)
+                    else -> {
+                        records[key] = body["record"]!!.jsonObject
+                        val cid = "bafy-$key-v${versions.incrementAndGet()}"
+                        cids[key] = cid
+                        json("""{"uri":"at://$did/$key","cid":"$cid"}""")
+                    }
+                }
             }
             "/xrpc/com.atproto.repo.deleteRecord" -> {
                 // As a PDS: deleting a record that isn't there is fine.
                 val body = Json.parseToJsonElement(r.body!!.utf8()).jsonObject
-                records.remove("${body["collection"]!!.jsonPrimitive.content}/${body["rkey"]!!.jsonPrimitive.content}")
+                val key = "${body["collection"]!!.jsonPrimitive.content}/${body["rkey"]!!.jsonPrimitive.content}"
+                records.remove(key)
+                cids.remove(key)
                 json("{}")
             }
             "/xrpc/com.atproto.repo.uploadBlob" -> {
@@ -285,7 +304,7 @@ class FakeAtproto : AutoCloseable {
             when {
                 getRecordFails != null -> json("""{"error":"InternalServerError"}""", getRecordFails!!)
                 r.url.queryParameter("repo") == did && value != null ->
-                    json("""{"uri":"at://$did/$key","cid":"bafy-$key","value":$value}""")
+                    json("""{"uri":"at://$did/$key","cid":"${cidOf(key)}","value":$value}""")
                 else -> json("""{"error":"RecordNotFound","message":"Could not locate record"}""", 400)
             }
         }
@@ -297,7 +316,7 @@ class FakeAtproto : AutoCloseable {
             val page = records.keys.filter { it.startsWith("$collection/") }.map { it.removePrefix("$collection/") }
                 .sorted().filter { after == null || it > after }.take(limit)
             val list = page.joinToString(",") { k ->
-                """{"uri":"at://$did/$collection/$k","cid":"bafy-$k","value":${records["$collection/$k"]}}"""
+                """{"uri":"at://$did/$collection/$k","cid":"${cidOf("$collection/$k")}","value":${records["$collection/$k"]}}"""
             }
             val cursor = if (page.size == limit) ""","cursor":"${page.last()}"""" else ""
             if (listFails != null) json("""{"error":"InternalServerError"}""", listFails!!)

@@ -228,6 +228,9 @@ fun AppScreen(app: HikerAtlasApp, link: Uri? = null, onLinkHandled: () -> Unit =
         },
         shareGpx = { title, gpx -> scope.launch { com.hikeratlas.android.track.shareGpx(context, title, gpx) } },
         openPhoto = { com.hikeratlas.android.map.openUrl(context, it) },
+        edit = { r, e ->
+            com.hikeratlas.android.atproto.Posts.editReview(app.account.xrpc, app.account.did ?: throw SignedOutException(), r, e)
+        },
     )
     val indexer = remember(app.http) { com.hikeratlas.android.atproto.IndexerClient(app.http) }
     val identity = remember(app.http) { com.hikeratlas.android.atproto.Identity(app.http) }
