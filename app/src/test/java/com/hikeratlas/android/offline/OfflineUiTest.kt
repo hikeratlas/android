@@ -170,4 +170,37 @@ class OfflineUiTest {
         assertEquals(false, online)
         compose.onNodeWithText("Offline · downloaded areas").assertIsDisplayed()
     }
+
+    /** #83: Wi-Fi to cellular, the active network null meanwhile, then the old one lost: no chip. */
+    @Test
+    fun noChipThroughAHandover() {
+        val context = androidx.test.core.app.ApplicationProvider.getApplicationContext<android.app.Application>()
+        val cm = context.getSystemService(android.net.ConnectivityManager::class.java)
+        val shadow = org.robolectric.Shadows.shadowOf(cm)
+        val internet = org.robolectric.shadows.ShadowNetworkCapabilities.newInstance()
+        org.robolectric.Shadows.shadowOf(internet).addCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET)
+        shadow.setNetworkCapabilities(cm.activeNetwork, internet)
+        var online: Boolean? = null
+        compose.setContent {
+            HikerAtlasTheme {
+                val on = rememberOnline()
+                online = on
+                if (!on) OfflineChip()
+            }
+        }
+        compose.waitForIdle()
+        val wifi = cm.activeNetwork!!
+        val cell = org.robolectric.shadows.ShadowNetwork.newInstance(9_999)
+        shadow.setDefaultNetworkActive(false)
+        shadow.setActiveNetworkInfo(null)
+        shadow.networkCallbacks.forEach {
+            it.onAvailable(cell)
+            it.onCapabilitiesChanged(cell, internet)
+            it.onLost(wifi)
+        }
+        org.robolectric.shadows.ShadowLooper.idleMainLooper()
+        compose.waitForIdle()
+        assertEquals(true, online)
+        assertEquals(0, compose.onAllNodesWithText("Offline · downloaded areas").fetchSemanticsNodes().size)
+    }
 }

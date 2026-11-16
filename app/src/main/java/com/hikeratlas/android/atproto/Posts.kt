@@ -407,7 +407,8 @@ object Posts {
     /**
      * The record at [collection]/[rkey] in [did]'s repository, if there is
      * one: null when the PDS says there's no such record. Network trouble
-     * is an IOException, as anything else the PDS says is an XrpcException.
+     * is an IOException, as anything else the PDS says is an XrpcException;
+     * an answer without the record's uri and cid, a [PostException].
      */
     suspend fun find(xrpc: Xrpc, did: String, collection: String, rkey: String): StrongRef? {
         val r = try {
@@ -416,8 +417,10 @@ object Posts {
             if (e.status == 400) return null
             throw e
         }
-        val uri = r["uri"]?.jsonPrimitive?.contentOrNull ?: throw IOException("getRecord gave no uri")
-        val cid = r["cid"]?.jsonPrimitive?.contentOrNull ?: throw IOException("getRecord gave no cid")
+        // A bad answer, not the network: no use waiting for signal over it.
+        val uri = r["uri"]?.jsonPrimitive?.contentOrNull
+        val cid = r["cid"]?.jsonPrimitive?.contentOrNull
+        if (uri == null || cid == null) throw PostException("getRecord failed (no uri and cid in the answer)")
         // Made by an earlier try whose answer was lost: that try couldn't tell the indexer.
         Indexer.notify(uri, (r["value"] as? JsonObject)?.let(::routeKeyOf))
         return StrongRef(uri, cid)
@@ -441,8 +444,11 @@ object Posts {
         return if (l != null && l in LICENSES) l else DEFAULT_LICENSE
     }
 
-    private fun unreachable(e: IOException) =
+    private fun unreachable(e: IOException) = if (e is ServerException) {
+        PostException("Your account's server had a problem (HTTP ${e.status}). Try again in a while.", e)
+    } else {
         PostException("Couldn't reach your account's server" + (e.message?.let { " ($it)" } ?: "") + ". Check your connection and try again.", e)
+    }
 
     fun gzip(text: String): ByteArray {
         val out = ByteArrayOutputStream()

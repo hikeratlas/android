@@ -172,9 +172,9 @@ class OAuth(private val http: OkHttpClient, private val config: AtConfig, val no
             val req = Request.Builder().url(url)
                 .header("DPoP", Dpop.proof(key, "POST", url, nonces[url]))
                 .post(form).build()
-            http.newCall(req).execute().use { r ->
+            http.newCall(req).sent().use { r ->
                 nonces.update(url, r)
-                val text = r.body.string()
+                val text = try { r.body.string() } catch (e: IOException) { throw NetworkException(e) }
                 val json = try { JSON.parseToJsonElement(text) as? JsonObject } catch (e: IllegalArgumentException) { null }
                 if (r.isSuccessful) return@withContext json ?: JsonObject(emptyMap())
                 val error = json?.get("error")?.jsonPrimitive?.contentOrNull
@@ -183,7 +183,7 @@ class OAuth(private val http: OkHttpClient, private val config: AtConfig, val no
                 } else if (r.code in 400..499) {
                     throw OAuthException(r.code, error, json?.get("error_description")?.jsonPrimitive?.contentOrNull)
                 } else {
-                    throw IOException("HTTP ${r.code} from $url")
+                    throw ServerException(r.code, url)
                 }
             }
         }
@@ -193,10 +193,13 @@ class OAuth(private val http: OkHttpClient, private val config: AtConfig, val no
 
     private suspend fun getJson(url: String): JsonObject? = withContext(Dispatchers.IO) {
         if (url.toHttpUrlOrNull() == null) return@withContext null
-        http.newCall(Request.Builder().url(url).build()).execute().use { r ->
+        http.newCall(Request.Builder().url(url).build()).sent().use { r ->
             if (r.code in 400..499) return@withContext null
-            if (!r.isSuccessful) throw IOException("HTTP ${r.code} for $url")
+            if (!r.isSuccessful) throw ServerException(r.code, url)
             try { JSON.parseToJsonElement(r.body.string()).jsonObject } catch (e: IllegalArgumentException) { null }
         }
     }
+
+    // OkHttp's IOExceptions here are all the request not getting through.
+    private fun okhttp3.Call.sent(): okhttp3.Response = try { execute() } catch (e: IOException) { throw NetworkException(e) }
 }

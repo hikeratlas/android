@@ -52,6 +52,8 @@ internal fun waitingWhat(e: Outbox.Entry): String {
 /** Where a waiting post is at, in words. */
 internal fun waitingState(e: Outbox.Entry, active: String?): String = when {
     e.id == active -> "Uploading…"
+    e.state == Outbox.State.WAITING && e.serverError && e.error != null ->
+        "Trying again soon: your account's server had a problem (${e.error})"
     e.state == Outbox.State.WAITING -> if (e.error != null) "Waiting for signal (last try: ${e.error})" else "Waiting for signal"
     e.state == Outbox.State.NEEDS_SIGN_IN -> "Needs you to sign in again: your session ended"
     e.state == Outbox.State.OTHER_ACCOUNT ->

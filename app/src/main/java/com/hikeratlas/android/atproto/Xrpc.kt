@@ -22,6 +22,29 @@ class XrpcException(val status: Int, val error: String?, message: String?) :
     Exception(message ?: error ?: "HTTP $status")
 
 /**
+ * A server answered with a 5xx: it's up, but had a problem. An IOException,
+ * as before, so whatever took one as "try again later" still does; told
+ * apart from [NetworkException] so it can be said as the server's problem,
+ * not the phone's signal.
+ */
+class ServerException(val status: Int, what: String) : java.io.IOException("HTTP $status from $what")
+
+/**
+ * The request never got an answer: no network, a name that didn't resolve,
+ * a connection refused, reset or cut short, a timeout, a TLS handshake that
+ * didn't finish. What OkHttp throws as it sends, wrapped so it's told apart
+ * from IOExceptions that aren't the network's (a bad answer, a file).
+ */
+class NetworkException(cause: java.io.IOException) : java.io.IOException(cause.message ?: cause.javaClass.simpleName, cause) {
+    companion object {
+        /** Whether [e] is one OkHttp throws for the network, in case one reaches us unwrapped. */
+        fun isTransport(e: Throwable): Boolean = e is NetworkException || e is java.net.UnknownHostException ||
+            e is java.net.SocketException || e is java.io.InterruptedIOException || e is javax.net.ssl.SSLException ||
+            e is java.io.EOFException
+    }
+}
+
+/**
  * No session: never signed in, signed out, or a session the server no
  * longer honours (revoked, or past its two weeks). Signing in again is the
  * way on.
@@ -51,8 +74,9 @@ internal interface XrpcAuth {
  * again, once each. Without a session ([Xrpc.public]), it reads anyone's
  * public records from their PDS.
  *
- * Network trouble is an IOException; an error the PDS gives, an
- * [XrpcException]; a session that's gone, [SignedOutException].
+ * Network trouble is a [NetworkException], a 5xx a [ServerException]
+ * (both IOExceptions); an error the PDS gives, an [XrpcException]; a
+ * session that's gone, [SignedOutException].
  */
 class Xrpc internal constructor(
     private val http: OkHttpClient,
@@ -99,9 +123,14 @@ class Xrpc internal constructor(
                 }
             }.build()
             val (code, bytes, wwwAuth) = withContext(Dispatchers.IO) {
-                http.newCall(req).execute().use { r ->
-                    auth?.nonces?.update(url.toString(), r)
-                    Triple(r.code, r.body.bytes(), r.header("WWW-Authenticate"))
+                try {
+                    http.newCall(req).execute().use { r ->
+                        auth?.nonces?.update(url.toString(), r)
+                        Triple(r.code, r.body.bytes(), r.header("WWW-Authenticate"))
+                    }
+                } catch (e: java.io.IOException) {
+                    // Everything OkHttp throws here is the request not getting through.
+                    throw NetworkException(e)
                 }
             }
             if (code in 200..299) return bytes
@@ -122,7 +151,7 @@ class Xrpc internal constructor(
                     continue
                 }
             }
-            if (code >= 500) throw java.io.IOException("HTTP $code from $nsid")
+            if (code >= 500) throw ServerException(code, nsid)
             throw XrpcException(code, error, err?.get("message")?.jsonPrimitive?.contentOrNull)
         }
     }
