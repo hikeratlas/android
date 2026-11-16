@@ -128,6 +128,83 @@ class PhotosTest {
         assertEquals(30, img.height)
     }
 
+    // aspectRatio (defs#photo, required since website#177): the size as
+    // displayed, from the bytes uploaded. The fixtures are 32 × 24 as stored.
+
+    @Test
+    fun aJpegUploadedAsItIsHasItsOwnSizeTurnedByItsOrientation() {
+        // Orientation 6: stored on its side, so 24 wide and 32 high as displayed.
+        assertEquals(Photos.AspectRatio(24, 32), Photos.prepare(bytes("gps-offset.jpg"), toronto).aspectRatio)
+        assertEquals(Photos.AspectRatio(32, 24), Photos.prepare(bytes("no-exif.jpg"), toronto).aspectRatio)
+    }
+
+    @Test
+    fun orientationsFiveToEightSwapWidthAndHeight() {
+        assertEquals(1, Exif.read(bytes("gps-time-be.jpg")).orientation)
+        assertEquals(Photos.AspectRatio(32, 24), Photos.measure(bytes("gps-time-be.jpg")))
+        assertEquals(3, Exif.read(bytes("local.jpg")).orientation)
+        assertEquals(Photos.AspectRatio(32, 24), Photos.measure(bytes("local.jpg")))
+        assertEquals(6, Exif.read(bytes("gps-offset.jpg")).orientation)
+        assertEquals(Photos.AspectRatio(24, 32), Photos.measure(bytes("gps-offset.jpg")))
+        assertEquals(8, Exif.read(bytes("orientation-8.jpg")).orientation)
+        assertEquals(Photos.AspectRatio(24, 32), Photos.measure(bytes("orientation-8.jpg")))
+        // 5 and 7 too: the same photo with its Orientation patched.
+        for (o in 1..8) {
+            val b = bytes("orientation-8.jpg")
+            val at = indexOfOrientation(b)
+            b[at] = o.toByte()
+            assertEquals("orientation $o", if (o in 5..8) Photos.AspectRatio(24, 32) else Photos.AspectRatio(32, 24), Photos.measure(b))
+        }
+    }
+
+    /** Where orientation-8.jpg's Orientation value is (little-endian: its low byte). */
+    private fun indexOfOrientation(b: ByteArray): Int {
+        for (i in 0 until b.size - 1) {
+            // Tag 0x0112, type SHORT, count 1, value 8.
+            if (b[i] == 0x12.toByte() && b[i + 1] == 0x01.toByte() && b[i + 2] == 3.toByte() && b[i + 8] == 8.toByte()) return i + 8
+        }
+        error("no Orientation")
+    }
+
+    @Test
+    fun aReencodedPhotoHasTheReencodedSize() {
+        // 4000 × 3000 stored, Orientation 6: re-encoded upright at 1536 × 2048.
+        assertEquals(Photos.AspectRatio(1536, 2048), Photos.prepare(bigRotatedPhoto(), toronto).aspectRatio)
+        val bmp = Bitmap.createBitmap(40, 30, Bitmap.Config.ARGB_8888).apply { eraseColor(Color.BLUE) }
+        val png = ByteArrayOutputStream().also { bmp.compress(Bitmap.CompressFormat.PNG, 100, it) }.toByteArray()
+        assertEquals(Photos.AspectRatio(40, 30), Photos.prepare(png, toronto).aspectRatio)
+    }
+
+    @Test
+    fun aWebpIsMeasuredToo() {
+        assertEquals(Photos.AspectRatio(40, 30), Photos.measure(bytes("thumbnail.webp")))
+        assertNull(Photos.measure("not a photo".toByteArray()))
+    }
+
+    @Test(expected = java.io.IOException::class)
+    fun aJpegThatCantBeDecodedIsntUploaded() {
+        // A JPEG's first bytes and nothing it could be measured from: as the website, not uploaded.
+        Photos.prepare(byteArrayOf(0xff.toByte(), 0xd8.toByte(), 0xff.toByte(), 0xd9.toByte()), toronto)
+    }
+
+    @Test
+    fun theStoreKeepsItsSizeWithIt() {
+        val store = Photos.Store(File(tmp.root, "photos")) { toronto }
+        assertEquals(Photos.AspectRatio(24, 32), store.save(bytes("gps-offset.jpg")).aspectRatio)
+        // A post saved by an older app has none: it reads as unknown, measured as it goes up.
+        val old = Json.decodeFromString(Posts.Photo.serializer(), """{"file":"/x/photo-0.jpg","alt":"Rainier"}""")
+        assertNull(old.aspectRatio)
+    }
+
+    @Test
+    fun anEntrysSizeIsReadOnlyWhenItsValid() {
+        fun entry(s: String) = Json.parseToJsonElement("""{"image":{}$s}""").jsonObject
+        assertEquals(Photos.AspectRatio(4, 3), Photos.ratioOf(entry(""","aspectRatio":{"width":4,"height":3}""")))
+        for (bad in listOf("", ""","aspectRatio":{"width":0,"height":3}""", ""","aspectRatio":{"width":"4","height":3}""", ""","aspectRatio":{"width":4}""")) {
+            assertNull(bad, Photos.ratioOf(entry(bad)))
+        }
+    }
+
     @Test(expected = java.io.IOException::class)
     fun notAnImage() {
         Photos.prepare("not a photo".toByteArray(), toronto)

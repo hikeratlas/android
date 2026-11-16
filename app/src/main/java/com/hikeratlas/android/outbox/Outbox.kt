@@ -402,13 +402,34 @@ class Outbox(
                         throw PostException("A photo is no longer on this phone", x)
                     }
                     if (bytes.size > Photos.MAX_BYTES) throw PostException("A photo is too big to post (over 2 MB)")
+                    // Measured before it goes up, so one that can't be isn't uploaded for nothing.
+                    ratio(i, p, bytes)
                     Posts.uploadBlob(xrpc, bytes, "image/jpeg").also {
                         save(e.progress.copy(photoBlobs = e.progress.photoBlobs + (i to it)))
                         Log.d(LOG, "${short(e.id)}: photo ${i + 1} uploaded (${bytes.size} bytes)")
                     }
                 }
-                Photos.record(blob, p)
+                Photos.record(blob, p, ratio(i, p, null))
             }
+        }
+
+        /**
+         * Photo [i]'s aspectRatio: as it was prepared, or for a post queued
+         * before the app recorded it, measured from its file ([bytes], if
+         * read already) and saved with the post, so it's measured once.
+         */
+        private suspend fun ratio(i: Int, p: Posts.Photo, bytes: ByteArray?): Photos.AspectRatio {
+            e.post.photos[i].aspectRatio?.let { return it }
+            val b = bytes ?: try {
+                withContext(Dispatchers.IO) { File(p.file).readBytes() }
+            } catch (x: IOException) {
+                throw PostException("A photo is no longer on this phone", x)
+            }
+            val r = Photos.ratioFor(p, b)
+            e = e.copy(post = e.post.copy(photos = e.post.photos.mapIndexed { j, q -> if (j == i) q.copy(aspectRatio = r) else q }))
+            withContext(Dispatchers.IO) { write(e) }
+            Log.d(LOG, "${short(e.id)}: photo ${i + 1} measured (${r.width} × ${r.height}), queued without its size")
+            return r
         }
 
         /**

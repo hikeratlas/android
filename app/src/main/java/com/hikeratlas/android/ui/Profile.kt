@@ -112,10 +112,10 @@ class ProfileActions(
     val openPhotos: (PhotoSet) -> Unit,
     /**
      * Saves an edit of one of your own reviews over it (putRecord, swapping
-     * the CID read), giving its new address; null where the profile isn't
-     * yours (no Edit).
+     * the CID read), giving its new address and the record written; null
+     * where the profile isn't yours (no Edit).
      */
-    val edit: (suspend (Profiles.Review, Posts.ReviewEdit) -> Posts.StrongRef)? = null,
+    val edit: (suspend (Profiles.Review, Posts.ReviewEdit) -> Posts.Edited)? = null,
 )
 
 internal sealed interface ProfileLoad {
@@ -362,10 +362,10 @@ private fun PostList(
     if (edit != null && edited != null) {
         EditReviewDialog(edited, profile.pds, profile.did, save = { e ->
             try {
-                val ref = edit(edited, e)
-                // Shown as saved, from what was written, at once.
-                val record = Posts.editedReview(edited.value, e)
-                Profiles.parseReview(buildJsonObject { put("uri", ref.uri); put("cid", ref.cid); put("value", record) })
+                val saved = edit(edited, e)
+                // Shown as saved, from what was written (photos' sizes measured included), at once.
+                val ref = saved.ref
+                Profiles.parseReview(buildJsonObject { put("uri", ref.uri); put("cid", ref.cid); put("value", saved.record) })
                     ?.let { onChange(profile.with(it)) }
             } catch (x: com.hikeratlas.android.atproto.PostException) {
                 // Changed meanwhile: read it again, so the next edit starts from what's there now.
@@ -491,20 +491,23 @@ private fun PostCard(
 
 private val TAG_LABEL = Posts.TAGS.toMap()
 
-/** A post's photos, three to a row, from its author's PDS; tapped, in the viewer from that one. */
+/**
+ * A post's photos, three to a row, square and cropped as the website's:
+ * thumbnails through the indexer, else from its author's PDS; tapped, in
+ * the viewer from that one.
+ */
 @Composable
 internal fun PhotoGrid(set: PhotoSet, openPhotos: (PhotoSet) -> Unit) {
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         for ((r, row) in set.photos.chunked(3).withIndex()) {
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 for ((i, ph) in row.withIndex()) {
-                    val url = set.url(ph)
                     Box(
                         Modifier.weight(1f).aspectRatio(1f).background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(8.dp))
                             .clickable { openPhotos(set.copy(start = r * 3 + i)) }
                             .semantics { contentDescription = ph.alt?.takeIf { it.isNotBlank() } ?: "Photo" },
                     ) {
-                        RemoteThumb(url, Modifier.fillMaxSize(), Thumbs.GRID_PX)
+                        RemoteThumb(set.thumb(ph), Modifier.fillMaxSize(), Thumbs.GRID_PX, fallback = set.url(ph))
                     }
                 }
                 repeat(3 - row.size) { Box(Modifier.weight(1f)) }

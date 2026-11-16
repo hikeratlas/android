@@ -98,6 +98,25 @@ object Indexer {
         "https://github.com/hikeratlas/feedback/issues/new".toHttpUrl().newBuilder()
             .addQueryParameter("template", "report.yml").addQueryParameter("link", uri).build().toString()
 
+    /**
+     * Where [photoUrl] points: the indexer, but settable so tests use a
+     * MockWebServer (and never the real one). Reset it after.
+     */
+    @Volatile var photoBase: String = BASE
+
+    /**
+     * A post's photo through the indexer's cache (com.hikeratlas.temp.getPhoto,
+     * website#177), as the website's photoUrl: a thumbnail (WebP, at most 640
+     * px a side) unless [fullsize] (the photo as uploaded). Only for photos of
+     * posts it has indexed and shows; for anything else it answers 404, and
+     * the photo comes from its author's PDS instead ([Profiles.blobUrl]).
+     */
+    fun photoUrl(did: String, cid: String, fullsize: Boolean = false): String =
+        "${photoBase.trimEnd('/')}/xrpc/com.hikeratlas.temp.getPhoto".toHttpUrl().newBuilder()
+            .addQueryParameter("did", did).addQueryParameter("cid", cid)
+            .apply { if (fullsize) addQueryParameter("size", "fullsize") }
+            .build().toString()
+
     /** Someone's profile on the website: the app has no view of other people's. */
     fun profileUrl(handle: String): String = "https://www.hikeratlas.com/@$handle"
 }

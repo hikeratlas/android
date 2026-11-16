@@ -20,6 +20,9 @@ import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Before
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
 import java.time.LocalDate
 import java.time.ZoneId
 import java.util.zip.GZIPInputStream
@@ -29,7 +32,11 @@ import java.util.zip.GZIPInputStream
  * with test/resources/posts/website-records.json: what the website's own
  * publishTrack and publishReview (app/atproto/posts.ts) sent for the same
  * GPX and form, run in Node with a stand-in session (createdAt blanked).
+ * Under Robolectric (native graphics) for photos' sizes, read with
+ * Android's decoder.
  */
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [35], application = android.app.Application::class)
 class PostsTest {
     private lateinit var fake: FakeAtproto
     private lateinit var account: Account
@@ -214,7 +221,11 @@ class PostsTest {
 
     // The photos website-photo-records.json was made with: one with GPS, a
     // time and a description; one with only a time; one placed on a track
-    // (no EXIF), its microdegrees rounded as Math.round.
+    // (no EXIF), its microdegrees rounded as Math.round. Their aspectRatio
+    // (website#177) was added to it by hand, in uploadPhotos' order: each is
+    // 32 × 24 as stored, the first turned a quarter (Orientation 6), the
+    // second a half (3). These have none of their own, as a post queued
+    // before the app recorded it: they're measured as they go up.
     private fun photos(): List<Posts.Photo> {
         fun file(name: String) = java.io.File.createTempFile("photo", ".jpg").apply {
             deleteOnExit()
@@ -283,9 +294,47 @@ class PostsTest {
     }
 
     @Test
+    fun aPhotosSizeFromWhenItWasPreparedIsTheOneWritten() = runBlocking {
+        val p = photos()[2].copy(aspectRatio = Photos.AspectRatio(3, 2))
+        Posts.publish(account.xrpc, fake.did, Posts.Post(text = "Hi", photos = listOf(p)))
+        val photo = creates().single()["record"]!!.jsonObject["photos"]!!.jsonArray.single().jsonObject
+        assertEquals(Json.parseToJsonElement("""{"width":3,"height":2}"""), photo["aspectRatio"])
+        assertEquals(listOf("image", "aspectRatio", "at"), photo.keys.toList())
+    }
+
+    @Test
+    fun aPhotoThatCantBeMeasuredIsntUploaded() = runBlocking {
+        val notAPhoto = java.io.File.createTempFile("photo", ".jpg").apply { deleteOnExit(); writeText("not a photo") }.path
+        try {
+            Posts.publish(account.xrpc, fake.did, Posts.Post(text = "Hi", photos = listOf(Posts.Photo(notAPhoto))))
+            fail("posted")
+        } catch (e: PostException) {
+            assertEquals("A photo can't be read as an image: remove it and post again", e.message)
+        }
+        assertTrue(fake.blobs.isEmpty())
+        assertTrue(creates().isEmpty())
+    }
+
+    @Test
+    fun aPhotoWithoutItsSizeIsRefusedAsTheLexiconNowDoes() = runBlocking {
+        val image = Json.parseToJsonElement("""{"${'$'}type":"blob","ref":{"${'$'}link":"bafk"},"mimeType":"image/jpeg","size":10}""").jsonObject
+        val record = Posts.reviewRecord("Hi", null, null, null, emptyList(), "CC0-1.0", listOf(kotlinx.serialization.json.buildJsonObject { put("image", image) }))
+        try {
+            Posts.create(account.xrpc, fake.did, Posts.REVIEW, record)
+            fail("created")
+        } catch (e: PostException) {
+            assertEquals("createRecord failed (400): Invalid record: a photo without its aspectRatio", e.message)
+        }
+        // With it, the same record goes in.
+        val withRatio = Posts.reviewRecord("Hi", null, null, null, emptyList(), "CC0-1.0", listOf(Photos.record(image, Posts.Photo("f"), Photos.AspectRatio(4, 3))))
+        Posts.create(account.xrpc, fake.did, Posts.REVIEW, withRatio)
+        Unit
+    }
+
+    @Test
     fun aDescriptionKeepsToTheLexicon() {
         val image = kotlinx.serialization.json.buildJsonObject { }
-        val alt = Photos.record(image, Posts.Photo("f", alt = "x".repeat(1200)))["alt"]!!.jsonPrimitive.content
+        val alt = Photos.record(image, Posts.Photo("f", alt = "x".repeat(1200)), Photos.AspectRatio(4, 3))["alt"]!!.jsonPrimitive.content
         assertEquals(Photos.MAX_ALT, alt.length)
     }
 }
