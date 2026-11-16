@@ -72,7 +72,13 @@ android {
     testOptions {
         unitTests.isReturnDefaultValues = true
         unitTests.isIncludeAndroidResources = true
-        unitTests.all { it.systemProperty("robolectric.graphicsMode", "NATIVE") }
+        unitTests.all {
+            it.systemProperty("robolectric.graphicsMode", "NATIVE")
+            // Test classes in several JVMs at once: most of them are
+            // single-threaded Robolectric, so one JVM leaves cores idle.
+            // Gradle caps this at --max-workers.
+            it.maxParallelForks = Runtime.getRuntime().availableProcessors()
+        }
     }
 }
 

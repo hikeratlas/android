@@ -6,6 +6,52 @@ on:
   pull_request:
 
 jobs:
+  # Tests, lint and the APK as separate jobs, side by side: the run takes as
+  # long as the slowest of them rather than all three in a row. Each has its
+  # own Gradle cache (setup-gradle keys it by job), written only on main.
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: 21
+      - uses: gradle/actions/setup-gradle@v6
+      # Robolectric's Android runtime jar (~200 MB), fetched on first use.
+      - uses: actions/cache@v6
+        with:
+          path: ~/.m2/repository/org/robolectric
+          key: robolectric-${{ hashFiles('gradle/libs.versions.toml') }}
+      - name: Test
+        run: ./gradlew testDebugUnitTest
+        env:
+          # Also read a tile from the published basemap.
+          HIKERATLAS_LIVE: "1"
+      # Merged with lint's into the reports artifact (the reports job).
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: reports-test
+          path: app/build/reports/
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: 21
+      - uses: gradle/actions/setup-gradle@v6
+      - name: Lint
+        run: ./gradlew lintDebug
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: reports-lint
+          path: app/build/reports/
+
   build:
     runs-on: ubuntu-latest
     steps:
@@ -30,16 +76,6 @@ jobs:
             echo "::error::The DEBUG_KEYSTORE secret isn't set: builds wouldn't install over each other."
             exit 1
           fi
-      # Robolectric's Android runtime jar (~200 MB), fetched on first use.
-      - uses: actions/cache@v6
-        with:
-          path: ~/.m2/repository/org/robolectric
-          key: robolectric-${{ hashFiles('gradle/libs.versions.toml') }}
-      - name: Test
-        run: ./gradlew testDebugUnitTest lintDebug
-        env:
-          # Also read a tile from the published basemap.
-          HIKERATLAS_LIVE: "1"
       - name: Build
         run: ./gradlew assembleDebug
       # Signed with the shared debug key, so it installs over any other
@@ -54,18 +90,27 @@ jobs:
         with:
           name: app-debug
           path: app/build/outputs/apk/debug/app-debug.apk
-      - uses: actions/upload-artifact@v7
-        if: always()
+
+  # Test and lint reports in one artifact, as when one job made both; also
+  # when either failed, which is when they're wanted.
+  reports:
+    needs: [test, lint]
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/upload-artifact/merge@v7
         with:
           name: reports
-          path: app/build/reports/
+          pattern: reports-*
+          delete-merged: true
 
   # The newest main build, for anyone to download without signing in: the
   # website's "Get the Android app" links to releases/latest. One release,
   # tagged "latest", moved to each push to main and its APK replaced. A full
   # release (not a pre-release): GitHub's releases/latest skips those.
   release:
-    needs: build
+    # Only once the tests and lint passed too, not just the build.
+    needs: [build, test, lint]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
