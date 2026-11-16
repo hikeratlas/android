@@ -1,5 +1,6 @@
 package com.hikeratlas.android.atproto
 
+import com.hikeratlas.android.logs.Log
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Deferred
@@ -104,6 +105,7 @@ class Account(
         // A session whose key is gone can't be used again: signed out, as
         // for a refused refresh, rather than signed in to nothing.
         override fun key(s: Stored) = keys.load(s.keyAlias) ?: run {
+            Log.w(LOG, "The session's DPoP key is gone: signed out")
             if (stored?.keyAlias == s.keyAlias) drop()
             throw SignedOutException()
         }
@@ -121,24 +123,38 @@ class Account(
         override suspend fun refresh(used: Stored): Stored = lock.withLock {
             val s = stored ?: throw SignedOutException()
             if (s.accessToken != used.accessToken) return@withLock s
-            val refreshToken = s.refreshToken ?: run { drop(); throw SignedOutException() }
-            val key = keys.load(s.keyAlias) ?: run { drop(); throw SignedOutException() }
+            val refreshToken = s.refreshToken ?: run {
+                Log.w(LOG, "No refresh token: signed out")
+                drop()
+                throw SignedOutException()
+            }
+            val key = keys.load(s.keyAlias) ?: run {
+                Log.w(LOG, "The session's DPoP key is gone: signed out")
+                drop()
+                throw SignedOutException()
+            }
             val t = try {
                 oauth.refresh(s.tokenEndpoint, key, refreshToken)
             } catch (e: OAuthException) {
                 // Revoked, expired, or otherwise refused: signed out. (A 5xx
                 // or no network is an IOException, and keeps the session.)
+                Log.w(LOG, "Refresh refused: signed out", e)
                 drop()
                 keys.delete(s.keyAlias)
                 throw SignedOutException()
+            } catch (e: IOException) {
+                Log.w(LOG, "Refresh didn't get through: session kept", e)
+                throw e
             }
             if (t.sub != null && t.sub != s.did) {
+                Log.w(LOG, "Refresh answered for ${t.sub}, not ${s.did}: signed out")
                 drop()
                 keys.delete(s.keyAlias)
                 throw SignedOutException()
             }
             s.copy(accessToken = t.access_token, refreshToken = t.refresh_token ?: s.refreshToken, expiresAt = expiry(t))
                 .also(::save)
+                .also { Log.i(LOG, "Refreshed (good for ${t.expires_in ?: DEFAULT_EXPIRES_S}s)") }
         }
     }
 
@@ -150,6 +166,7 @@ class Account(
     private val restored: Deferred<Unit> = scope.async(Dispatchers.IO) {
         stored = read<Stored>(SESSION)
         _state.value = stored?.let { AccountState.In(it.did, it.handle, it.avatar) } ?: AccountState.Out()
+        Log.i(LOG, stored?.let { "Session restored: ${it.did} (${it.handle})" } ?: "No saved session")
     }
 
     init {
@@ -203,8 +220,10 @@ class Account(
                 oauth.authServerFor(doc.pds) to did
             }
         } catch (e: IOException) {
+            Log.w(LOG, "Sign-in: couldn't find the server", e)
             throw SignInException(FAILED, e)
         }
+        Log.i(LOG, "Sign-in started at ${server.issuer}${did?.let { " for $it" } ?: ""}")
         val alias = "atproto-dpop-${randomToken(9)}"
         val key = keys.create(alias)
         val state = randomToken()
@@ -213,6 +232,7 @@ class Account(
             oauth.par(server, key, state, b64url(sha256(verifier.toByteArray())), loginHint = if (bluesky) null else typed)
         } catch (e: Exception) {
             if (e is CancellationException) throw e
+            Log.w(LOG, "Sign-in: the pushed authorization request failed", e)
             keys.delete(alias)
             throw SignInException(FAILED, e)
         }
@@ -242,6 +262,7 @@ class Account(
         val q = query(uri)
         if (q["state"] != pending.state) {
             // Not this sign-in's: perhaps an earlier one. The current one may still come back.
+            Log.i(LOG, "Sign-in redirect for another sign-in: ignored")
             return
         }
         secrets.remove(PENDING)
@@ -249,6 +270,7 @@ class Account(
         _state.value = AccountState.SigningIn
         try {
             q["error"]?.let { error ->
+                Log.i(LOG, "Sign-in ended in the browser: $error")
                 keys.delete(pending.keyAlias)
                 // Cancelled in the browser: nothing to say.
                 _state.value = AccountState.Out(if (error == "access_denied") null else FAILED)
@@ -278,9 +300,11 @@ class Account(
                 expiresAt = expiry(t),
             )
             save(s)
+            Log.i(LOG, "Signed in as $sub (${doc.handle})")
             updateProfile()
         } catch (e: Exception) {
             if (e is CancellationException) throw e
+            Log.w(LOG, "Sign-in failed", e)
             keys.delete(pending.keyAlias)
             _state.value = before?.let { AccountState.In(it.did, it.handle, it.avatar) }
                 ?: AccountState.Out((e as? SignInException)?.message ?: FAILED)
@@ -293,12 +317,14 @@ class Account(
         val s = lock.withLock {
             stored.also { drop() }
         } ?: return
+        Log.i(LOG, "Signed out ${s.did}")
         try {
             val key = keys.load(s.keyAlias)
             val token = s.refreshToken ?: s.accessToken
             if (key != null && s.revocationEndpoint != null) oauth.revoke(s.revocationEndpoint, key, token)
         } catch (e: Exception) {
             if (e is CancellationException) throw e
+            Log.w(LOG, "Sign-out: couldn't tell the server", e)
         } finally {
             keys.delete(s.keyAlias)
         }
@@ -385,6 +411,7 @@ class Account(
 
     companion object {
         private const val SESSION = "session"
+        private const val LOG = "account"
         private const val PENDING = "pending"
         /** Refreshed this long before the access token expires, so a request doesn't race it. */
         private const val EARLY_MS = 60_000L

@@ -3,6 +3,7 @@ package com.hikeratlas.android.offline
 import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
+import com.hikeratlas.android.logs.Log
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 
@@ -37,19 +38,21 @@ class Connectivity(private val cm: ConnectivityManager?) : AutoCloseable {
         // at once) say otherwise.
         override fun onAvailable(network: Network) {
             current = network
-            _online.value = true
+            set(true, "network $network available")
         }
 
         override fun onCapabilitiesChanged(network: Network, caps: NetworkCapabilities) {
             current = network
-            _online.value = caps.hasInternet()
+            set(caps.hasInternet(), "network $network ${if (caps.hasInternet()) "has" else "has no"} internet")
         }
 
         // An old network going after a new one took over changes nothing.
         override fun onLost(network: Network) {
             if (network == current) {
                 current = null
-                _online.value = false
+                set(false, "network $network lost")
+            } else {
+                Log.d(LOG, "Network $network lost, not the default: no change")
             }
         }
     }
@@ -59,6 +62,7 @@ class Connectivity(private val cm: ConnectivityManager?) : AutoCloseable {
         if (!registered && cm != null) {
             cm.registerDefaultNetworkCallback(callback)
             registered = true
+            Log.d(LOG, "Following the default network: ${if (_online.value) "online" else "offline"}")
         }
         return this
     }
@@ -70,9 +74,16 @@ class Connectivity(private val cm: ConnectivityManager?) : AutoCloseable {
         }
     }
 
+    /** Only changes are logged: capabilities come often, mostly the same. */
+    private fun set(online: Boolean, why: String) {
+        if (_online.value != online) Log.i(LOG, "${if (online) "Online" else "Offline"}: $why")
+        _online.value = online
+    }
+
     private fun NetworkCapabilities.hasInternet() = hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
 
     companion object {
+        private const val LOG = "network"
         fun of(context: android.content.Context) = Connectivity(context.getSystemService(ConnectivityManager::class.java))
     }
 }

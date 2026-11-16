@@ -16,6 +16,7 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.foundation.verticalScroll
 import com.hikeratlas.android.atproto.AccountState
 import com.hikeratlas.android.atproto.Posts
 import com.hikeratlas.android.atproto.Profiles
@@ -162,5 +163,26 @@ class YouTabTest {
         compose.onNodeWithTag("you-person").assertExists()
         compose.onNodeWithTag("you-avatar").assertDoesNotExist()
         assertTrue(compose.onAllNodesWithText("A").fetchSemanticsNodes().isEmpty())
+    }
+
+    // #86: Logs is under About in Settings.
+    @Test
+    fun settingsHaveLogsUnderAbout() {
+        var opened = 0
+        compose.setContent {
+            HikerAtlasTheme {
+                androidx.compose.foundation.layout.Column(
+                    androidx.compose.ui.Modifier.verticalScroll(androidx.compose.foundation.rememberScrollState()),
+                ) {
+                    YouSettings(account(signedIn), UnitsActions(Units.METRIC, signedIn = true, save = {}), null, storage(), logs = { opened++ })
+                }
+            }
+        }
+        compose.onNodeWithText("Logs").performScrollTo()
+        val about = compose.onNodeWithText("About").fetchSemanticsNode().boundsInRoot.top
+        val logs = compose.onNodeWithText("Logs").fetchSemanticsNode().boundsInRoot.top
+        assertTrue(logs > about)
+        compose.onNodeWithText("Logs").performClick()
+        assertEquals(1, opened)
     }
 }

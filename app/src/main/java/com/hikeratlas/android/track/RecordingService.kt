@@ -19,6 +19,7 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
 import com.hikeratlas.android.R
+import com.hikeratlas.android.logs.Log
 import com.hikeratlas.android.units.dist
 
 /** Whatever holds the app's [TrackRecorder] (the app; a test's own). */
@@ -36,12 +37,15 @@ class RecordingService : Service() {
     private val recorder get() = (application as RecorderHost).recorder
     private var listening = false
     private var notifiedAt = 0L
+    /** Whether GPS has given a fix since it was turned on, for the log. */
+    private var hadFix = false
 
     private val listener = LocationListener { l -> onLocation(l) }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        Log.d(LOG, "Command ${intent?.action?.substringAfterLast('.') ?: "restart"}")
         when (intent?.action) {
             ACTION_START -> {
                 foreground()
@@ -61,15 +65,18 @@ class RecordingService : Service() {
             }
             // Restarted by the system after the app was killed mid-track.
             null -> if (recorder.resumeUnfinished(paused = false) && recorder.state?.paused == false) {
+                Log.i(LOG, "Restarted by the system after the app was killed: recording on")
                 try {
                     foreground()
                     listen()
                 } catch (e: Exception) {
                     // Not allowed to start in the background: it's left
                     // unfinished, and comes back paused when the app opens.
+                    Log.w(LOG, "Couldn't carry on in the background: left for the app to resume", e)
                     stop()
                 }
             } else {
+                Log.i(LOG, "Restarted by the system with nothing recording: stopping")
                 stop()
             }
         }
@@ -90,7 +97,9 @@ class RecordingService : Service() {
     @SuppressLint("MissingPermission") // The app asks for it before starting this.
     private fun listen() {
         if (listening) return
-        val lm = getSystemService(LocationManager::class.java) ?: return
+        val lm = getSystemService(LocationManager::class.java) ?: return Log.w(LOG, "No location service: no GPS")
+        val enabled = try { lm.isProviderEnabled(LocationManager.GPS_PROVIDER) } catch (e: Exception) { false }
+        if (enabled) Log.i(LOG, "GPS on") else Log.w(LOG, "GPS is turned off: no fixes until it's on")
         lm.requestLocationUpdates(LocationManager.GPS_PROVIDER, INTERVAL_MS, 0f, listener, Looper.getMainLooper())
         listening = true
     }
@@ -99,9 +108,16 @@ class RecordingService : Service() {
         if (!listening) return
         getSystemService(LocationManager::class.java)?.removeUpdates(listener)
         listening = false
+        hadFix = false
+        Log.d(LOG, "GPS off")
     }
 
     private fun onLocation(l: Location) {
+        if (!hadFix) {
+            hadFix = true
+            Log.i(LOG, "First GPS fix, ±${if (l.hasAccuracy()) l.accuracy.toInt() else "?"} m")
+        }
+        Log.d(LOG, "Fix ${Log.point(l.latitude, l.longitude)} ±${if (l.hasAccuracy()) l.accuracy.toInt() else "?"} m")
         recorder.onFix(l.toFix())
         val now = System.currentTimeMillis()
         if (now - notifiedAt >= NOTIFY_EVERY_MS) notifyNow()
@@ -147,6 +163,7 @@ class RecordingService : Service() {
         const val ACTION_START = "com.hikeratlas.android.track.START"
         const val ACTION_PAUSE = "com.hikeratlas.android.track.PAUSE"
         const val ACTION_STOP = "com.hikeratlas.android.track.STOP"
+        private const val LOG = "recording"
 
         /** How often GPS is asked for a fix. */
         const val INTERVAL_MS = 2_000L

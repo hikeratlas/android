@@ -307,6 +307,9 @@ fun MapScreen(
 
     // Offline: the downloaded areas outlined, and a chip saying so.
     val online = rememberOnline()
+    LaunchedEffect(online) {
+        com.hikeratlas.android.logs.Log.i("network", if (online) "Map online: no offline pill" else "Map offline: the offline pill shows")
+    }
     val offlineAreas = app.offlineAreas.areas
     LaunchedEffect(online, style, offlineAreas) {
         val c = controller ?: return@LaunchedEffect

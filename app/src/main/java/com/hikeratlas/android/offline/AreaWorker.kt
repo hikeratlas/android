@@ -11,6 +11,7 @@ import androidx.work.ForegroundInfo
 import androidx.work.WorkerParameters
 import androidx.work.workDataOf
 import com.hikeratlas.android.R
+import com.hikeratlas.android.logs.Log
 import kotlinx.coroutines.CancellationException
 import java.io.IOException
 
@@ -31,6 +32,7 @@ class AreaWorker(context: Context, params: WorkerParameters) : CoroutineWorker(c
         val refresh = inputData.getBoolean(REFRESH, false)
         // Already downloaded (a duplicate run), unless it's an update.
         if (area.ready && !refresh) return Result.success()
+        Log.i(LOG, "${if (refresh) "Updating" else "Downloading"} area $id (${area.kind} ${area.ref}), try ${runAttemptCount + 1}")
         var finished = false
         try {
             try {
@@ -56,23 +58,28 @@ class AreaWorker(context: Context, params: WorkerParameters) : CoroutineWorker(c
             }
             store.finishArea(id)
             if (build != null) store.setAreaBuild(id, build.key)
+            Log.i(LOG, "Area $id ${if (refresh) "updated" else "downloaded"}")
             finished = true
             return Result.success()
         } catch (e: CancellationException) {
             // Stopped (Wi-Fi went, say): it waits, and resumes from where it was.
+            Log.i(LOG, "Area $id stopped (its network rule stopped being met, or cancelled)")
             throw e
         } catch (e: CantPlan) {
             // Not the network's fault: says why at once, rather than after retries.
+            Log.e(LOG, "Area $id can't be planned", e)
             store.setAreaState(id, OfflineStore.FAILED, e.message)
             finished = true
             return Result.failure()
         } catch (e: IOException) {
             if (runAttemptCount < MAX_ATTEMPTS) {
+                Log.w(LOG, "Area $id failed, retrying", e)
                 // Says it's retrying, and why: not "waiting for Wi-Fi".
                 store.setAreaState(id, OfflineStore.RETRYING, e.message ?: e.toString())
                 finished = true
                 return Result.retry()
             }
+            Log.e(LOG, "Area $id failed after $MAX_ATTEMPTS tries", e)
             store.setAreaState(id, OfflineStore.FAILED, e.message ?: e.toString())
             finished = true
             return Result.failure()
@@ -114,5 +121,6 @@ class AreaWorker(context: Context, params: WorkerParameters) : CoroutineWorker(c
         private const val NOTIFICATION_ID = 2
         private const val NOTIFY_EVERY_MS = 2_000L
         private const val MAX_ATTEMPTS = 5
+        private const val LOG = "offline"
     }
 }

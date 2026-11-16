@@ -86,6 +86,7 @@ class OfflineAreas(
 
     /** Downloads [id]'s map and routes again, from the current build. */
     suspend fun update(id: Long) {
+        com.hikeratlas.android.logs.Log.i(LOG, "Update area $id queued")
         withContext(Dispatchers.IO) {
             store.setAreaState(id, OfflineStore.QUEUED)
             enqueue(id, ExistingWorkPolicy.REPLACE, refresh = true)
@@ -95,6 +96,7 @@ class OfflineAreas(
 
     /** Deletes every offline area (the fonts, icons and routes index stay: they're small). */
     suspend fun deleteAll() {
+        com.hikeratlas.android.logs.Log.i(LOG, "Deleting every area")
         WorkManager.getInstance(context).cancelAllWorkByTag(TAG)
         withContext(Dispatchers.IO) {
             for (a in store.areas()) store.deleteArea(a.id)
@@ -183,6 +185,7 @@ class OfflineAreas(
 
     /** Starts downloading [t] (and the overview, the first time). */
     suspend fun download(t: Target) {
+        com.hikeratlas.android.logs.Log.i(LOG, "Download queued: ${t.kind} ${t.ref}")
         withContext(Dispatchers.IO) {
             if (store.findArea(OfflineStore.OVERVIEW, "") == null) {
                 enqueue(store.area(OVERVIEW_TARGET.kind, OVERVIEW_TARGET.ref, OVERVIEW_TARGET.name).id)
@@ -194,6 +197,7 @@ class OfflineAreas(
 
     /** Tries a failed download again. */
     suspend fun retry(id: Long) {
+        com.hikeratlas.android.logs.Log.i(LOG, "Retry area $id")
         withContext(Dispatchers.IO) {
             store.setAreaState(id, OfflineStore.QUEUED)
             enqueue(id, ExistingWorkPolicy.REPLACE)
@@ -202,6 +206,7 @@ class OfflineAreas(
     }
 
     suspend fun delete(id: Long) {
+        com.hikeratlas.android.logs.Log.i(LOG, "Deleting area $id")
         WorkManager.getInstance(context).cancelUniqueWork(workName(id))
         withContext(Dispatchers.IO) {
             store.deleteArea(id)
@@ -236,6 +241,7 @@ class OfflineAreas(
 
     companion object {
         const val TAG = "offline-area"
+        private const val LOG = "offline"
         fun workName(id: Long) = "offline-area-$id"
 
         val OVERVIEW_TARGET = Target(OfflineStore.OVERVIEW, "", "North America overview")
