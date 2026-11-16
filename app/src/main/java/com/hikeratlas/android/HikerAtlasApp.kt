@@ -106,6 +106,10 @@ class HikerAtlasApp : Application(), RecorderHost, OfflineHost, com.hikeratlas.a
 
     override fun onCreate() {
         super.onCreate()
+        // First, so everything after can log, and a crash anywhere after is kept.
+        com.hikeratlas.android.logs.Log.install(this)
+        com.hikeratlas.android.logs.CrashLog.install()
+        com.hikeratlas.android.logs.Log.i("app", "Started: ${BuildConfig.VERSION_NAME} ${BuildConfig.COMMIT.take(7)}")
         Offline.tiles = offline
         Offline.resources = offline
         // OkHttp allows 5 requests at a time per host by default. Map tiles

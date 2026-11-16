@@ -20,6 +20,7 @@ import com.hikeratlas.android.atproto.SignedOutException
 import com.hikeratlas.android.atproto.Tid
 import com.hikeratlas.android.atproto.Xrpc
 import com.hikeratlas.android.atproto.XrpcException
+import com.hikeratlas.android.logs.Log
 import com.hikeratlas.android.track.TrackLibrary
 import com.hikeratlas.android.track.TrackMeasure
 import com.hikeratlas.android.track.TrackStore
@@ -199,6 +200,7 @@ class Outbox(
                     )
                     // Last: a folder without post.json is a post never saved (see cleanOrphans).
                     write(e)
+                    Log.i(LOG, "Queued ${short(id)} as $did: track ${post.gpx != null}, review $review, ${photos.size} photos, recorded ${trackId != null}")
                     e
                 } catch (x: Exception) {
                     folder.deleteRecursively()
@@ -218,6 +220,7 @@ class Outbox(
             .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 30, TimeUnit.SECONDS)
             .addTag(TAG)
             .build()
+        Log.d(LOG, "Scheduled ${short(id)}${if (replace) " (now)" else ""}")
         WorkManager.getInstance(context).enqueueUniqueWork(workName(id), if (replace) ExistingWorkPolicy.REPLACE else ExistingWorkPolicy.KEEP, request)
     }
 
@@ -228,6 +231,7 @@ class Outbox(
                 read(id)?.let { write(it.copy(state = State.WAITING, error = null, serverError = false, signInNotified = false)) } != null
             }
         }
+        Log.i(LOG, if (found) "Retry ${short(id)}" else "Retry ${short(id)}: gone")
         if (found) schedule(id, replace = true)
         refresh()
     }
@@ -238,6 +242,7 @@ class Outbox(
         WorkManager.getInstance(context).cancelUniqueWork(workName(id))
         lock.withLock { withContext(Dispatchers.IO) { File(dir, id).deleteRecursively() } }
         notifications.cancel(id)
+        Log.i(LOG, "Discarded ${short(id)}")
         refresh()
     }
 
@@ -248,7 +253,8 @@ class Outbox(
      */
     suspend fun upload(id: String, notify: Boolean = false, progress: (String) -> Unit = {}): Outcome {
         val outcome = lock.withLock {
-            val first = withContext(Dispatchers.IO) { read(id) } ?: return@withLock Outcome.Gone
+            val first = withContext(Dispatchers.IO) { read(id) } ?: return@withLock Outcome.Gone.also { Log.i(LOG, "Upload ${short(id)}: gone") }
+            Log.i(LOG, "Upload ${short(id)} (${if (notify) "background" else "from the form"}), was ${first.state}")
             _active.value = id
             refresh()
             val run = Run(first, progress)
@@ -256,9 +262,11 @@ class Outbox(
                 run.go()
                 withContext(Dispatchers.IO) { File(dir, id).deleteRecursively() }
                 _posted.value++
+                Log.i(LOG, "Posted ${short(id)}")
                 if (notify) notifications.posted(run.e)
                 Outcome.Posted
             } catch (x: CancellationException) {
+                Log.i(LOG, "Upload ${short(id)} stopped (cancelled)")
                 throw x
             } catch (x: Exception) {
                 stopped(run.e, x, notify)
@@ -284,6 +292,8 @@ class Outbox(
             is Outcome.Failed -> outcome.message
             else -> null
         }
+        val how = "Upload ${short(e.id)} stopped: $state ${outcomeText(outcome)}"
+        if (state == State.FAILED) Log.e(LOG, how, x) else Log.w(LOG, how, x)
         val askSignIn = notify && state == State.NEEDS_SIGN_IN && !e.signInNotified
         val saved = e.copy(
             state = state, error = error, serverError = (outcome as? Outcome.Waiting)?.server == true,
@@ -318,6 +328,7 @@ class Outbox(
                 steps()
             } catch (x: Exception) {
                 if (!reused || x is CancellationException || cause<XrpcException>(x)?.status != 400) throw x
+                Log.w(LOG, "${short(e.id)}: refused with blobs from an earlier try; uploading them again", x)
                 save(e.progress.copy(gpxBlob = null, photoBlobs = emptyMap()))
                 steps()
             }
@@ -325,6 +336,7 @@ class Outbox(
 
         private suspend fun steps() {
             progress("Posting…")
+            Log.d(LOG, "${short(e.id)}: steps from ${done(e.progress)}")
             val license = e.progress.license ?: Posts.licenseStrict(xrpc, e.did).also { save(e.progress.copy(license = it)) }
             val review = e.review
             var track = e.progress.track ?: e.post.track
@@ -345,7 +357,10 @@ class Outbox(
                 val blob = e.progress.gpxBlob ?: run {
                     val bytes = Posts.gzip(gpx)
                     if (bytes.size > Posts.MAX_GPX_BYTES) throw PostException(Posts.TOO_BIG)
-                    Posts.uploadBlob(xrpc, bytes, "application/gzip").also { save(e.progress.copy(gpxBlob = it)) }
+                    Posts.uploadBlob(xrpc, bytes, "application/gzip").also {
+                        save(e.progress.copy(gpxBlob = it))
+                        Log.d(LOG, "${short(e.id)}: GPX uploaded (${bytes.size} bytes)")
+                    }
                 }
                 val photoEntries = if (review) emptyList() else photoEntries()
                 val record = Posts.trackRecord(blob, stats, e.post.routeKey, e.post.title, license, photoEntries, e.createdAt)
@@ -387,7 +402,10 @@ class Outbox(
                         throw PostException("A photo is no longer on this phone", x)
                     }
                     if (bytes.size > Photos.MAX_BYTES) throw PostException("A photo is too big to post (over 2 MB)")
-                    Posts.uploadBlob(xrpc, bytes, "image/jpeg").also { save(e.progress.copy(photoBlobs = e.progress.photoBlobs + (i to it))) }
+                    Posts.uploadBlob(xrpc, bytes, "image/jpeg").also {
+                        save(e.progress.copy(photoBlobs = e.progress.photoBlobs + (i to it)))
+                        Log.d(LOG, "${short(e.id)}: photo ${i + 1} uploaded (${bytes.size} bytes)")
+                    }
                 }
                 Photos.record(blob, p)
             }
@@ -404,13 +422,19 @@ class Outbox(
                 save(if (review) e.progress.copy(reviewRkey = it) else e.progress.copy(trackRkey = it))
             }
             val tried = if (review) e.progress.reviewTried else e.progress.trackTried
-            if (tried) Posts.find(xrpc, e.did, collection, rkey)?.let { return it }
+            if (tried) Posts.find(xrpc, e.did, collection, rkey)?.let {
+                Log.i(LOG, "${short(e.id)}: $collection/$rkey found, made by an earlier try")
+                return it
+            }
             save(if (review) e.progress.copy(reviewTried = true) else e.progress.copy(trackTried = true))
             return try {
-                Posts.create(xrpc, e.did, collection, record, rkey)
+                Posts.create(xrpc, e.did, collection, record, rkey).also { Log.i(LOG, "${short(e.id)}: made $collection/$rkey") }
             } catch (x: PostException) {
                 // Already made after all (by a try just before this one).
-                if (cause<XrpcException>(x)?.status == 400) Posts.find(xrpc, e.did, collection, rkey)?.let { return it }
+                if (cause<XrpcException>(x)?.status == 400) Posts.find(xrpc, e.did, collection, rkey)?.let {
+                    Log.i(LOG, "${short(e.id)}: $collection/$rkey refused but there, made by an earlier try")
+                    return it
+                }
                 throw x
             }
         }
@@ -468,6 +492,7 @@ class Outbox(
                 }
             }
         }
+        if (ids.isNotEmpty()) Log.i(LOG, "Signed in as $did: ${ids.size} held posts waiting again")
         for (id in ids) schedule(id, replace = true)
         refresh()
     }
@@ -517,8 +542,26 @@ class Outbox(
         if (!tmp.renameTo(File(folder, POST))) throw IOException("Couldn't save the post")
     }
 
+    /** What a post's progress has done so far, for the log. */
+    private fun done(p: Progress) = listOfNotNull(
+        "licence".takeIf { p.license != null },
+        "GPX".takeIf { p.gpxBlob != null },
+        "${p.photoBlobs.size} photos".takeIf { p.photoBlobs.isNotEmpty() },
+        "track".takeIf { p.track != null },
+        "review".takeIf { p.review != null },
+    ).joinToString(", ").ifEmpty { "the start" }
+
+    private fun outcomeText(o: Outcome) = when (o) {
+        is Outcome.Waiting -> if (o.server) "(server: ${o.error})" else "(network: ${o.error})"
+        is Outcome.Failed -> "(${o.message})"
+        else -> ""
+    }
+
     companion object {
         const val TAG = "post"
+        private const val LOG = "outbox"
+        /** A post's id, short: enough to follow one through the log. */
+        private fun short(id: String) = id.take(8)
         fun workName(id: String) = "post-$id"
         private const val POST = "post.json"
         private const val GPX = "track.gpx"

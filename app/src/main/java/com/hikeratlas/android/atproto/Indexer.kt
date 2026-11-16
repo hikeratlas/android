@@ -62,8 +62,9 @@ object Indexer {
         val done = { writes.tryEmit(routeKey); Unit }
         try {
             notifier(uri, done)
-        } catch (_: Exception) {
+        } catch (e: Exception) {
             // Never the write's problem; the sheet may as well look again.
+            com.hikeratlas.android.logs.Log.w("indexer", "Notify failed for $uri", e)
             done()
         }
     }
@@ -74,9 +75,15 @@ object Indexer {
         return { uri, done ->
             val body = buildJsonObject { put("uri", uri) }.toString().toRequestBody(JSON)
             client.newCall(Request.Builder().url(url).post(body).build()).enqueue(object : Callback {
-                override fun onFailure(call: Call, e: IOException) = done()
+                override fun onFailure(call: Call, e: IOException) {
+                    com.hikeratlas.android.logs.Log.w("indexer", "Notify failed for $uri", e)
+                    done()
+                }
+
                 override fun onResponse(call: Call, response: Response) {
                     response.close()
+                    if (response.isSuccessful) com.hikeratlas.android.logs.Log.i("indexer", "Notified $uri")
+                    else com.hikeratlas.android.logs.Log.w("indexer", "Notify for $uri: HTTP ${response.code}")
                     done()
                 }
             })

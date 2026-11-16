@@ -4,6 +4,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import com.hikeratlas.android.elevation.ElevationProfiler
+import com.hikeratlas.android.logs.Log
 import kotlinx.coroutines.CompletableDeferred
 import java.util.concurrent.Executor
 import java.util.concurrent.Executors
@@ -88,6 +89,7 @@ class TrackRecorder(
             tally = null
             stepTrack = null
         }
+        Log.i(LOG, "Started track $id, ${if (stepTrack != null) "counting steps" else "without steps"}")
         return State(id, now, 0, null, emptyList(), 0.0, null).also { state = it }
     }
 
@@ -120,6 +122,11 @@ class TrackRecorder(
         stepsReported = t.steps != null
         if (pausedAt != null && t.stepsBase != null) store.setSteps(t.id, t.steps ?: 0, null)
         state = State(t.id, t.started, t.pausedMs, pausedAt, lines(), metres(), gpsGain(), t.steps)
+        Log.i(
+            LOG,
+            "Picked up unfinished track ${t.id} (${points.size} fixes), ${if (pausedAt != null) "paused" else "recording"}, " +
+                if (t.steps != null) "steps ${t.steps}" else "without steps",
+        )
         if (pausedAt == null) openSteps(rebase = false)
         measure()
         return true
@@ -133,6 +140,7 @@ class TrackRecorder(
         store.setPaused(s.trackId, s.pausedMs, now)
         log.breakSegment()
         state = s.copy(pausedAt = now)
+        Log.i(LOG, "Paused track ${s.trackId}")
         closeSteps()
     }
 
@@ -143,6 +151,7 @@ class TrackRecorder(
         val pausedMs = s.pausedMs + (clock() - at).coerceAtLeast(0)
         store.setPaused(s.trackId, pausedMs, null)
         state = s.copy(pausedMs = pausedMs, pausedAt = null)
+        Log.i(LOG, "Resumed track ${s.trackId}")
         openSteps()
     }
 
@@ -153,6 +162,7 @@ class TrackRecorder(
         val now = clock()
         if (s.pausedAt != null) store.setPaused(s.trackId, s.pausedMs + (now - s.pausedAt).coerceAtLeast(0), null)
         store.end(s.trackId, now)
+        Log.i(LOG, "Stopped track ${s.trackId}: ${metres().toInt()} m, ${s.steps?.let { "$it steps" } ?: "no steps"}")
         state = null
         closeSteps()
         return s.trackId
@@ -201,7 +211,10 @@ class TrackRecorder(
         if (rebase) t.base = null
         if (!listening) listening = steps?.start { v -> onStepCount(v) } == true
         stepsOpen = listening
-        if (!listening) return false
+        if (!listening) {
+            Log.i(LOG, "Steps can't be counted now: what was counted stays")
+            return false
+        }
         stepsSavedAt = clock()
         if (stepsReported) store.setSteps(id, t.total, t.base)
         return true
@@ -277,6 +290,7 @@ class TrackRecorder(
     }
 
     companion object {
+        private const val LOG = "recording"
         /** How often the climb is measured again while recording. */
         const val MEASURE_EVERY_MS = 30_000L
         /** How often the step count is saved while counting: a kill loses none, as it's counted on from the saved reading. */

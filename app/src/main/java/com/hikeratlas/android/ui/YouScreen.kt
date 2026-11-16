@@ -84,16 +84,18 @@ fun YouTab(
     waiting: WaitingActions? = null,
     seePost: PostRef? = null,
     refreshKey: Int = 0,
+    /** Opens the Logs screen. */
+    logs: (() -> Unit)? = null,
 ) {
     val s = account.state
     if (s is AccountState.In) {
         ProfileScreen(
             ProfileTarget(s.did, s.handle, seePost), profile, onBack = null, avatar = s.avatar,
-            settings = { YouSettings(account, units, license, storage) },
+            settings = { YouSettings(account, units, license, storage, logs) },
             waiting = waiting, refreshKey = refreshKey,
         )
     } else {
-        YouScreen(storage, account, units, waiting)
+        YouScreen(storage, account, units, waiting, logs)
     }
 }
 
@@ -103,14 +105,14 @@ fun YouTab(
  * storage is this phone's.
  */
 @Composable
-internal fun YouSettings(account: AccountActions, units: UnitsActions, license: LicenseActions?, storage: StorageActions?) {
+internal fun YouSettings(account: AccountActions, units: UnitsActions, license: LicenseActions?, storage: StorageActions?, logs: (() -> Unit)? = null) {
     SettingsGroup("Posting") {
         UnitsCard(units)
         if (license != null) LicenseCard(license)
     }
     if (storage != null) SettingsGroup("On this phone") { StorageCard(storage) }
     SettingsGroup("Account") { AccountCard(account, title = null) }
-    SettingsGroup("About") { AboutCard(title = null) }
+    SettingsGroup("About") { AboutCard(title = null, logs = logs) }
 }
 
 @Composable
@@ -156,6 +158,7 @@ fun YouScreen(
     units: UnitsActions? = null,
     /** Posts waiting to go up (signed in, they're on your profile's Overview). */
     waiting: WaitingActions? = null,
+    logs: (() -> Unit)? = null,
 ) {
     Column(
         Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surfaceContainerLowest)
@@ -167,13 +170,13 @@ fun YouScreen(
         if (waiting != null && waiting.entries.isNotEmpty()) WaitingPosts(waiting)
         if (units != null && !units.signedIn) UnitsCard(units)
         if (storage != null) StorageCard(storage)
-        AboutCard()
+        AboutCard(logs = logs)
     }
 }
 
-/** The site, the terms, map credits and the version. [title] null where a heading above says it. */
+/** The site, the terms, map credits, the logs and the version. [title] null where a heading above says it. */
 @Composable
-private fun AboutCard(title: String? = "About") {
+private fun AboutCard(title: String? = "About", logs: (() -> Unit)? = null) {
     val context = LocalContext.current
     var credits by remember { mutableStateOf(false) }
     Card(title) {
@@ -181,6 +184,7 @@ private fun AboutCard(title: String? = "About") {
         // The source is a tap away on the version's commit hash, below.
         Item("Terms and privacy", external = true) { openUrl(context, "$SITE/terms") }
         Item("Map credits", "OpenStreetMap contributors, Mapterhorn, ESA WorldCover and others") { credits = true }
+        if (logs != null) Item("Logs", "What the app did lately, to share with a bug report", onClick = logs)
         VersionRow(BuildConfig.COMMIT, BuildConfig.COMMIT_DATE) { openUrl(context, it) }
     }
     if (credits) {

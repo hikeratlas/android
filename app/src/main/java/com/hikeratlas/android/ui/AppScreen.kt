@@ -112,6 +112,8 @@ fun AppScreen(app: HikerAtlasApp, link: Uri? = null, onLinkHandled: () -> Unit =
     var photosFrom by remember { mutableStateOf<OfflineAreas.Target?>(null) }
     var viewPhoto by remember { mutableStateOf<PhotoPin?>(null) }
     var photoFrom by remember { mutableStateOf<OfflineAreas.Target?>(null) }
+    // The Logs screen, over everything (from You's About).
+    var showLogs by rememberSaveable { mutableStateOf(false) }
     val accountActions = AccountActions(
         state = accountState,
         signIn = { app.account.beginSignIn(it) },
@@ -419,6 +421,7 @@ fun AppScreen(app: HikerAtlasApp, link: Uri? = null, onLinkHandled: () -> Unit =
                     waiting = waitingActions,
                     seePost = seePost,
                     refreshKey = postedCount,
+                    logs = { showLogs = true },
                 )
             }
         }
@@ -449,6 +452,12 @@ fun AppScreen(app: HikerAtlasApp, link: Uri? = null, onLinkHandled: () -> Unit =
         // Over the tabs too: the viewer is the whole screen.
         viewPhotos?.let { set ->
             androidx.compose.runtime.key(set) { PhotoViewer(set, photoViewerActions, onClose = { viewPhotos = null }) }
+        }
+        if (showLogs) {
+            com.hikeratlas.android.logs.LogsScreen(
+                remember { com.hikeratlas.android.logs.logsActions(context, scope) },
+                onClose = { showLogs = false },
+            )
         }
     }
 }

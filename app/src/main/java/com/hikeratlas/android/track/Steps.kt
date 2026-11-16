@@ -12,6 +12,7 @@ import android.os.Handler
 import android.os.Looper
 import androidx.core.content.ContextCompat
 import androidx.core.content.edit
+import com.hikeratlas.android.logs.Log
 import java.util.Locale
 
 /**
@@ -84,9 +85,9 @@ class SensorStepSource(context: Context) : StepSource {
 
     override fun start(onCount: (Long) -> Unit): Boolean {
         stop()
-        if (!canCountSteps(app)) return false
-        val sm = sensors ?: return false
-        val sensor = sm.getDefaultSensor(Sensor.TYPE_STEP_COUNTER) ?: return false
+        if (!canCountSteps(app)) return false.also { Log.i("recording", "Steps: no permission") }
+        val sm = sensors ?: return false.also { Log.i("recording", "Steps: no sensor service") }
+        val sensor = sm.getDefaultSensor(Sensor.TYPE_STEP_COUNTER) ?: return false.also { Log.i("recording", "Steps: no step counter") }
         val l = object : SensorEventListener2 {
             override fun onSensorChanged(event: SensorEvent) {
                 event.values.firstOrNull()?.let { onCount(it.toLong()) }
@@ -98,8 +99,12 @@ class SensorStepSource(context: Context) : StepSource {
                 handler.post { finishFlush() }
             }
         }
-        if (!sm.registerListener(l, sensor, SensorManager.SENSOR_DELAY_NORMAL, handler)) return false
+        if (!sm.registerListener(l, sensor, SensorManager.SENSOR_DELAY_NORMAL, handler)) {
+            Log.w("recording", "Steps: the step counter wouldn't listen")
+            return false
+        }
         listener = l
+        Log.d("recording", "Steps: counting")
         return true
     }
 
