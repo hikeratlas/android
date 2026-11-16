@@ -1,7 +1,8 @@
 package com.hikeratlas.android.ui
 
 import androidx.compose.ui.test.junit4.createComposeRule
-import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.hasContentDescription
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import org.junit.Assert.assertEquals
@@ -40,5 +41,14 @@ class AboutCardTest {
         compose.onNodeWithText("hikeratlas.com").fetchSemanticsNode()
         compose.onNodeWithText("Blog").assertDoesNotExist()
         compose.onNodeWithText("Hiker Atlas on the web").assertDoesNotExist()
+    }
+
+    // #62: the terms in place of "Source code" (the version's commit hash links the source).
+    @Test
+    fun aboutLinksTheTermsNotTheSource() {
+        compose.setContent { HikerAtlasTheme { YouScreen() } }
+        // The row has the open-in-browser icon (merged into its semantics, as a clickable row's are).
+        compose.onNode(hasText("Terms and privacy") and hasContentDescription("Opens in browser")).fetchSemanticsNode()
+        compose.onNodeWithText("Source code").assertDoesNotExist()
     }
 }
