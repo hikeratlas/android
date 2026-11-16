@@ -28,6 +28,8 @@ data class GpxStats(
     val gain: Long?,
     val points: Int,
     val loss: Long? = null,
+    /** Steps counted while it was recorded (the app's <ha:steps>); null where they weren't. */
+    val steps: Long? = null,
 )
 
 /**
@@ -125,8 +127,25 @@ object TrackMeasure {
         return run.stats()
     }
 
-    /** The website's numbers for a GPX file. */
-    fun ofGpx(text: String): GpxStats = stats(parse(text))
+    /** The website's numbers for a GPX file, and its steps where the app counted them. */
+    fun ofGpx(text: String): GpxStats {
+        val root = document(text)
+        return stats(segments(root)).copy(steps = steps(root))
+    }
+
+    /**
+     * The first <trk>'s <ha:steps> (in the app's namespace, in the track's
+     * own extensions): a whole number, 0 or more, or none.
+     */
+    private fun steps(root: Element): Long? {
+        val trk = byName(root, "trk").firstOrNull() ?: return null
+        val ext = children(trk).firstOrNull { (it.localName ?: it.nodeName) == "extensions" } ?: return null
+        val el = children(ext).firstOrNull { it.namespaceURI == Gpx.NS && it.localName == "steps" } ?: return null
+        return el.textContent.trim().toLongOrNull()?.takeIf { it >= 0 }
+    }
+
+    private fun children(el: Element): List<Element> =
+        (0 until el.childNodes.length).mapNotNull { el.childNodes.item(it) as? Element }
 
     /**
      * A recorded track's points as [Gpx.write] writes them, so measuring
@@ -144,7 +163,9 @@ object TrackMeasure {
      * namespace; <ele> and <time> the first of each inside the point; a
      * point without a usable lat and lon dropped.
      */
-    fun parse(text: String): List<List<Point>> {
+    fun parse(text: String): List<List<Point>> = segments(document(text))
+
+    private fun document(text: String): Element {
         val f = DocumentBuilderFactory.newInstance().apply {
             isNamespaceAware = true
             isExpandEntityReferences = false
@@ -163,7 +184,11 @@ object TrackMeasure {
         }
         val root = doc.documentElement
         if (root == null || (root.localName ?: root.nodeName) != "gpx") throw IllegalArgumentException("Not a GPX file")
-        return byName(doc.documentElement, "trkseg").map { seg ->
+        return root
+    }
+
+    private fun segments(root: Element): List<List<Point>> {
+        return byName(root, "trkseg").map { seg ->
             byName(seg, "trkpt").mapNotNull { p ->
                 val ele = byName(p, "ele").firstOrNull()?.textContent
                 val time = byName(p, "time").firstOrNull()?.textContent

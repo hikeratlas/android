@@ -292,6 +292,25 @@ class ProfileScreenTest {
         assertEquals("4.5 mi", trackFacts(t.copy(gain = null, duration = null)))
     }
 
+    /** A track's steps, as the website shows them: only where its record has a count. */
+    @Test
+    fun aCountedTracksStepsAreShown() {
+        val t = track("t")
+        assertEquals("7.3 km · ↑ 612 m · 2 h 5 min · 3,120 steps", trackFacts(t.copy(steps = 3120)))
+        fun parsed(steps: String) = com.hikeratlas.android.atproto.Profiles.parseTrack(
+            kotlinx.serialization.json.Json.parseToJsonElement(
+                """{"uri":"at://did:plc:x/com.hikeratlas.temp.track/t","cid":"c","value":{"createdAt":"2026-07-02T00:00:00.000Z",
+                "gpx":{"${'$'}type":"blob","ref":{"${'$'}link":"bafy"},"mimeType":"application/gzip","size":10}$steps}}""",
+            ) as kotlinx.serialization.json.JsonObject,
+        )!!.steps
+        assertEquals(3120L, parsed(",\"steps\":3120"))
+        assertEquals(0L, parsed(",\"steps\":0"))
+        assertNull(parsed(""))
+        assertNull(parsed(",\"steps\":-5"))
+        assertNull(parsed(",\"steps\":12.5"))
+        assertNull(parsed(",\"steps\":\"3120\""))
+    }
+
     @Test
     fun signedInTheAccountCardOpensYourProfileWhereTheSettingsAre() {
         var opened = 0

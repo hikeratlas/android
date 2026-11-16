@@ -51,6 +51,8 @@ object Profiles {
         val routeKey: String? = null,
         val photos: List<Photo> = emptyList(),
         val license: String? = null,
+        /** Counted while recording; null where it wasn't (absent, or not a count). */
+        val steps: Long? = null,
     )
 
     data class Review(
@@ -179,6 +181,7 @@ object Profiles {
             startedAt = v.str("startedAt"), duration = v.num("duration"), distance = v.num("distance"), gain = v.num("gain"),
             title = v.str("title"), routeKey = v.str("routeKey")?.takeIf { it.isNotEmpty() },
             photos = photos(v["photos"]), license = v.str("license"),
+            steps = v.num("steps")?.takeIf { it >= 0 && it == Math.floor(it) && it <= 9.007199254740991E15 }?.toLong(),
         )
     }
 

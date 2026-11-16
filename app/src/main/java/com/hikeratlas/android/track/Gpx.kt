@@ -10,13 +10,14 @@ import java.util.TimeZone
  * <trkpt> with its time. <ele> is GPS's altitude above sea level where
  * Android gave one (14+), else above the WGS84 ellipsoid, as GPS reports it.
  * Everything else recorded (the ellipsoid altitude, accuracies, speed) is
- * kept in Hiker Atlas extensions, so nothing is lost.
+ * kept in Hiker Atlas extensions, so nothing is lost; and the track's
+ * steps, where they were counted, as <ha:steps> in the <trk>'s extensions.
  */
 object Gpx {
     const val NS = "https://www.hikeratlas.com/gpx/1"
     const val MIME = "application/gpx+xml"
 
-    fun write(name: String, started: Long, points: List<Pair<Int, Fix>>): String {
+    fun write(name: String, started: Long, points: List<Pair<Int, Fix>>, steps: Long? = null): String {
         val time = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.ROOT).apply { timeZone = TimeZone.getTimeZone("UTC") }
         fun t(ms: Long) = time.format(Date(ms))
         // Plain decimals: GPX has no 5.0E-5 (a longitude near the prime meridian).
@@ -29,6 +30,8 @@ object Gpx {
         sb.append(" xsi:schemaLocation=\"http://www.topografix.com/GPX/1/1 http://www.topografix.com/GPX/1/1/gpx.xsd\">\n")
         sb.append("  <metadata>\n    <name>").append(escape(name)).append("</name>\n    <time>").append(t(started)).append("</time>\n  </metadata>\n")
         sb.append("  <trk>\n    <name>").append(escape(name)).append("</name>\n")
+        // GPX puts a <trk>'s extensions after its name, before its segments.
+        steps?.let { sb.append("    <extensions><ha:steps>").append(it).append("</ha:steps></extensions>\n") }
         for ((_, seg) in points.groupBy({ it.first }, { it.second }).toSortedMap()) {
             sb.append("    <trkseg>\n")
             for (f in seg) {

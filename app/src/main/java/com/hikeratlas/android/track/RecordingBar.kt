@@ -33,6 +33,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
 import java.util.Locale
@@ -48,9 +49,10 @@ fun duration(ms: Long): String {
     return if (h > 0) String.format(Locale.ROOT, "%d:%02d:%02d", h, m, sec) else String.format(Locale.ROOT, "%d:%02d", m, sec)
 }
 
-/** The track's time, distance and climb so far: 1:04:09 · 3.2 km · ↑ 240 m. */
+/** The track's time, distance, climb and steps (where counted) so far: 1:04:09 · 3.2 km · ↑ 240 m · 3,120 steps. */
 fun summary(s: TrackRecorder.State, now: Long): String =
-    listOfNotNull(duration(s.elapsed(now)), dist(s.metres / 1000, 1), s.gain?.let { "↑ ${elev(it)}" }).joinToString(" · ")
+    listOfNotNull(duration(s.elapsed(now)), dist(s.metres / 1000, 1), s.gain?.let { "↑ ${elev(it)}" }, s.steps?.let(::stepsText))
+        .joinToString(" · ")
 
 /**
  * The recording bar, under search: a dot (red recording, grey paused), the
@@ -83,6 +85,8 @@ fun RecordingBar(
                 style = MaterialTheme.typography.titleSmall,
                 fontWeight = FontWeight.SemiBold,
                 maxLines = 1,
+                // On a narrow phone the steps, last, are what's cut.
+                overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f),
             )
             if (state.paused) {

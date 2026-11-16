@@ -36,12 +36,14 @@ import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.Route
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -72,6 +74,8 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.Dispatchers
 import com.hikeratlas.android.track.RecordingService
 import com.hikeratlas.android.track.RecordingBar
+import com.hikeratlas.android.track.StepsPermission
+import kotlinx.coroutines.withTimeoutOrNull
 import androidx.compose.material.icons.filled.FiberManualRecord
 import android.widget.Toast
 import android.os.Build
@@ -480,7 +484,11 @@ fun MapScreen(
     val stopRecording = {
         val id = recorder.stop()
         RecordingService.stop(context)
-        if (id != null) scope.launch { summary = app.library.detail(id) }
+        if (id != null) scope.launch {
+            // Its last steps (held back by the counter) are read first.
+            withTimeoutOrNull(3_000) { recorder.stepsSettled() }
+            summary = app.library.detail(id)
+        }
     }
     val recordPermissions = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { granted ->
         // Without the notification it still records; without precise location it can't.
@@ -490,14 +498,39 @@ fun MapScreen(
             Toast.makeText(context, "Recording a track needs precise location.", Toast.LENGTH_LONG).show()
         }
     }
-    val record = {
+    // Steps are counted where allowed; refused, it records as before.
+    val startRecording = { countSteps: Boolean ->
         val needed = buildList {
             if (!hasFineLocation(context)) add(Manifest.permission.ACCESS_FINE_LOCATION)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
                 ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
             ) add(Manifest.permission.POST_NOTIFICATIONS)
+            if (countSteps && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) add(Manifest.permission.ACTIVITY_RECOGNITION)
         }
         if (needed.isEmpty()) beginRecording() else recordPermissions.launch(needed.toTypedArray())
+    }
+    var askingSteps by remember { mutableStateOf(false) }
+    val record = {
+        if (StepsPermission.toAsk(context)) { askingSteps = true } else { startRecording(false) }
+    }
+    if (askingSteps) {
+        val answer = { count: Boolean ->
+            askingSteps = false
+            StepsPermission.asked(context)
+            startRecording(count)
+        }
+        AlertDialog(
+            onDismissRequest = { askingSteps = false },
+            title = { Text("Count your steps while you record") },
+            text = {
+                Text(
+                    "Hiker Atlas can count your steps with your phone's step counter, only while recording, " +
+                        "and show them with the track and its post.",
+                )
+            },
+            confirmButton = { TextButton(onClick = { answer(true) }) { Text("Continue") } },
+            dismissButton = { TextButton(onClick = { answer(false) }) { Text("Not now") } },
+        )
     }
 
     Box(Modifier.fillMaxSize().onSizeChanged { containerPx = it.height }) {

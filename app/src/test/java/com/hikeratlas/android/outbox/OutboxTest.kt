@@ -388,6 +388,34 @@ class OutboxTest {
         assertEquals(1, fake.blobs.size)
     }
 
+    /** A counted track's steps survive waiting in the outbox: they're in its GPX, and go in its record. */
+    @Test
+    fun aQueuedTracksStepsGoUpWithIt() = runBlocking {
+        val id = store.start(1_783_000_000_000)
+        for (i in 0 until 20) store.add(id, 0, Fix(1_783_000_000_000 + i * 5_000L, 47.45 + i * 0.0002, -121.8, 4f, mslAltitude = 200.0 + i))
+        store.setSteps(id, 2_345, null)
+        store.end(id, 1_783_000_100_000)
+        fake.fault = { r -> if (isStep(r)) unavailable() else null }
+        val e = queue(Posts.Post(title = "Mount Si", gpx = library.gpxText(id)!!), trackId = id)
+        assertTrue(app.outbox.upload(e.id) is Outbox.Outcome.Waiting)
+        fake.fault = null
+        // Picked up again later, as if after the app was restarted.
+        app.outbox = newOutbox()
+        assertEquals(ListenableWorker.Result.success(), work(e.id))
+        assertEquals("2345", tracks().values.single()["steps"]!!.jsonPrimitive.content)
+    }
+
+    /** A track recorded without counting has no steps in its record (not 0). */
+    @Test
+    fun anUncountedTrackPostsNoSteps() = runBlocking {
+        val id = store.start(1_783_000_000_000)
+        for (i in 0 until 20) store.add(id, 0, Fix(1_783_000_000_000 + i * 5_000L, 47.45 + i * 0.0002, -121.8, 4f))
+        store.end(id, 1_783_000_100_000)
+        val e = queue(Posts.Post(title = "Mount Si", gpx = library.gpxText(id)!!), trackId = id)
+        assertEquals(ListenableWorker.Result.success(), work(e.id))
+        assertNull(tracks().values.single()["steps"])
+    }
+
     @Test
     fun notificationsAreLeftOutWhenNotAllowed() {
         shadowOf(app).denyPermissions(Manifest.permission.POST_NOTIFICATIONS)
