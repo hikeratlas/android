@@ -29,7 +29,6 @@ import okhttp3.OkHttpClient
 import org.maplibre.android.offline.OfflineManager
 import org.maplibre.android.MapLibre
 import org.maplibre.android.module.http.HttpRequestUtil
-import java.util.concurrent.TimeUnit
 
 class HikerAtlasApp : Application(), RecorderHost, OfflineHost, com.hikeratlas.android.outbox.OutboxHost {
     /** For our own requests: the style, and PMTiles range reads. */
@@ -119,10 +118,8 @@ class HikerAtlasApp : Application(), RecorderHost, OfflineHost, com.hikeratlas.a
             maxRequests = 64
             maxRequestsPerHost = 24
         }
-        http = OkHttpClient.Builder()
+        http = Http.builder()
             .dispatcher(dispatcher)
-            .connectTimeout(15, TimeUnit.SECONDS)
-            .readTimeout(30, TimeUnit.SECONDS)
             .build()
         com.hikeratlas.android.map.Thumbs.client = http
         // Tells the indexer about each post, fave or delete right after it's written.

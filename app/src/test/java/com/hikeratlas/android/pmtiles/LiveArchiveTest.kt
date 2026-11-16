@@ -1,6 +1,6 @@
 package com.hikeratlas.android.pmtiles
 
-import okhttp3.OkHttpClient
+import com.hikeratlas.android.Http
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Assume.assumeTrue
@@ -14,7 +14,7 @@ class LiveArchiveTest {
     @Test
     fun readsAGaribaldiTile() {
         assumeTrue(System.getenv("HIKERATLAS_LIVE") == "1")
-        val source = HttpRangeSource("https://public.hikeratlas.com/north-america.pmtiles", OkHttpClient())
+        val source = HttpRangeSource("https://public.hikeratlas.com/north-america.pmtiles", Http.builder().build())
         val p = Pmtiles(source)
         val h = p.header()
         assertEquals(Compression.ZSTD, h.tileCompression)

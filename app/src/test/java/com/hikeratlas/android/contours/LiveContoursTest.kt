@@ -1,5 +1,6 @@
 package com.hikeratlas.android.contours
 
+import com.hikeratlas.android.Http
 import com.hikeratlas.android.elevation.DemServer
 import com.hikeratlas.android.elevation.DemTiles
 import com.hikeratlas.android.elevation.MapterhornSource
@@ -7,7 +8,6 @@ import com.hikeratlas.android.elevation.NlDemSource
 import com.hikeratlas.android.pmtiles.TileServer
 import com.hikeratlas.android.style.StyleLoader
 import kotlinx.coroutines.runBlocking
-import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
@@ -33,7 +33,7 @@ class LiveContoursTest {
     @Test
     fun garibaldiHasContours() {
         assumeTrue(System.getenv("HIKERATLAS_LIVE") == "1")
-        val http = OkHttpClient()
+        val http = Http.builder().build()
         val sources = listOf(NlDemSource(http), MapterhornSource(http))
         val dem = DemTiles(sources)
         val mapClient = http.newBuilder()

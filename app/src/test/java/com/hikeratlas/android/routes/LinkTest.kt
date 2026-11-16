@@ -1,7 +1,7 @@
 package com.hikeratlas.android.routes
 
+import com.hikeratlas.android.Http
 import kotlinx.coroutines.runBlocking
-import okhttp3.OkHttpClient
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assume.assumeTrue
@@ -75,7 +75,7 @@ class LinkTest {
     @Test
     fun resolvesALiveLink() = runBlocking {
         assumeTrue(System.getenv("HIKERATLAS_LIVE") == "1")
-        val repo = RoutesRepository(OkHttpClient())
+        val repo = RoutesRepository(Http.builder().build())
         val link = Link.resolve(
             Link.parts("/hikes/united-states/washington/raging-river-state-forest/upward-mobility")!!,
             repo.regions(),
