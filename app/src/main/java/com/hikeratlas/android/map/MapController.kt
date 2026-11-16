@@ -112,6 +112,13 @@ class MapController(val map: MapLibreMap, private val density: Float) {
                 org.maplibre.android.style.layers.PropertyFactory.textIgnorePlacement(true),
             ),
         )
+        // A photo's place, from the photo viewer's "Show on map".
+        s.addSource(GeoJsonSource(PHOTO))
+        s.addLayer(
+            CircleLayer(PHOTO, PHOTO).withProperties(
+                circleRadius(9f), circleColor(PHOTO_COLOR), circleStrokeColor("#ffffff"), circleStrokeWidth(3f),
+            ),
+        )
         s.addLayer(
             CircleLayer(HOVER, HOVER).withProperties(
                 circleRadius(6f), circleColor("#0b0b0b"), circleStrokeColor("#ffffff"), circleStrokeWidth(2.5f),
@@ -279,6 +286,19 @@ class MapController(val map: MapLibreMap, private val density: Float) {
         if (p == null) src.setGeoJson(FeatureCollection.fromFeatures(emptyList())) else src.setGeoJson(Feature.fromGeometry(Point.fromLngLat(p[0], p[1])))
     }
 
+    /** Marks where a photo was taken, [lon, lat]; null clears it. */
+    fun showPhoto(p: DoubleArray?) {
+        val src = style?.getSourceAs<GeoJsonSource>(PHOTO) ?: return
+        if (p == null) src.setGeoJson(FeatureCollection.fromFeatures(emptyList())) else src.setGeoJson(Feature.fromGeometry(Point.fromLngLat(p[0], p[1])))
+    }
+
+    /** Centres a point in the part of the map that a bottom sheet [bottomPx] tall leaves, close in (as a fitted hike's furthest zoom). */
+    fun centreOn(lon: Double, lat: Double, bottomPx: Int) {
+        // A box too small to fit: fitBounds stops at its zoom limit, centred on it.
+        val d = 1e-5
+        fitBounds(LatLngBounds.from(lat + d, lon + d, lat - d, lon - d), bottomPx)
+    }
+
     /** Fits a line into the part of the map that a bottom sheet [bottomPx] tall leaves. */
     fun fitLine(line: List<List<Double>>, bottomPx: Int) {
         if (line.size < 2) return
@@ -358,6 +378,8 @@ class MapController(val map: MapLibreMap, private val density: Float) {
         private const val SEL = "curated-sel"
         private const val HOVER = "curated-hover"
         private const val ALONG = "curated-along"
+        private const val PHOTO = "photo-place"
+        private const val PHOTO_COLOR = "#1d4ed8"
         private const val PARK = "curated-park"
         const val ALONG_COLOR = "#a21caf"
     }

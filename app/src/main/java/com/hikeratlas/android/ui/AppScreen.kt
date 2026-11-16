@@ -102,6 +102,13 @@ fun AppScreen(app: HikerAtlasApp, link: Uri? = null, onLinkHandled: () -> Unit =
     var viewPosted by remember { mutableStateOf<PostedTrack?>(null) }
     // The hike sheet a posted track was shown from, to go back to when it's closed.
     var postedFrom by remember { mutableStateOf<OfflineAreas.Target?>(null) }
+    // A post's photos in the viewer, over everything, and the hike sheet
+    // they were opened from (none: the profile). Then a photo's place on
+    // the map, and where to go back to when it's closed.
+    var viewPhotos by remember { mutableStateOf<PhotoSet?>(null) }
+    var photosFrom by remember { mutableStateOf<OfflineAreas.Target?>(null) }
+    var viewPhoto by remember { mutableStateOf<PhotoPin?>(null) }
+    var photoFrom by remember { mutableStateOf<OfflineAreas.Target?>(null) }
     val accountActions = AccountActions(
         state = accountState,
         signIn = { app.account.beginSignIn(it) },
@@ -220,17 +227,22 @@ fun AppScreen(app: HikerAtlasApp, link: Uri? = null, onLinkHandled: () -> Unit =
         openHike = { h ->
             viewTrack = null
             viewPosted = null
+            viewPhoto = null
             openArea = OfflineAreas.Target(com.hikeratlas.android.offline.OfflineStore.HIKE, h.id, h.title)
             tab = Tab.Map
         },
         showTrack = { t ->
             viewTrack = null
+            viewPhoto = null
             viewPosted = t
             postedFrom = null
             tab = Tab.Map
         },
         shareGpx = { title, gpx -> scope.launch { com.hikeratlas.android.track.shareGpx(context, title, gpx) } },
-        openPhoto = { com.hikeratlas.android.map.openUrl(context, it) },
+        openPhotos = { s ->
+            viewPhotos = s
+            photosFrom = null
+        },
         edit = { r, e ->
             com.hikeratlas.android.atproto.Posts.editReview(app.account.xrpc, app.account.did ?: throw SignedOutException(), r, e)
         },
@@ -249,10 +261,26 @@ fun AppScreen(app: HikerAtlasApp, link: Uri? = null, onLinkHandled: () -> Unit =
         openUrl = { com.hikeratlas.android.map.openUrl(context, it) },
         showTrack = { t, id, title ->
             viewTrack = null
+            viewPhoto = null
             viewPosted = t
             postedFrom = OfflineAreas.Target(com.hikeratlas.android.offline.OfflineStore.HIKE, id, title)
         },
         shareGpx = { title, gpx -> scope.launch { com.hikeratlas.android.track.shareGpx(context, title, gpx) } },
+        openPhotos = { s, id, title ->
+            viewPhotos = s
+            photosFrom = OfflineAreas.Target(com.hikeratlas.android.offline.OfflineStore.HIKE, id, title)
+        },
+    )
+    val photoViewerActions = PhotoViewerActions(
+        download = { url, p -> PhotoDownload.download(context, app.http, url, p) },
+        showOnMap = { pin ->
+            photoFrom = photosFrom
+            viewPhotos = null
+            viewTrack = null
+            viewPosted = null
+            viewPhoto = pin
+            tab = Tab.Map
+        },
     )
     val tabs = Tab.entries.filter {
         it != Tab.Saved || library.tracks.isNotEmpty() || offline.areas.isNotEmpty() || did != null || tab == Tab.Saved
@@ -280,6 +308,15 @@ fun AppScreen(app: HikerAtlasApp, link: Uri? = null, onLinkHandled: () -> Unit =
                 if (from != null) openArea = from
                 else if (profileTarget != null) tab = Tab.You
             },
+            viewPhoto = viewPhoto.takeIf { tab == Tab.Map },
+            // Back to the hike sheet or profile the photo was opened from.
+            onPhotoClosed = {
+                viewPhoto = null
+                val from = photoFrom
+                photoFrom = null
+                if (from != null) openArea = from
+                else if (profileTarget != null) tab = Tab.You
+            },
             openArea = openArea.takeIf { tab == Tab.Map }, onAreaOpened = { openArea = null },
             onCrumb = { c ->
                 explore = c.path.joinToString("/")
@@ -295,6 +332,7 @@ fun AppScreen(app: HikerAtlasApp, link: Uri? = null, onLinkHandled: () -> Unit =
                     library.tracks,
                     onOpen = { id ->
                         viewPosted = null
+                        viewPhoto = null
                         viewTrack = id
                         tab = Tab.Map
                     },
@@ -410,6 +448,10 @@ fun AppScreen(app: HikerAtlasApp, link: Uri? = null, onLinkHandled: () -> Unit =
                     )
                 }
             }
+        }
+        // Over the tabs too: the viewer is the whole screen.
+        viewPhotos?.let { set ->
+            androidx.compose.runtime.key(set) { PhotoViewer(set, photoViewerActions, onClose = { viewPhotos = null }) }
         }
     }
 }

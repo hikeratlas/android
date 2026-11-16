@@ -143,7 +143,8 @@ class FromHikersTest {
     /** Nodes with [text] in them: a post's title and date share its author's line. */
     private fun has(text: String) = compose.onAllNodesWithText(text, substring = true).fetchSemanticsNodes().size
     private fun tagged(tag: String) = compose.onAllNodesWithTag(tag).fetchSemanticsNodes().size
-    private fun asked(path: String) = requests.filter { it.url.encodedPath == "/xrpc/$path" }
+    // A synchronized list is iterated under its lock: the server's thread may be adding to it.
+    private fun asked(path: String) = synchronized(requests) { requests.filter { it.url.encodedPath == "/xrpc/$path" } }
 
     @Test
     fun countsLineSaysWhatsBeenPosted() {

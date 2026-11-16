@@ -8,7 +8,11 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.junit4.v2.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import com.hikeratlas.android.atproto.IndexerClient
 import com.hikeratlas.android.elevation.ElevationProfiler
 import com.hikeratlas.android.routes.RoutesRepository
@@ -49,6 +53,8 @@ class HikersSheetTest {
     private val http = OkHttpClient.Builder().proxy(java.net.Proxy.NO_PROXY).build()
     private val key = "1E57E06gbDEBBBICDGF.F55FRcODEp_"
     private val asked = Collections.synchronizedList(mutableListOf<String>())
+    /** Reviews the fake indexer counts for the keyed route (it lists the one in [reviews]). */
+    @Volatile private var reviewCount = 0
 
     @After
     fun tearDown() = server.close()
@@ -66,7 +72,14 @@ class HikersSheetTest {
         return ByteArrayOutputStream().also { o -> GZIPOutputStream(o).use { it.write(park) } }.toByteArray()
     }
 
-    private fun open(id: String): PanelModel {
+    /** A review of day hike 5 with two photos (the author's PDS: the fake server, from pdsOf). */
+    private fun reviews() = """{"reviews":[{"uri":"at://did:plc:abcdefghijklmnopqrstuvwx/com.hikeratlas.temp.review/r1","cid":"c",
+        "author":{"did":"did:plc:abcdefghijklmnopqrstuvwx","handle":"alice.test"},"indexedAt":"x",
+        "record":{"text":"Lovely","createdAt":"2026-11-14T00:00:00.000Z","license":"CC0-1.0","photos":[
+        {"image":{"ref":{"${'$'}link":"bafk-p1"},"mimeType":"image/jpeg"},"alt":"Lake"},
+        {"image":{"ref":{"${'$'}link":"bafk-p2"},"mimeType":"image/jpeg"},"alt":"Ridge","at":{"lat":49950000,"lon":-123000000}}]}}]}"""
+
+    private fun open(id: String, photos: MutableList<Triple<com.hikeratlas.android.ui.PhotoSet, String, String>> = mutableListOf()): PanelModel {
         val bundle = bundle()
         server.dispatcher = object : Dispatcher() {
             override fun dispatch(request: RecordedRequest): MockResponse = when (request.url.encodedPath) {
@@ -74,8 +87,9 @@ class HikersSheetTest {
                 "/b.bin" -> MockResponse.Builder().body(Buffer().write(bundle)).build()
                 "/xrpc/com.hikeratlas.temp.getRouteStats" -> {
                     asked += request.url.queryParameter("keys")!!
-                    MockResponse.Builder().body("""{"routes":[{"routeKey":"$key","faves":12,"reviews":0,"tracks":0}]}""").build()
+                    MockResponse.Builder().body("""{"routes":[{"routeKey":"$key","faves":12,"reviews":$reviewCount,"tracks":0}]}""").build()
                 }
+                "/xrpc/com.hikeratlas.temp.getRouteReviews" -> MockResponse.Builder().body(reviews()).build()
                 else -> MockResponse.Builder().code(404).build()
             }
         }
@@ -90,8 +104,9 @@ class HikersSheetTest {
         }
         val hikers = HikerActions(
             IndexerClient(http, server.url("/").toString()),
-            pdsOf = { null }, getTrack = { _, _ -> null }, gpx = { _, _, _ -> "" },
+            pdsOf = { server.url("/").toString().trimEnd('/') }, getTrack = { _, _ -> null }, gpx = { _, _, _ -> "" },
             openUrl = {}, showTrack = { _, _, _ -> }, shareGpx = { _, _ -> }, writes = emptyFlow(),
+            openPhotos = { s, hikeId, title -> photos += Triple(s, hikeId, title) },
         )
         compose.setContent {
             val scope = rememberCoroutineScope()
@@ -113,6 +128,22 @@ class HikersSheetTest {
         open("2226817/day/5")
         compose.waitUntil(10_000) { compose.onAllNodesWithText("12 faves").fetchSemanticsNodes().isNotEmpty() }
         assertEquals(listOf(key), asked.toList())
+    }
+
+    @Test
+    fun aPhotoInFromHikersOpensTheViewerWithTheHikeToComeBackTo() {
+        reviewCount = 1
+        val opened = mutableListOf<Triple<com.hikeratlas.android.ui.PhotoSet, String, String>>()
+        open("2226817/day/5", opened)
+        compose.waitUntil(10_000) { compose.onAllNodesWithContentDescription("Ridge").fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithContentDescription("Ridge").performScrollTo().performClick()
+        val (set, hikeId, _) = opened.single()
+        assertEquals("2226817/day/5", hikeId)
+        assertEquals(1, set.start)
+        assertEquals(listOf("bafk-p1", "bafk-p2"), set.photos.map { it.image.cid })
+        assertEquals("alice.test", set.handle)
+        assertEquals("CC0-1.0", set.license)
+        assertEquals(49.95, set.photos[1].lat!!, 1e-9)
     }
 
     @Test

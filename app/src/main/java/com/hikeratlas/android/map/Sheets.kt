@@ -474,7 +474,11 @@ private fun DetailBody(
         }
         // As the website's sheet: before the trip reports.
         if (posts != null && key != null) com.hikeratlas.android.ui.PostSection(com.hikeratlas.android.ui.PostHike(key, title, r.line), posts)
-        hikers?.let { h -> com.hikeratlas.android.ui.FromHikers(h) { t -> hikerActions?.showTrack?.invoke(t, d.selected.id, title) } }
+        hikers?.let { h ->
+            com.hikeratlas.android.ui.FromHikers(h, openPhotos = { s -> hikerActions?.openPhotos?.invoke(s, d.selected.id, title) }) { t ->
+                hikerActions?.showTrack?.invoke(t, d.selected.id, title)
+            }
+        }
         d.reports?.let { ReportsSection(it, d.selected.dest) }
         // The way there, the route for a GPS app, and a link to it.
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {

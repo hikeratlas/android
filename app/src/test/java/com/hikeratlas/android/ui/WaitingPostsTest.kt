@@ -38,7 +38,7 @@ class WaitingPostsTest {
 
     private fun actions(load: suspend () -> Profiles.Profile) = ProfileActions(
         load = { load() }, findHikes = { KeyedSearch(emptyMap(), emptySet()) }, canFind = true, gpx = { _, _ -> "" },
-        delete = null, openHike = {}, showTrack = {}, shareGpx = { _, _ -> }, openPhoto = {},
+        delete = null, openHike = {}, showTrack = {}, shareGpx = { _, _ -> }, openPhotos = {},
     )
 
     private fun waitFor(text: String) = compose.waitUntil(5_000) {

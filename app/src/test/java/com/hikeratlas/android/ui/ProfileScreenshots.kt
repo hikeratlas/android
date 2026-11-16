@@ -96,14 +96,14 @@ class ProfileScreenshots {
             canFind = true,
             gpx = { p, t -> Profiles.gpx(Xrpc.public(http, p.pds), p.did, t.gpx) },
             delete = {},
-            openHike = {}, showTrack = {}, shareGpx = { _, _ -> }, openPhoto = {},
+            openHike = {}, showTrack = {}, shareGpx = { _, _ -> }, openPhotos = {},
         )
         compose.setContent {
             HikerAtlasTheme {
                 ProfileScreen(ProfileTarget(f.did, f.handle), actions, onBack = {}, settings = {})
             }
         }
-        compose.waitUntil(10_000) { Thumbs.cached(Profiles.blobUrl(f.pdsOrigin, f.did, "bafk-p2")) != null }
+        compose.waitUntil(10_000) { Thumbs.cached(Profiles.blobUrl(f.pdsOrigin, f.did, "bafk-p2"), Thumbs.GRID_PX) != null }
         compose.mainClock.advanceTimeBy(1_000)
         compose.waitForIdle()
         val bmp = compose.onRoot().captureToImage().asAndroidBitmap()

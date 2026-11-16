@@ -162,7 +162,9 @@ class ProfilesTest {
         put(Posts.TRACK, "nocreated", """{"gpx":{"ref":{"${'$'}link":"x"}}}""")
         // Numbers that aren't: left out, the track kept.
         track("oddnumbers", ""","duration":"long","gain":true""")
-        review("good", ""","photos":[{"image":{"ref":{"${'$'}link":"bafk-photo"},"mimeType":"image/jpeg"},"alt":"Falls"},{"image":{}},"x"]""")
+        review("good", ""","photos":[{"image":{"ref":{"${'$'}link":"bafk-photo"},"mimeType":"image/jpeg"},"alt":"Falls"},{"image":{}},"x",""" +
+            """{"image":{"ref":{"${'$'}link":"bafk-at"}},"takenAt":"2026-07-01T15:00:00.000Z","at":{"lat":47512345,"lon":-121734567}},""" +
+            """{"image":{"ref":{"${'$'}link":"bafk-off"}},"at":{"lat":95000000,"lon":0}}]""")
         put(Posts.REVIEW, "notext", """{"createdAt":"2026-07-01T12:00:00.000Z"}""")
         put(Posts.REVIEW, "numbertext", """{"text":5,"createdAt":"2026-07-01T12:00:00.000Z"}""")
         put(Posts.REVIEW, "nocreated", """{"text":"hi"}""")
@@ -179,7 +181,15 @@ class ProfilesTest {
         assertNull(odd.duration)
         assertNull(odd.gain)
         val photos = p.reviews.single { it.uri == uri(Posts.REVIEW, "good") }.photos
-        assertEquals(listOf(Profiles.Photo(Profiles.Blob("bafk-photo", "image/jpeg"), "Falls")), photos)
+        assertEquals(
+            listOf(
+                Profiles.Photo(Profiles.Blob("bafk-photo", "image/jpeg"), "Falls"),
+                Profiles.Photo(Profiles.Blob("bafk-at", null), null, "2026-07-01T15:00:00.000Z", 47.512345, -121.734567),
+                // Off the globe: no location, the photo kept.
+                Profiles.Photo(Profiles.Blob("bafk-off", null), null),
+            ),
+            photos,
+        )
         // Only route keys' faves, as the website.
         assertEquals(listOf("1E57E06gbDEBBBICDGF.F55FRcODEp_"), p.faves.map { it.key })
     }
