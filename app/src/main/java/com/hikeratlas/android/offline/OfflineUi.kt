@@ -28,6 +28,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -127,24 +128,16 @@ fun DownloadDialog(
     )
 }
 
-/** Whether the phone has a network with internet now, kept up to date. */
+/** Whether the phone has a network with internet now, kept up to date (see [Connectivity]). */
 @Composable
 fun rememberOnline(): Boolean {
     val context = LocalContext.current
-    val cm = remember { context.getSystemService(android.net.ConnectivityManager::class.java) }
-    fun now() = cm?.getNetworkCapabilities(cm.activeNetwork)?.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET) == true
-    var online by remember { mutableStateOf(now()) }
-    DisposableEffect(cm) {
-        val main = android.os.Handler(android.os.Looper.getMainLooper())
-        val callback = object : android.net.ConnectivityManager.NetworkCallback() {
-            override fun onAvailable(network: android.net.Network) { main.post { online = now() } }
-            override fun onLost(network: android.net.Network) { main.post { online = now() } }
-            override fun onCapabilitiesChanged(network: android.net.Network, caps: android.net.NetworkCapabilities) { main.post { online = now() } }
-        }
-        cm?.registerDefaultNetworkCallback(callback)
-        onDispose { cm?.unregisterNetworkCallback(callback) }
+    val connectivity = remember { Connectivity.of(context) }
+    DisposableEffect(connectivity) {
+        connectivity.start()
+        onDispose { connectivity.close() }
     }
-    return online
+    return connectivity.online.collectAsState().value
 }
 
 /** Says the map's offline: what it shows is what's downloaded. */

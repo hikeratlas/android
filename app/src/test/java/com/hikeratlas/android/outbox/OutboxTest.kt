@@ -17,11 +17,16 @@ import com.hikeratlas.android.atproto.Account
 import com.hikeratlas.android.atproto.FakeAtproto
 import com.hikeratlas.android.atproto.MemoryDpopKeys
 import com.hikeratlas.android.atproto.MemorySecretStore
+import com.hikeratlas.android.atproto.NetworkException
 import com.hikeratlas.android.atproto.OtherAccountException
 import com.hikeratlas.android.atproto.Photos
+import com.hikeratlas.android.atproto.PostException
 import com.hikeratlas.android.atproto.Posts
 import com.hikeratlas.android.atproto.ProfileRecord
+import com.hikeratlas.android.atproto.ServerException
 import com.hikeratlas.android.atproto.Tid
+import com.hikeratlas.android.atproto.XrpcException
+import com.hikeratlas.android.outbox.Outbox.Outcome
 import com.hikeratlas.android.track.Fix
 import com.hikeratlas.android.track.TrackLibrary
 import com.hikeratlas.android.track.TrackStore
@@ -151,10 +156,11 @@ class OutboxTest {
 
     @Test
     fun queuedWhileOfflineAndPostedOnceOnline() = runBlocking {
-        // No signal: the form's try fails, and it waits for a network.
-        fake.fault = { r -> if (isStep(r)) unavailable() else null }
+        // No signal: the form's try gets no answer, and it waits for a network.
+        fake.fault = { r -> if (isStep(r)) FakeAtproto.dropped() else null }
         val e = queue()
-        assertTrue(app.outbox.upload(e.id) is Outbox.Outcome.Waiting)
+        val o = app.outbox.upload(e.id)
+        assertTrue(o is Outbox.Outcome.Waiting && !o.server)
         app.outbox.schedule(e.id)
         val info = wm.getWorkInfosForUniqueWork(Outbox.workName(e.id)).get().single()
         assertEquals(WorkInfo.State.ENQUEUED, info.state)
@@ -431,5 +437,84 @@ class OutboxTest {
         assertTrue(a, Tid.isTid(a))
         assertTrue(b > a)
         assertEquals("2222222222222", Tid.encode(0))
+    }
+
+    /** #83: only the network and the server's own trouble wait; anything else fails where it can be seen. */
+    @Test
+    fun classifyWaitsOnlyForTheNetworkAndTheServer() {
+        val o = app.outbox
+        fun waiting(x: Throwable) = o.classify(x) as? Outcome.Waiting
+        // OkHttp's transport failures, wrapped (as Xrpc does) or not, and inside a PostException.
+        for (x in listOf(
+            java.net.UnknownHostException("Unable to resolve host"), java.net.ConnectException("Failed to connect"),
+            java.net.SocketTimeoutException("timeout"), java.net.NoRouteToHostException("No route to host"),
+            javax.net.ssl.SSLHandshakeException("connection closed"), java.io.EOFException(),
+            NetworkException(java.io.IOException("unexpected end of stream on http://pds")),
+            PostException("Couldn't reach your account's server", NetworkException(java.net.SocketException("Connection reset"))),
+        )) {
+            val w = waiting(x)
+            assertNotNull("$x waits", w)
+            assertFalse("$x is the network's", w!!.server)
+        }
+        assertEquals("unexpected end of stream on http://pds", waiting(NetworkException(java.io.IOException("unexpected end of stream on http://pds")))!!.error)
+        // A 5xx: waits, as the server's problem.
+        assertEquals(Outcome.Waiting("HTTP 502", server = true), o.classify(PostException("x", ServerException(502, "com.atproto.repo.createRecord"))))
+        assertEquals(Outcome.Waiting("HTTP 429", server = true), o.classify(XrpcException(429, "RateLimitExceeded", null)))
+        // Not the network: a bad answer, a parse error, an IOException of the app's own.
+        assertEquals(Outcome.Failed("getRecord gave no uri"), o.classify(java.io.IOException("getRecord gave no uri")))
+        assertEquals(Outcome.Failed("Couldn't save the post"), o.classify(java.io.IOException("Couldn't save the post")))
+        assertTrue(o.classify(kotlinx.serialization.SerializationException("Unexpected JSON token")) is Outcome.Failed)
+        assertEquals(Outcome.Failed("createRecord failed (400): no"), o.classify(PostException("createRecord failed (400): no", XrpcException(400, "InvalidRecord", "no"))))
+    }
+
+    /** A 5xx waits and tries again, said as the server's problem rather than no signal. */
+    @Test
+    fun aServerProblemWaitsAndSaysSo() = runBlocking {
+        fake.fault = { r -> if (r.url.encodedPath.endsWith("createRecord")) FakeAtproto.json("""{"error":"BadGateway"}""", 502) else null }
+        val e = queue()
+        assertEquals(Outcome.Waiting("HTTP 502", server = true), app.outbox.upload(e.id))
+        val saved = entry(e.id)!!
+        assertEquals(Outbox.State.WAITING, saved.state)
+        assertEquals("Trying again soon: your account's server had a problem (HTTP 502)", waitingState(saved, null))
+        assertEquals(ListenableWorker.Result.retry(), work(e.id))
+        fake.fault = null
+        assertEquals(ListenableWorker.Result.success(), work(e.id))
+        assertOneTrackAndOneReview()
+    }
+
+    /** An answer that makes no sense fails (Retry or Discard), rather than waiting for a signal the phone has. */
+    @Test
+    fun aBadAnswerFailsRatherThanWaiting() = runBlocking {
+        fake.fault = { r -> if (r.url.encodedPath.endsWith("uploadBlob")) FakeAtproto.json("not json") else null }
+        val e = queue()
+        assertTrue(app.outbox.upload(e.id) is Outcome.Failed)
+        assertEquals(Outbox.State.FAILED, entry(e.id)!!.state)
+    }
+
+    /**
+     * #83: a review with a 0 km track goes up, whether the track has one
+     * point, several in one place, or none.
+     */
+    @Test
+    fun aReviewWithAZeroKmTrackGoesUp() = runBlocking {
+        val t = 1_783_000_000_000
+        val shapes = listOf(
+            "one point" to listOf(Fix(t, 47.45, -121.8, 4f, mslAltitude = 200.0)),
+            "standing still" to (0 until 5).map { Fix(t + it * 5_000L, 47.45, -121.8, 4f, mslAltitude = 200.0) },
+            "no points" to emptyList(),
+        )
+        for ((what, fixes) in shapes) {
+            fake.records.clear()
+            val id = store.start(t)
+            for (f in fixes) store.add(id, 0, f)
+            store.end(id, t + 20_000)
+            val e = queue(Posts.Post(text = "Didn't get far.", title = "Mount Si", gpx = library.gpxText(id)!!), trackId = id)
+            assertEquals(what, Outcome.Posted, app.outbox.upload(e.id))
+            val track = tracks().values.single()
+            assertEquals(what, "0", track["distance"]!!.jsonPrimitive.content)
+            if (fixes.isNotEmpty()) assertEquals(what, if (fixes.size == 1) "0" else "20", track["duration"]!!.jsonPrimitive.content)
+            assertEquals(what, 1, reviews().size)
+            assertNotNull(what, library.posted(id)?.reviewUri)
+        }
     }
 }

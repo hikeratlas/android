@@ -215,7 +215,7 @@ class FakeAtproto : AutoCloseable {
                 val body = Json.parseToJsonElement(r.body!!.utf8()).jsonObject
                 val rkey = body["rkey"]?.jsonPrimitive?.content
                 val key = "${body["collection"]?.jsonPrimitive?.content}/$rkey"
-                val invalid = body["record"]?.jsonObject?.let(::invalidPhotos)
+                val invalid = body["record"]?.jsonObject?.let { invalidPhotos(it) ?: invalidTrack(it) }
                 when {
                     createFails != null -> json(createFails!!.second, createFails!!.first)
                     invalid != null -> json("""{"error":"InvalidRecord","message":"Invalid record: $invalid"}""", 400)
@@ -291,6 +291,23 @@ class FakeAtproto : AutoCloseable {
             }
             val extra = p.keys - setOf("image", "alt", "takenAt", "at")
             if (extra.isNotEmpty()) return "unknown photo fields $extra"
+        }
+        return null
+    }
+
+    /**
+     * What's wrong with a track record by its lexicon (com.hikeratlas.temp.track:
+     * gpx and createdAt required; duration, distance, gain and steps whole
+     * numbers, 0 or more), as a PDS that validates records would refuse it;
+     * null when it's fine, or not a track.
+     */
+    private fun invalidTrack(record: JsonObject): String? {
+        if (record["\$type"]?.jsonPrimitive?.content != "com.hikeratlas.temp.track") return null
+        for (k in listOf("gpx", "createdAt")) if (record[k] == null) return "no $k"
+        for (k in listOf("duration", "distance", "gain", "steps")) {
+            val v = record[k] ?: continue
+            val n = (v as? kotlinx.serialization.json.JsonPrimitive)?.takeIf { !it.isString }?.content?.toLongOrNull() ?: return "$k not an integer"
+            if (n < 0) return "$k below its minimum of 0"
         }
         return null
     }
@@ -378,6 +395,9 @@ class FakeAtproto : AutoCloseable {
     }
 
     companion object {
+        /** No answer at all: the connection closes as the answer would start, as when signal goes. */
+        fun dropped(): MockResponse = MockResponse.Builder().onResponseStart(mockwebserver3.SocketEffect.CloseSocket()).build()
+
         fun json(body: String, code: Int = 200) =
             MockResponse.Builder().code(code).addHeader("Content-Type", "application/json").body(body).build()
 

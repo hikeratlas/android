@@ -23,6 +23,7 @@ import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Before
 import org.junit.Test
@@ -59,8 +60,9 @@ class PostFlowTest {
     private fun outbox(lib: TrackLibrary, now: () -> Long = System::currentTimeMillis) =
         com.hikeratlas.android.outbox.Outbox(context, account, lib, now = now)
 
-    private suspend fun post(lib: TrackLibrary, d: PostDraft, progress: (String) -> Unit = {}, now: () -> Long = System::currentTimeMillis) =
-        sendDraft(outbox(lib, now), fake.did, fake.handle, lib, d, progress)
+    private suspend fun post(
+        lib: TrackLibrary, d: PostDraft, progress: (String) -> Unit = {}, now: () -> Long = System::currentTimeMillis, online: Boolean = false,
+    ) = sendDraft(outbox(lib, now), fake.did, fake.handle, lib, d, progress) { online }
 
     @After
     fun tearDown() {
@@ -203,5 +205,40 @@ class PostFlowTest {
         val review = fake.records.entries.single { it.key.startsWith(Posts.REVIEW) }.value
         assertNotNull(review["photos"]!!.jsonArray.single().jsonObject["at"])
         assertNull(fake.records.entries.single { it.key.startsWith(Posts.TRACK) }.value["photos"])
+    }
+
+    /**
+     * #83: a post kept on the phone says why: no signal only when the phone
+     * has no network; else that the server couldn't be reached, or had a
+     * problem.
+     */
+    @Test
+    fun theFormSaysWhyAPostWaits() = runBlocking {
+        fun creates(answer: () -> mockwebserver3.MockResponse) {
+            fake.fault = { r -> if (r.url.encodedPath.endsWith("createRecord")) answer() else null }
+        }
+        creates { FakeAtproto.dropped() }
+        assertEquals(PostOutcome.Queued(WILL_POST), post(library(), draft(recorded(), "Lovely."), online = false))
+        val reached = post(library(), draft(recorded(), "Lovely."), online = true) as PostOutcome.Queued
+        assertTrue(reached.message, reached.message.startsWith("Couldn't reach your account's server just now ("))
+        assertTrue(reached.message, reached.message.endsWith("). It'll try again. Until then it's under Waiting posts on your profile."))
+        creates { FakeAtproto.json("""{"error":"BadGateway"}""", 502) }
+        val expected = PostOutcome.Queued("Your account's server had a problem (HTTP 502). It'll try again. Until then it's under Waiting posts on your profile.")
+        assertEquals(expected, post(library(), draft(recorded(), "Lovely."), online = true))
+        assertEquals(expected, post(library(), draft(recorded(), "Lovely."), online = false))
+    }
+
+    /** #83: a review with a track recorded standing still (0 km) posts, from the form. */
+    @Test
+    fun aReviewWithAZeroKmTrackPosts() = runBlocking {
+        val id = store.start(1_783_000_000_000)
+        for (i in 0 until 3) store.add(id, 0, Fix(1_783_000_000_000 + i * 5_000L, 47.45, -121.8, 4f, mslAltitude = 200.0))
+        store.end(id, 1_783_000_010_000)
+        val lib = library()
+        assertEquals(PostOutcome.Posted, post(lib, draft(id, "Didn't get far."), online = true))
+        val track = fake.records.entries.single { it.key.startsWith(Posts.TRACK) }.value
+        assertEquals("0", track["distance"]!!.jsonPrimitive.content)
+        assertEquals("10", track["duration"]!!.jsonPrimitive.content)
+        assertNotNull(lib.posted(id)!!.reviewUri)
     }
 }

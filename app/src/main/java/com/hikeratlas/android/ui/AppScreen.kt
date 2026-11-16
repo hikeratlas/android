@@ -35,6 +35,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -144,6 +145,8 @@ fun AppScreen(app: HikerAtlasApp, link: Uri? = null, onLinkHandled: () -> Unit =
             },
         )
     }
+    // Read as a post comes back waiting: whether to say it waits for signal.
+    val online by rememberUpdatedState(com.hikeratlas.android.offline.rememberOnline())
     val postActions = PostActions(
         accountActions,
         tracks = library.tracks,
@@ -153,7 +156,7 @@ fun AppScreen(app: HikerAtlasApp, link: Uri? = null, onLinkHandled: () -> Unit =
             com.hikeratlas.android.track.hikesNear(library.lines(id), app.routes.regions(), app.routes.index(), { app.routes.park(it) })
         },
         tracksNear = { line -> library.tracksNear(line) },
-        post = { d, progress -> sendDraft(outbox, app.account.did ?: throw SignedOutException(), handle, library, d, progress) },
+        post = { d, progress -> sendDraft(outbox, app.account.did ?: throw SignedOutException(), handle, library, d, progress) { online } },
         openProfile = { posted ->
             seePostTarget(did, handle, posted)?.let {
                 profileTarget = it

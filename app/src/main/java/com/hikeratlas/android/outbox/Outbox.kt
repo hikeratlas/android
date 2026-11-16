@@ -10,10 +10,12 @@ import androidx.work.WorkManager
 import androidx.work.workDataOf
 import com.hikeratlas.android.atproto.Account
 import com.hikeratlas.android.atproto.AccountState
+import com.hikeratlas.android.atproto.NetworkException
 import com.hikeratlas.android.atproto.OtherAccountException
 import com.hikeratlas.android.atproto.Photos
 import com.hikeratlas.android.atproto.PostException
 import com.hikeratlas.android.atproto.Posts
+import com.hikeratlas.android.atproto.ServerException
 import com.hikeratlas.android.atproto.SignedOutException
 import com.hikeratlas.android.atproto.Tid
 import com.hikeratlas.android.atproto.Xrpc
@@ -67,13 +69,13 @@ class Outbox(
     private val notifications: PostNotifications = PostNotifications(context),
 ) {
     enum class State {
-        /** For signal, or to try again after a network error ([Entry.error] says which). */
+        /** For signal, or to try again after a network error or a server's 5xx ([Entry.error] says which). */
         WAITING,
         /** The session ended: waits for the account to sign in again. */
         NEEDS_SIGN_IN,
         /** Another account is signed in: waits for its own. */
         OTHER_ACCOUNT,
-        /** Refused (a 4xx, or something wrong with the post itself): waits for Retry or Discard. */
+        /** Refused (a 4xx, a bad answer, or something wrong with the post itself): waits for Retry or Discard. */
         FAILED,
     }
 
@@ -112,6 +114,8 @@ class Outbox(
         val trackId: Long? = null,
         val state: State = State.WAITING,
         val error: String? = null,
+        /** Waiting because the server had a problem (a 5xx, or busy), not for signal. */
+        val serverError: Boolean = false,
         val progress: Progress = Progress(),
         /** Asked to sign in (a notification) once: not again each try. */
         val signInNotified: Boolean = false,
@@ -124,7 +128,12 @@ class Outbox(
         data object Posted : Outcome
         /** No such post (posted or discarded meanwhile). */
         data object Gone : Outcome
-        data class Waiting(val error: String) : Outcome
+        /**
+         * To try again later: the request didn't get through ([error] is
+         * OkHttp's why), or with [server], the server had a problem
+         * ([error] is its HTTP status).
+         */
+        data class Waiting(val error: String, val server: Boolean = false) : Outcome
         data object NeedsSignIn : Outcome
         data object OtherAccount : Outcome
         data class Failed(val message: String) : Outcome
@@ -216,7 +225,7 @@ class Outbox(
     suspend fun retry(id: String) {
         val found = lock.withLock {
             withContext(Dispatchers.IO) {
-                read(id)?.let { write(it.copy(state = State.WAITING, error = null, signInNotified = false)) } != null
+                read(id)?.let { write(it.copy(state = State.WAITING, error = null, serverError = false, signInNotified = false)) } != null
             }
         }
         if (found) schedule(id, replace = true)
@@ -276,7 +285,10 @@ class Outbox(
             else -> null
         }
         val askSignIn = notify && state == State.NEEDS_SIGN_IN && !e.signInNotified
-        val saved = e.copy(state = state, error = error, signInNotified = e.signInNotified || askSignIn)
+        val saved = e.copy(
+            state = state, error = error, serverError = (outcome as? Outcome.Waiting)?.server == true,
+            signInNotified = e.signInNotified || askSignIn,
+        )
         withContext(Dispatchers.IO) { if (File(dir, e.id).isDirectory) write(saved) }
         if (notify && state == State.FAILED) notifications.failed(saved)
         if (askSignIn) notifications.signIn(saved)
@@ -297,7 +309,7 @@ class Outbox(
             val did = account.currentDid() ?: throw SignedOutException()
             if (did != e.did) throw OtherAccountException(e.did, did)
             xrpc = account.xrpcAs(e.did)
-            e = e.copy(state = State.WAITING, error = null)
+            e = e.copy(state = State.WAITING, error = null, serverError = false)
             // A blob kept from an earlier try may have been dropped by the PDS
             // since (unused blobs are, after a while): a record refused
             // then is tried once more with every file uploaded again.
@@ -404,7 +416,13 @@ class Outbox(
         }
     }
 
-    /** What stopping on [x] means: try again later, wait for a sign-in, or fail for good. */
+    /**
+     * What stopping on [x] means: try again later, wait for a sign-in, or
+     * fail for good. Only the network and the server's own trouble wait:
+     * any other IOException (a bad answer, a file that couldn't be saved)
+     * would fail the same way next time, so it fails now, where it can be
+     * seen, rather than waiting for a signal it already has (#83).
+     */
     internal fun classify(x: Throwable): Outcome {
         cause<OtherAccountException>(x)?.let { return Outcome.OtherAccount }
         cause<SignedOutException>(x)?.let { return Outcome.NeedsSignIn }
@@ -413,20 +431,23 @@ class Outbox(
                 // Refused even after a refresh: the session's no good.
                 401 -> Outcome.NeedsSignIn
                 // Timed out, or too many requests: later.
-                408, 429 -> Outcome.Waiting("HTTP ${xe.status}")
+                408, 429 -> Outcome.Waiting("HTTP ${xe.status}", server = true)
                 else -> Outcome.Failed(failure(x))
             }
         }
-        cause<IOException>(x)?.let { return Outcome.Waiting(it.message ?: it.toString()) }
+        cause<ServerException>(x)?.let { return Outcome.Waiting("HTTP ${it.status}", server = true) }
+        causeWhere(x, NetworkException::isTransport)?.let { return Outcome.Waiting(it.message ?: it.javaClass.simpleName) }
         return Outcome.Failed(failure(x))
     }
 
     private fun failure(x: Throwable): String = (cause<PostException>(x) ?: x).let { it.message ?: it.toString() }
 
-    private inline fun <reified T : Throwable> cause(x: Throwable): T? {
+    private inline fun <reified T : Throwable> cause(x: Throwable): T? = causeWhere(x) { it is T } as T?
+
+    private inline fun causeWhere(x: Throwable, ok: (Throwable) -> Boolean): Throwable? {
         var c: Throwable? = x
         while (c != null) {
-            if (c is T) return c
+            if (ok(c)) return c
             c = c.cause
         }
         return null
@@ -442,7 +463,7 @@ class Outbox(
             if ((account.state.value as? AccountState.In)?.did != did) return
             withContext(Dispatchers.IO) {
                 list().filter { it.did == did && (it.state == State.NEEDS_SIGN_IN || it.state == State.OTHER_ACCOUNT) }.map {
-                    write(it.copy(state = State.WAITING, error = null, signInNotified = false))
+                    write(it.copy(state = State.WAITING, error = null, serverError = false, signInNotified = false))
                     it.id
                 }
             }

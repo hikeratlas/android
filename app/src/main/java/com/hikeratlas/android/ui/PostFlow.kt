@@ -16,20 +16,30 @@ sealed interface PostOutcome {
 
 const val WILL_POST = "Will post when you're online. Until then it's under Waiting posts on your profile."
 const val WILL_POST_SIGNED_IN = "Will post once you sign in again (You tab). Until then it's under Waiting posts on your profile."
+private const val UNTIL_THEN = "It'll try again. Until then it's under Waiting posts on your profile."
+
+/** A post kept on the phone after the server had a problem ([error]: its HTTP status). */
+fun willPostServer(error: String) = "Your account's server had a problem ($error). $UNTIL_THEN"
+
+/** A post kept on the phone that didn't get through, though the phone has a network ([error]: why not). */
+fun willPostUnreachable(error: String) = "Couldn't reach your account's server just now ($error). $UNTIL_THEN"
 
 /**
  * Posts what the form holds, as [did], by way of the [outbox]: saved on the
  * phone first, then up at once. Every post takes this one way, signal or
  * not, so a post cut off halfway (signal lost, the app killed) is never
  * lost or posted twice: it carries on from where it got to. A network
- * error leaves it waiting for signal; a refusal (a 4xx) takes it back out
- * of the outbox and throws, so the form, which kept its contents, can say
- * why and let it be tried again. A track is marked posted on the phone as
- * soon as its record is made, so it's never posted twice: if the review
- * then fails, trying again points the review at the track already posted.
+ * error or the server's 5xx leaves it waiting (said as waiting for signal
+ * only when [online] says the phone has no network); a refusal (a 4xx, or
+ * a bad answer) takes it back out of the outbox and throws, so the form,
+ * which kept its contents, can say why and let it be tried again. A track
+ * is marked posted on the phone as soon as its record is made, so it's
+ * never posted twice: if the review then fails, trying again points the
+ * review at the track already posted.
  */
 internal suspend fun sendDraft(
     outbox: Outbox, did: String, handle: String?, library: TrackLibrary, d: PostDraft, progress: (String) -> Unit,
+    online: () -> Boolean = { false },
 ): PostOutcome {
     val id = d.trackId
     val already = id?.let { library.posted(it) }
@@ -55,7 +65,13 @@ internal suspend fun sendDraft(
         Outbox.Outcome.Posted, Outbox.Outcome.Gone -> PostOutcome.Posted
         is Outbox.Outcome.Waiting -> {
             outbox.schedule(entry.id)
-            PostOutcome.Queued(WILL_POST)
+            PostOutcome.Queued(
+                when {
+                    o.server -> willPostServer(o.error)
+                    online() -> willPostUnreachable(o.error)
+                    else -> WILL_POST
+                },
+            )
         }
         Outbox.Outcome.NeedsSignIn -> PostOutcome.Queued(WILL_POST_SIGNED_IN)
         Outbox.Outcome.OtherAccount -> PostOutcome.Queued("Will post once ${handle?.let { "@$it" } ?: "that account"} signs in again.")
