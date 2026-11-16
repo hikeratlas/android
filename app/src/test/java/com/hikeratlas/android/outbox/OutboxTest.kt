@@ -496,6 +496,39 @@ class OutboxTest {
      * point, several in one place, or none.
      */
     @Test
+    fun aPostQueuedWithoutPhotoSizesGetsThemAsItGoesUp() = runBlocking {
+        // As an older app queued it: photos without aspectRatio (post() makes them so).
+        val e = queue()
+        assertTrue(e.post.photos.all { it.aspectRatio == null })
+        // Stopped after the first photo went up: measured once, and saved with the post.
+        var uploads = 0
+        fake.fault = { r -> if (r.url.encodedPath.endsWith("uploadBlob") && r.headers["Content-Type"] == "image/jpeg" && ++uploads == 2) unavailable() else null }
+        assertTrue(app.outbox.upload(e.id) is Outcome.Waiting)
+        val saved = entry(e.id)!!.post.photos
+        assertEquals(Photos.AspectRatio(24, 32), saved[0].aspectRatio)
+        fake.fault = null
+        assertEquals(Outcome.Posted, app.outbox.upload(e.id))
+        val photos = reviews().values.single()["photos"]!!.jsonArray.map { it.jsonObject }
+        // 32 × 24 as stored: the first turned a quarter (Orientation 6), the second a half (3).
+        assertEquals(listOf(24 to 32, 32 to 24), photos.map { it["aspectRatio"]!!.jsonObject.let { r -> r["width"]!!.jsonPrimitive.content.toInt() to r["height"]!!.jsonPrimitive.content.toInt() } })
+        // In the website's order: image, alt, takenAt, aspectRatio, at.
+        assertEquals(listOf("image", "alt", "aspectRatio"), photos[0].keys.toList())
+    }
+
+    @Test
+    fun aPostQueuedFromTheFormKeepsItsPhotosSizes() = runBlocking {
+        val form = Photos.Store(File(app.filesDir, "photos"))
+        val p = form.save(javaClass.getResource("/photos/gps-offset.jpg")!!.readBytes())
+        val e = queue(Posts.Post(title = "Mount Si", gpx = gpx, photos = listOf(p)))
+        assertEquals(Photos.AspectRatio(24, 32), e.post.photos.single().aspectRatio)
+        assertEquals(Outcome.Posted, app.outbox.upload(e.id))
+        // A track posted alone carries them.
+        val photo = tracks().values.single()["photos"]!!.jsonArray.single().jsonObject
+        assertEquals(listOf("image", "takenAt", "aspectRatio", "at"), photo.keys.toList())
+        assertEquals("24", photo["aspectRatio"]!!.jsonObject["width"]!!.jsonPrimitive.content)
+    }
+
+    @Test
     fun aReviewWithAZeroKmTrackGoesUp() = runBlocking {
         val t = 1_783_000_000_000
         val shapes = listOf(

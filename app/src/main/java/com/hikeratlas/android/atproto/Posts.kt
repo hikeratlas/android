@@ -110,8 +110,9 @@ object Posts {
 
     /**
      * A photo for a post, as [Photos.Store] keeps it: the prepared JPEG's
-     * [file] on the phone (uploaded as it is), and where and when it was
-     * taken, from its EXIF or, for [lat] and [lon], its time on the track.
+     * [file] on the phone (uploaded as it is), where and when it was
+     * taken, from its EXIF or, for [lat] and [lon], its time on the track,
+     * and its size as displayed.
      */
     @Serializable
     data class Photo(
@@ -123,6 +124,11 @@ object Posts {
         val lon: Double? = null,
         /** Whether [takenAt] came with its time zone (EXIF often has local time only). */
         val offsetKnown: Boolean = false,
+        /**
+         * [file]'s size as displayed, measured when it was prepared; null in
+         * a post queued before the app recorded it, measured as it goes up.
+         */
+        val aspectRatio: Photos.AspectRatio? = null,
     )
 
     /** What was posted. */
@@ -311,6 +317,37 @@ object Posts {
         else -> noonOf(day, zone)
     }
 
+    /** What [editReview] wrote: the review's new version, and the record as saved. */
+    data class Edited(val ref: StrongRef, val record: JsonObject)
+
+    /**
+     * [edit] with an aspectRatio on each photo, as the website's dialog
+     * saves it (#177): a photo posted before it was required has none, and
+     * the record wouldn't validate without it. Those are measured from their
+     * blobs, read from [did]'s PDS. One that can't be read (gone, not an
+     * image) throws [PostException] rather than saving a record the
+     * indexer would leave out.
+     */
+    suspend fun measured(xrpc: Xrpc, did: String, edit: ReviewEdit): ReviewEdit {
+        if (edit.photos.all { Photos.ratioOf(it) != null }) return edit
+        val photos = edit.photos.mapIndexed { i, entry ->
+            if (Photos.ratioOf(entry) != null) return@mapIndexed entry
+            val cid = ((entry["image"] as? JsonObject)?.get("ref") as? JsonObject)?.get("\$link")
+                ?.let { it as? JsonPrimitive }?.takeIf { it.isString }?.content
+            val bytes = try {
+                cid?.let { xrpc.queryBytes("com.atproto.sync.getBlob", mapOf("did" to did, "cid" to it)) }
+            } catch (e: XrpcException) {
+                null
+            } catch (e: IOException) {
+                throw PostException("Couldn't reach your account's server, and an edit needs it. What you typed is kept here: try again when you have signal.", e)
+            }
+            val ratio = bytes?.let { withContext(Dispatchers.Default) { Photos.measure(it) } }
+                ?: throw PostException("Photo ${i + 1} couldn't be read from your account to record its size, which photos now need. Remove it and save again.")
+            JsonObject(entry + ("aspectRatio" to Photos.ratioJson(ratio)))
+        }
+        return edit.copy(photos = photos)
+    }
+
     const val EDIT_CHANGED = "This review changed since you opened it: your profile has been read again. Close this and edit the review again."
 
     /**
@@ -320,13 +357,14 @@ object Posts {
      * ([EDIT_CHANGED]) rather than overwrite a review that changed since.
      * Online only: an edit needs the current CID. Throws [PostException]
      * saying what failed; [SignedOutException] if there's no session.
+     * Photos posted before aspectRatio was required get it first ([measured]).
      */
-    suspend fun editReview(xrpc: Xrpc, did: String, review: Profiles.Review, edit: ReviewEdit): StrongRef {
+    suspend fun editReview(xrpc: Xrpc, did: String, review: Profiles.Review, edit: ReviewEdit): Edited {
         val parts = review.uri.removePrefix("at://").split('/')
         require(parts.size == 3 && parts[0] == did && parts[1] == REVIEW) { "Not your review" }
         // Without the record as read, the edit would drop what it doesn't change.
         require(review.value["createdAt"] != null && review.cid.isNotEmpty()) { "The review wasn't read whole" }
-        val record = editedReview(review.value, edit)
+        val record = editedReview(review.value, measured(xrpc, did, edit))
         val r = try {
             xrpc.procedure(
                 "com.atproto.repo.putRecord",
@@ -346,7 +384,7 @@ object Posts {
         val cid = r["cid"]?.jsonPrimitive?.contentOrNull
         if (uri == null || cid == null) throw PostException("Saving failed (no uri and cid in the answer)")
         Indexer.notify(uri, routeKeyOf(record))
-        return StrongRef(uri, cid)
+        return Edited(StrongRef(uri, cid), record)
     }
 
     /** Each photo's JPEG uploaded, in order, and its entry for the record (the website's uploadPhotos). */
@@ -360,7 +398,8 @@ object Posts {
             }
             // Prepared to fit already; a PDS would refuse one that doesn't.
             if (bytes.size > Photos.MAX_BYTES) throw PostException("A photo is too big to post (over 2 MB)")
-            Photos.record(uploadBlob(xrpc, bytes, "image/jpeg"), p)
+            val ratio = Photos.ratioFor(p, bytes)
+            Photos.record(uploadBlob(xrpc, bytes, "image/jpeg"), p, ratio)
         }
     }
 

@@ -14,8 +14,20 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.swipeLeft
+import androidx.compose.ui.test.getBoundsInRoot
+import androidx.compose.ui.test.onAllNodesWithTag
+import com.hikeratlas.android.atproto.Indexer
+import com.hikeratlas.android.atproto.Photos
 import com.hikeratlas.android.atproto.Profiles
+import com.hikeratlas.android.map.Thumbs
+import mockwebserver3.Dispatcher
+import mockwebserver3.MockResponse
+import mockwebserver3.MockWebServer
+import mockwebserver3.RecordedRequest
+import okhttp3.OkHttpClient
+import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -23,7 +35,12 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import java.io.IOException
 
-/** The photo viewer: which photo of how many, its caption and licence, Show on map, Download, and closing. */
+/**
+ * The photo viewer: which photo of how many, its caption and licence, Show
+ * on map, Download, and closing; the photo through the indexer (full size)
+ * else its PDS, in a placeholder of its aspectRatio while it loads; and
+ * posts' grids of thumbnails through the indexer.
+ */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35], qualifiers = "w390dp-h844dp-xxhdpi", application = android.app.Application::class)
 class PhotoViewerTest {
@@ -59,6 +76,123 @@ class PhotoViewerTest {
     }
 
     private fun count(text: String) = compose.onAllNodesWithText(text).fetchSemanticsNodes().size
+
+    // Set by the tests that load photos: a MockWebServer each for the indexer and a PDS.
+    private var servers = emptyList<MockWebServer>()
+
+    // Released at the end: until then the servers made by stall() don't answer.
+    private val release = java.util.concurrent.CountDownLatch(1)
+
+    @After
+    fun tearDown() {
+        release.countDown()
+        Thumbs.client = null
+        Indexer.photoBase = Indexer.BASE
+        servers.forEach { it.close() }
+    }
+
+    /** What the indexer and the PDS were asked for; the indexer has only "indexed", the PDS every photo. */
+    private fun serve(): Pair<String, MutableList<String>> {
+        val asked = java.util.concurrent.CopyOnWriteArrayList<String>()
+        val jpeg = javaClass.getResource("/photos/no-exif.jpg")!!.readBytes()
+        val webp = javaClass.getResource("/photos/thumbnail.webp")!!.readBytes()
+        fun image(b: ByteArray) = MockResponse.Builder().code(200).body(okio.Buffer().write(b)).build()
+        val indexer = MockWebServer().apply {
+            dispatcher = object : Dispatcher() {
+                override fun dispatch(request: RecordedRequest): MockResponse {
+                    val cid = request.url.queryParameter("cid")
+                    val size = request.url.queryParameter("size") ?: "thumbnail"
+                    asked += "indexer $cid $size"
+                    return if (cid != "indexed") MockResponse.Builder().code(404).body("""{"error":"NotFound"}""").build()
+                    else image(if (size == "fullsize") jpeg else webp)
+                }
+            }
+            start()
+        }
+        val pds = MockWebServer().apply {
+            dispatcher = object : Dispatcher() {
+                override fun dispatch(request: RecordedRequest): MockResponse {
+                    asked += "pds ${request.url.queryParameter("cid")}"
+                    return image(jpeg)
+                }
+            }
+            start()
+        }
+        servers = listOf(indexer, pds)
+        Indexer.photoBase = indexer.url("/").toString()
+        Thumbs.client = OkHttpClient.Builder().proxy(java.net.Proxy.NO_PROXY).build()
+        return pds.url("/").toString().trimEnd('/') to asked
+    }
+
+    private fun waitForAsked(asked: List<String>, what: String) = compose.waitUntil(5_000) { what in asked }
+
+    @Test
+    fun theViewerShowsTheIndexersFullSizePhotoElseThePds() {
+        val (pdsOrigin, asked) = serve()
+        // Each test its own CIDs: the caches outlive a test.
+        val photos = listOf(photo("indexed", "Indexed"), photo("new-${System.nanoTime()}", "Just posted"))
+        show(PhotoSet(pdsOrigin, did, "alice.test", null, photos))
+        waitForAsked(asked, "indexer indexed fullsize")
+        compose.waitUntil(5_000) { compose.onAllNodes(androidx.compose.ui.test.hasContentDescription("Indexed")).fetchSemanticsNodes().isNotEmpty() }
+        assertTrue(asked.toString(), asked.none { it.startsWith("pds") })
+        swipe()
+        // Not indexed yet (404): from the PDS.
+        val cid = photos[1].image.cid
+        waitForAsked(asked, "indexer $cid fullsize")
+        waitForAsked(asked, "pds $cid")
+        compose.waitUntil(5_000) { compose.onAllNodes(androidx.compose.ui.test.hasContentDescription("Just posted")).fetchSemanticsNodes().isNotEmpty() }
+    }
+
+    @Test
+    fun aGridsThumbnailsComeThroughTheIndexerElseThePds() {
+        val (pdsOrigin, asked) = serve()
+        val cid = "new-${System.nanoTime()}"
+        val s = PhotoSet(pdsOrigin, did, "alice.test", null, listOf(photo("indexed"), photo(cid)))
+        compose.setContent { HikerAtlasTheme { PhotoGrid(s) {} } }
+        waitForAsked(asked, "indexer indexed thumbnail")
+        waitForAsked(asked, "pds $cid")
+        assertTrue(asked.toString(), "indexer $cid thumbnail" in asked)
+        assertTrue(asked.toString(), "pds indexed" !in asked)
+        assertTrue(asked.toString(), asked.none { it.endsWith("fullsize") })
+    }
+
+    /** An indexer and a PDS that don't answer until the test ends: photos stay loading. */
+    private fun stall(): String {
+        val slow = MockWebServer().apply {
+            dispatcher = object : Dispatcher() {
+                override fun dispatch(request: RecordedRequest): MockResponse {
+                    release.await(30, java.util.concurrent.TimeUnit.SECONDS)
+                    return MockResponse.Builder().code(404).build()
+                }
+            }
+            start()
+        }
+        servers = listOf(slow)
+        Indexer.photoBase = slow.url("/").toString()
+        Thumbs.client = OkHttpClient.Builder().proxy(java.net.Proxy.NO_PROXY).build()
+        return slow.url("/").toString().trimEnd('/')
+    }
+
+    @Test
+    fun whileItLoadsAPlaceholderHasThePhotosShape() {
+        val pdsOrigin = stall()
+        val tall = photo("bafk-tall").copy(aspectRatio = Photos.AspectRatio(24, 32))
+        val wide = photo("bafk-wide").copy(aspectRatio = Photos.AspectRatio(4000, 3000))
+        show(PhotoSet(pdsOrigin, did, "alice.test", null, listOf(tall, wide, photo("bafk-old"))))
+        // Fitted to the 390 × 844 dp screen, as the photo will be.
+        compose.onNodeWithTag("photo-placeholder").getBoundsInRoot().let {
+            assertEquals(390f, (it.right - it.left).value, 0.5f)
+            assertEquals(520f, (it.bottom - it.top).value, 0.5f)
+        }
+        swipe()
+        compose.onNodeWithTag("photo-placeholder").getBoundsInRoot().let {
+            assertEquals(390f, (it.right - it.left).value, 0.5f)
+            assertEquals(292.5f, (it.bottom - it.top).value, 0.5f)
+        }
+        swipe()
+        // Posted before aspectRatio: no shape to give, as before.
+        assertEquals(0, compose.onAllNodesWithTag("photo-placeholder").fetchSemanticsNodes().size)
+    }
 
     private fun swipe() {
         compose.onNodeWithTag("photo-pager").performTouchInput { swipeLeft() }

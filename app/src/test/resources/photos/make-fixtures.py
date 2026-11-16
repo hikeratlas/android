@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Makes the small JPEG fixtures for ExifTest and PhotosTest: each a tiny
+"""Makes the small JPEG fixtures for ExifTest and PhotosTest (and a WebP,
+for ThumbsTest): each a tiny
 image (Pillow) with an EXIF segment written here by hand, so each case has
 exactly the tags it tests, in either byte order.
 
@@ -134,6 +135,9 @@ CASES = {
     )),
     # No EXIF at all.
     'no-exif.jpg': None,
+    # Orientation 8 (drawn turned a quarter anticlockwise) and nothing else:
+    # its aspectRatio swaps width and height.
+    'orientation-8.jpg': app1(tiff([(0x0112, SHORT, [8])])),
 }
 
 
@@ -147,6 +151,9 @@ def main(out):
     t[4:8] = struct.pack('<I', 5000)
     with open(f'{out}/broken.jpg', 'wb') as f:
         f.write(jpeg(app1(bytes(t))))
+    # A WebP, as the indexer's thumbnails are (getPhoto): 40 x 30.
+    img = Image.new('RGB', (40, 30), (40, 120, 60))
+    img.save(f'{out}/thumbnail.webp', 'WEBP', quality=80)
 
 
 if __name__ == '__main__':

@@ -33,13 +33,18 @@ object Profiles {
     /** A blob as a record refers to it: its CID, and its type. */
     data class Blob(val cid: String, val mimeType: String?)
 
-    /** A photo in a post: [lat] and [lon] in degrees, where it was taken (defs#photo's `at`), when known. */
+    /**
+     * A photo in a post: [lat] and [lon] in degrees, where it was taken
+     * (defs#photo's `at`), when known; [aspectRatio], its size as displayed,
+     * to lay it out before it loads (null in records from before it was required).
+     */
     data class Photo(
         val image: Blob,
         val alt: String?,
         val takenAt: String? = null,
         val lat: Double? = null,
         val lon: Double? = null,
+        val aspectRatio: Photos.AspectRatio? = null,
     )
 
     data class Track(
@@ -302,7 +307,7 @@ object Profiles {
         (e as? JsonArray).orEmpty().mapNotNull { p ->
             val o = p as? JsonObject ?: return@mapNotNull null
             val at = point(o["at"])
-            Photo(blob(o["image"]) ?: return@mapNotNull null, o.str("alt"), o.str("takenAt"), at?.first, at?.second)
+            Photo(blob(o["image"]) ?: return@mapNotNull null, o.str("alt"), o.str("takenAt"), at?.first, at?.second, Photos.ratioOf(o))
         }.take(MAX_PHOTOS)
 
     /** A defs#point, microdegrees, as (lat, lon) in degrees; null when missing or off the globe. */

@@ -55,11 +55,13 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import com.hikeratlas.android.atproto.Indexer
 import com.hikeratlas.android.atproto.Photos
 import com.hikeratlas.android.atproto.Posts
 import com.hikeratlas.android.atproto.Profiles
 import com.hikeratlas.android.atproto.SignedOutException
 import com.hikeratlas.android.map.RemoteThumb
+import com.hikeratlas.android.map.Thumbs
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonArray
@@ -228,7 +230,9 @@ internal fun EditReviewForm(
                         Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                             val shape = RoundedCornerShape(8.dp)
                             Box(Modifier.size(56.dp).clip(shape).background(MaterialTheme.colorScheme.surfaceVariant)) {
-                                cidOf(entry)?.let { RemoteThumb(Profiles.blobUrl(pds, did, it), Modifier.fillMaxSize()) }
+                                cidOf(entry)?.let {
+                                    RemoteThumb(Indexer.photoUrl(did, it), Modifier.fillMaxSize(), Thumbs.GRID_PX, fallback = Profiles.blobUrl(pds, did, it))
+                                }
                             }
                             OutlinedTextField(
                                 alt, { a -> photos[i] = entry to a.take(Photos.MAX_ALT) },

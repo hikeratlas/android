@@ -5,6 +5,7 @@ import android.graphics.BitmapFactory
 import android.graphics.Matrix
 import androidx.core.graphics.scale
 import com.hikeratlas.android.track.TrackMeasure
+import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
@@ -23,7 +24,9 @@ import kotlin.math.min
  * most [MAX_SIDE] pixels a side, with the original's EXIF put back. Either
  * way it keeps where and when it was taken: photos of places are much of
  * what's worth sharing. Where and when also go in the record (at, takenAt),
- * from EXIF, so apps needn't read the image for them.
+ * from EXIF, so apps needn't read the image for them, and so does its size
+ * as displayed (aspectRatio, which the lexicon requires since website#177),
+ * so apps can lay it out before fetching it.
  */
 object Photos {
     const val MAX_SIDE = 2048
@@ -35,14 +38,43 @@ object Photos {
     /** Bigger than any phone's photo: a file past this isn't read into memory. */
     const val MAX_INPUT = 64_000_000
 
-    /** A photo ready to upload: its bytes, and where and when it was taken (from its EXIF). */
-    class Prepared(val bytes: ByteArray, val lat: Double?, val lon: Double?, val takenAt: String?, val offsetKnown: Boolean)
+    /**
+     * A photo's width and height as displayed (EXIF orientation applied),
+     * as defs#aspectRatio (and app.bsky.embed.defs#aspectRatio): each at least 1.
+     */
+    @Serializable
+    data class AspectRatio(val width: Int, val height: Int)
+
+    /** A photo ready to upload: its bytes, where and when it was taken (from its EXIF), and its size as displayed. */
+    class Prepared(
+        val bytes: ByteArray, val lat: Double?, val lon: Double?, val takenAt: String?, val offsetKnown: Boolean,
+        val aspectRatio: AspectRatio,
+    )
 
     /** [bytes] as the website's preparePhoto would upload them. Throws [IOException] for what isn't an image Android can read. */
     fun prepare(bytes: ByteArray, zone: ZoneId = ZoneId.systemDefault()): Prepared {
         val exif = Exif.read(bytes, zone)
         val out = if (isJpeg(bytes) && bytes.size <= MAX_BYTES) bytes else reencode(bytes, exif)
-        return Prepared(out, exif.lat, exif.lon, exif.takenAt, exif.offsetKnown)
+        // Measured from what's uploaded: a re-encoded photo is upright at its
+        // new size (its EXIF says Orientation 1), one sent as it is keeps its
+        // own Orientation. As the website: one that can't be measured isn't
+        // uploaded, as its record would need it.
+        val ratio = measure(out) ?: throw IOException("Not an image Android can read")
+        return Prepared(out, exif.lat, exif.lon, exif.takenAt, exif.offsetKnown, ratio)
+    }
+
+    /**
+     * [bytes]' size as displayed, for the record's aspectRatio: the decoder's
+     * width and height (read from the header, not decoded), swapped when its
+     * EXIF Orientation turns it a quarter (5 to 8). Null for what Android
+     * can't read as an image.
+     */
+    fun measure(bytes: ByteArray): AspectRatio? {
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
+        val turned = Exif.read(bytes).orientation in 5..8
+        return if (turned) AspectRatio(bounds.outHeight, bounds.outWidth) else AspectRatio(bounds.outWidth, bounds.outHeight)
     }
 
     fun isJpeg(b: ByteArray) = b.size > 2 && b[0] == 0xff.toByte() && b[1] == 0xd8.toByte()
@@ -174,13 +206,31 @@ object Photos {
     /** Degrees as the lexicon's integer microdegrees (defs#point), rounded as Math.round. */
     fun micro(x: Double): Long = TrackMeasure.jsRound(x * 1e6)
 
-    /** A photo's entry in a record, field for field as the website's uploadPhotos writes it. */
-    fun record(image: JsonObject, p: Posts.Photo): JsonObject = buildJsonObject {
+    /** A photo's entry in a record, field for field as the website's uploadPhotos writes it ([ratio]: its size as uploaded). */
+    fun record(image: JsonObject, p: Posts.Photo, ratio: AspectRatio): JsonObject = buildJsonObject {
         put("image", image)
         p.alt?.trim()?.takeIf { it.isNotEmpty() }?.let { put("alt", Posts.clip(it, MAX_ALT)) }
         p.takenAt?.let { put("takenAt", it) }
+        put("aspectRatio", ratioJson(ratio))
         if (p.lat != null && p.lon != null) put("at", buildJsonObject { put("lat", micro(p.lat)); put("lon", micro(p.lon)) })
     }
+
+    fun ratioJson(r: AspectRatio): JsonObject = buildJsonObject { put("width", r.width); put("height", r.height) }
+
+    /** A photo entry's aspectRatio, if it has a valid one (whole numbers, at least 1); null for one posted before it was required. */
+    fun ratioOf(entry: JsonObject): AspectRatio? {
+        val o = entry["aspectRatio"] as? JsonObject ?: return null
+        fun dim(k: String) = (o[k] as? kotlinx.serialization.json.JsonPrimitive)?.takeIf { !it.isString }?.content?.toIntOrNull()?.takeIf { it >= 1 }
+        return AspectRatio(dim("width") ?: return null, dim("height") ?: return null)
+    }
+
+    /**
+     * The aspectRatio a photo's entry needs, for [bytes] about to be uploaded:
+     * [p]'s, from when it was prepared, else (a post queued before the app
+     * recorded it) measured now. Throws [PostException] when it can't be.
+     */
+    fun ratioFor(p: Posts.Photo, bytes: ByteArray): AspectRatio =
+        p.aspectRatio ?: measure(bytes) ?: throw PostException("A photo can't be read as an image: remove it and post again")
 
     /**
      * Prepared photos kept in the app's own storage while the post form
@@ -210,6 +260,7 @@ object Photos {
                 file = f.path, lat = p.lat, lon = p.lon,
                 takenAt = p.takenAt ?: capturedAt?.let(TrackMeasure::iso),
                 offsetKnown = p.offsetKnown || fallback,
+                aspectRatio = p.aspectRatio,
             )
         }
 

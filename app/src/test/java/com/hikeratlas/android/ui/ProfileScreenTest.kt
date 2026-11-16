@@ -63,7 +63,7 @@ class ProfileScreenTest {
         load: suspend () -> Profiles.Profile,
         delete: (suspend (Profiles.Deletion) -> Unit)? = null,
         shown: MutableList<PostedTrack> = mutableListOf(),
-        edit: (suspend (Profiles.Review, Posts.ReviewEdit) -> Posts.StrongRef)? = null,
+        edit: (suspend (Profiles.Review, Posts.ReviewEdit) -> Posts.Edited)? = null,
         openPhotos: (PhotoSet) -> Unit = {},
     ) = ProfileActions(
         load = { load() },
@@ -98,7 +98,7 @@ class ProfileScreenTest {
             HikerAtlasTheme {
                 ProfileScreen(
                     ProfileTarget(did, "alice.test"),
-                    actions({ p }, delete = {}, edit = { r, _ -> Posts.StrongRef(r.uri, "new") }), onBack = {},
+                    actions({ p }, delete = {}, edit = { r, e -> Posts.Edited(Posts.StrongRef(r.uri, "new"), Posts.editedReview(r.value, e)) }), onBack = {},
                 )
             }
         }

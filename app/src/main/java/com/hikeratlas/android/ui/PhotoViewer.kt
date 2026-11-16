@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
@@ -65,6 +66,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.core.view.WindowCompat
+import com.hikeratlas.android.atproto.Indexer
+import com.hikeratlas.android.atproto.Photos
 import com.hikeratlas.android.atproto.Posts
 import com.hikeratlas.android.atproto.Profiles
 import com.hikeratlas.android.map.RemoteThumb
@@ -82,7 +85,12 @@ data class PhotoSet(
     val photos: List<Profiles.Photo>,
     val start: Int = 0,
 ) {
+    /** The photo as uploaded, from its author's PDS: to download, and where the indexer can't give it. */
     fun url(p: Profiles.Photo) = Profiles.blobUrl(pds, did, p.image.cid)
+    /** Its thumbnail, through the indexer (fallback: [url]), for grids. */
+    fun thumb(p: Profiles.Photo) = Indexer.photoUrl(did, p.image.cid)
+    /** The photo itself through the indexer's cache (fallback: [url]), for the viewer. */
+    fun full(p: Profiles.Photo) = Indexer.photoUrl(did, p.image.cid, fullsize = true)
 }
 
 /** A photo's place, for the map: where it was taken, and the photo to show beside it. */
@@ -107,6 +115,7 @@ private const val MAX_ZOOM = 5f
 private const val DOUBLE_TAP_ZOOM = 2.5f
 private val SCRIM = Color.Black.copy(alpha = 0.55f)
 private val MUTED = Color.White.copy(alpha = 0.75f)
+private val PLACEHOLDER = Color.White.copy(alpha = 0.08f)
 
 /**
  * A post's photos, full screen on black: pinch to zoom, drag to pan, swipe
@@ -139,7 +148,8 @@ fun PhotoViewer(set: PhotoSet, actions: PhotoViewerActions, onClose: () -> Unit)
             userScrollEnabled = !zoomed,
             key = { it },
         ) { page ->
-            ZoomablePhoto(set.url(set.photos[page]), set.photos[page].alt, page, pager) { if (page == pager.currentPage) zoomed = it }
+            val p = set.photos[page]
+            ZoomablePhoto(set.full(p), set.url(p), set.thumb(p), p.aspectRatio, p.alt, page, pager) { if (page == pager.currentPage) zoomed = it }
         }
         Row(
             Modifier.fillMaxWidth().background(SCRIM).statusBarsPadding().padding(horizontal = 4.dp),
@@ -200,14 +210,20 @@ fun PhotoViewer(set: PhotoSet, actions: PhotoViewerActions, onClose: () -> Unit)
  * One photo, fitted to the screen: pinch zooms (up to [MAX_ZOOM]), a drag
  * pans once zoomed, a double tap zooms in on that spot or back out. It
  * goes back to fitted when swiped away. [onZoomed] says whether it's zoomed in.
+ * [url] is through the indexer, [fallback] from the PDS; [thumb], the grid's
+ * thumbnail, shown while it loads if it's to hand, in a box of the photo's
+ * [ratio] (when its record has one), where the photo will be, so nothing jumps.
  */
 @Composable
-private fun ZoomablePhoto(url: String, alt: String?, page: Int, pager: PagerState, onZoomed: (Boolean) -> Unit) {
+private fun ZoomablePhoto(
+    url: String, fallback: String, thumb: String, ratio: Photos.AspectRatio?, alt: String?, page: Int, pager: PagerState,
+    onZoomed: (Boolean) -> Unit,
+) {
     var img by remember(url) { mutableStateOf<ImageBitmap?>(Thumbs.cachedPhoto(url)) }
     var failed by remember(url) { mutableStateOf(false) }
     LaunchedEffect(url) {
         if (img == null) {
-            img = Thumbs.loadPhoto(url)
+            img = Thumbs.loadPhoto(url, fallback)
             failed = img == null
         }
     }
@@ -263,9 +279,17 @@ private fun ZoomablePhoto(url: String, alt: String?, page: Int, pager: PagerStat
             )
             failed -> Text("Couldn't load the photo", color = MUTED)
             else -> {
-                // The grid's thumbnail while the full photo loads, when it's to hand.
-                Thumbs.cached(url, Thumbs.GRID_PX)?.let {
-                    Image(it, contentDescription = null, contentScale = ContentScale.Fit, modifier = Modifier.fillMaxSize())
+                val small = Thumbs.cached(thumb, Thumbs.GRID_PX)
+                if (ratio != null) {
+                    // Where the photo will be: its shape, fitted as it will be.
+                    Box(
+                        Modifier.aspectRatio(ratio.width.toFloat() / ratio.height).background(PLACEHOLDER).testTag("photo-placeholder"),
+                    ) {
+                        small?.let { Image(it, contentDescription = null, contentScale = ContentScale.FillBounds, modifier = Modifier.fillMaxSize()) }
+                    }
+                } else {
+                    // The grid's thumbnail while the full photo loads, when it's to hand.
+                    small?.let { Image(it, contentDescription = null, contentScale = ContentScale.Fit, modifier = Modifier.fillMaxSize()) }
                 }
                 CircularProgressIndicator(color = Color.White)
             }

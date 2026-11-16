@@ -39,6 +39,10 @@
               },
               "alt": "Rainier from the summit",
               "takenAt": "2026-07-02T17:15:30.000Z",
+              "aspectRatio": {
+                "width": 24,
+                "height": 32
+              },
               "at": {
                 "lat": 47487500,
                 "lon": -121723400
@@ -53,7 +57,11 @@
                 "mimeType": "image/jpeg",
                 "size": 734
               },
-              "takenAt": "2026-03-08T07:30:00.000Z"
+              "takenAt": "2026-03-08T07:30:00.000Z",
+              "aspectRatio": {
+                "width": 32,
+                "height": 24
+              }
             },
             {
               "image": {
@@ -63,6 +71,10 @@
                 },
                 "mimeType": "image/jpeg",
                 "size": 648
+              },
+              "aspectRatio": {
+                "width": 32,
+                "height": 24
               },
               "at": {
                 "lat": -33856812,
@@ -129,6 +141,10 @@
               },
               "alt": "Rainier from the summit",
               "takenAt": "2026-07-02T17:15:30.000Z",
+              "aspectRatio": {
+                "width": 24,
+                "height": 32
+              },
               "at": {
                 "lat": 47487500,
                 "lon": -121723400
@@ -143,7 +159,11 @@
                 "mimeType": "image/jpeg",
                 "size": 734
               },
-              "takenAt": "2026-03-08T07:30:00.000Z"
+              "takenAt": "2026-03-08T07:30:00.000Z",
+              "aspectRatio": {
+                "width": 32,
+                "height": 24
+              }
             },
             {
               "image": {
@@ -153,6 +173,10 @@
                 },
                 "mimeType": "image/jpeg",
                 "size": 648
+              },
+              "aspectRatio": {
+                "width": 32,
+                "height": 24
               },
               "at": {
                 "lat": -33856812,

@@ -37,6 +37,7 @@ class EditReviewTest {
 
     private fun obj(s: String) = Json.parseToJsonElement(s).jsonObject
     private fun blob(cid: String) = """{"${'$'}type":"blob","ref":{"${'$'}link":"$cid"},"mimeType":"image/jpeg","size":1}"""
+    private val ratio = ""","aspectRatio":{"width":4,"height":3}"""
 
     // The website test's review, field for field.
     private val review = obj(
@@ -125,7 +126,7 @@ class EditReviewTest {
         fake.records[key] = obj(
             """{"${'$'}type":"${Posts.REVIEW}","text":"Muddy","createdAt":"2026-11-01T10:00:00.000Z","hikedAt":"2026-10-31T16:00:00.000Z",
             "routeKey":"1E57E06gbDEBBBICDGF.tn3dBnAuR_Q","tags":["mud"],
-            "photos":[{"image":${blob("a")},"alt":"one","takenAt":"2026-10-31T15:00:00.000Z"},{"image":${blob("b")}}],
+            "photos":[{"image":${blob("a")},"alt":"one","takenAt":"2026-10-31T15:00:00.000Z"$ratio},{"image":${blob("b")}$ratio}],
             "via":"another app"$extra}""",
         )
         return runBlocking { Profiles.loadDid(http, Identity(http, fake.config()), fake.did) }.reviews.single()
@@ -144,7 +145,8 @@ class EditReviewTest {
             // The first photo's description changed; the second removed.
             listOf(Posts.withAlt(photos[0], "The bridge")),
         )
-        val ref = runBlocking { Posts.editReview(account.xrpc, fake.did, r, edit) }
+        val saved0 = runBlocking { Posts.editReview(account.xrpc, fake.did, r, edit) }
+        val ref = saved0.ref
         assertEquals(uri, ref.uri)
         assertTrue(ref.cid != before)
         val put = puts().single()
@@ -154,13 +156,16 @@ class EditReviewTest {
         assertEquals(before, put["swapRecord"]!!.jsonPrimitive.content)
         val saved = fake.records[key]!!
         assertEquals(Posts.editedReview(r.value, edit), saved)
+        // Its photos had their sizes: nothing to measure, so what was written is the edit as it was.
+        assertEquals(saved, saved0.record)
+        assertTrue(fake.pdsRequests.none { it.url.encodedPath.endsWith("getBlob") })
         assertEquals("Muddy, then snow", saved["text"]!!.jsonPrimitive.content)
         // What the edit doesn't touch stays, fields this app doesn't know included.
         assertEquals("another app", saved["via"]!!.jsonPrimitive.content)
         assertEquals("2026-11-01T10:00:00.000Z", saved["createdAt"]!!.jsonPrimitive.content)
         assertEquals("1E57E06gbDEBBBICDGF.tn3dBnAuR_Q", saved["routeKey"]!!.jsonPrimitive.content)
         assertEquals(
-            obj("""{"image":${blob("a")},"alt":"The bridge","takenAt":"2026-10-31T15:00:00.000Z"}"""),
+            obj("""{"image":${blob("a")},"alt":"The bridge","takenAt":"2026-10-31T15:00:00.000Z"$ratio}"""),
             (saved["photos"] as kotlinx.serialization.json.JsonArray).single(),
         )
         // No licence before, none written.

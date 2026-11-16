@@ -273,8 +273,8 @@ class FakeAtproto : AutoCloseable {
     }
 
     /**
-     * What's wrong with a record's photos by the lexicon (defs#photo, and the
-     * review's and track's photos arrays), as a PDS that validates records
+     * What's wrong with a record's photos by the lexicon (defs#photo, with
+     * its required aspectRatio, and the review's and track's photos arrays), as a PDS that validates records
      * would refuse it; null when they're fine.
      */
     private fun invalidPhotos(record: JsonObject): String? {
@@ -289,7 +289,15 @@ class FakeAtproto : AutoCloseable {
             p["at"]?.jsonObject?.let { at ->
                 for (k in listOf("lat", "lon")) if (at[k]?.jsonPrimitive?.content?.toLongOrNull() == null) return "at.$k not an integer"
             }
-            val extra = p.keys - setOf("image", "alt", "takenAt", "at")
+            // Required since website#177: the indexer leaves out posts whose photos lack it.
+            val ratio = p["aspectRatio"] as? JsonObject ?: return "a photo without its aspectRatio"
+            for (k in listOf("width", "height")) {
+                val n = (ratio[k] as? kotlinx.serialization.json.JsonPrimitive)?.takeIf { !it.isString }?.content?.toLongOrNull()
+                    ?: return "aspectRatio.$k not an integer"
+                if (n < 1) return "aspectRatio.$k below its minimum of 1"
+            }
+            if (ratio.keys != setOf("width", "height")) return "unknown aspectRatio fields ${ratio.keys}"
+            val extra = p.keys - setOf("image", "alt", "takenAt", "at", "aspectRatio")
             if (extra.isNotEmpty()) return "unknown photo fields $extra"
         }
         return null
