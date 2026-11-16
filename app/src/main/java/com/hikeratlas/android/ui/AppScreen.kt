@@ -60,6 +60,7 @@ private enum class Tab(val label: String, val selected: ImageVector, val unselec
     Explore("Explore", Icons.Filled.Explore, Icons.Outlined.Explore),
     // Offline areas, faved hikes and recorded tracks: shown once it may have something in it.
     Saved("Saved", Icons.Filled.Bookmark, Icons.Outlined.BookmarkBorder),
+    // Signed in, your profile, with your picture for its icon (YouTabIcon).
     You("You", Icons.Filled.Person, Icons.Outlined.Person),
 }
 
@@ -96,9 +97,11 @@ fun AppScreen(app: HikerAtlasApp, link: Uri? = null, onLinkHandled: () -> Unit =
     val accountState by app.account.state.collectAsState()
     val did = (accountState as? AccountState.In)?.did
     val handle = (accountState as? AccountState.In)?.handle
-    // Your profile, open over the You tab (signing out closes it); and a
-    // posted track from it, on the map.
-    var profileTarget by remember(did) { mutableStateOf<ProfileTarget?>(null) }
+    // Signed in, the You tab is your profile. The post "See post" took it
+    // to, kept so "Show on map" comes back to it, until a tab is chosen
+    // from the bar (signing out forgets it); and a posted track from the
+    // profile, on the map.
+    var seePost by remember(did) { mutableStateOf<PostRef?>(null) }
     var viewPosted by remember { mutableStateOf<PostedTrack?>(null) }
     // The hike sheet a posted track was shown from, to go back to when it's closed.
     var postedFrom by remember { mutableStateOf<OfflineAreas.Target?>(null) }
@@ -115,7 +118,6 @@ fun AppScreen(app: HikerAtlasApp, link: Uri? = null, onLinkHandled: () -> Unit =
         openPage = { openSignInPage(context, it) },
         signOut = { app.account.signOut() },
         clearError = { app.account.clearError() },
-        openProfile = { did?.let { profileTarget = ProfileTarget(it, handle) } },
     )
     val faveActions = FaveActions(
         accountActions,
@@ -166,7 +168,7 @@ fun AppScreen(app: HikerAtlasApp, link: Uri? = null, onLinkHandled: () -> Unit =
         post = { d, progress -> sendDraft(outbox, app.account.did ?: throw SignedOutException(), handle, library, d, progress) { online } },
         openProfile = { posted ->
             seePostTarget(did, handle, posted)?.let {
-                profileTarget = it
+                seePost = it.highlight
                 tab = Tab.You
             }
         },
@@ -306,7 +308,7 @@ fun AppScreen(app: HikerAtlasApp, link: Uri? = null, onLinkHandled: () -> Unit =
                 val from = postedFrom
                 postedFrom = null
                 if (from != null) openArea = from
-                else if (profileTarget != null) tab = Tab.You
+                else if (did != null) tab = Tab.You
             },
             viewPhoto = viewPhoto.takeIf { tab == Tab.Map },
             // Back to the hike sheet or profile the photo was opened from.
@@ -315,7 +317,7 @@ fun AppScreen(app: HikerAtlasApp, link: Uri? = null, onLinkHandled: () -> Unit =
                 val from = photoFrom
                 photoFrom = null
                 if (from != null) openArea = from
-                else if (profileTarget != null) tab = Tab.You
+                else if (did != null) tab = Tab.You
             },
             openArea = openArea.takeIf { tab == Tab.Map }, onAreaOpened = { openArea = null },
             onCrumb = { c ->
@@ -397,39 +399,27 @@ fun AppScreen(app: HikerAtlasApp, link: Uri? = null, onLinkHandled: () -> Unit =
                 save = { app.units.set(it) },
             )
             Box(Modifier.fillMaxSize().padding(bottom = barHeight)) {
-                val target = profileTarget
-                if (target != null && did != null) {
-                    ProfileScreen(
-                        target, profileActions, onBack = { profileTarget = null },
-                        // Units and the licence: the profile's settings, here only (one place, as the website's).
-                        settings = {
-                            UnitsCard(unitsActions)
-                            LicenseCard(
-                                LicenseActions(license, licenseError) { l ->
-                                    com.hikeratlas.android.atproto.ProfileRecord.saveSettings(
-                                        app.account.xrpc, did, mapOf("license" to kotlinx.serialization.json.JsonPrimitive(l)),
-                                    )
-                                    license = l
-                                },
+                YouTab(
+                    accountActions, profileActions, unitsActions,
+                    storage = StorageActions(
+                        areaCount = { offline.areas.size },
+                        offlineBytes = { offline.bytes() },
+                        mapCacheBytes = { mapCache.bytes() },
+                        deleteAll = { offline.deleteAll() },
+                        clearMapCache = { mapCache.clear() },
+                    ),
+                    license = did?.let { d ->
+                        LicenseActions(license, licenseError) { l ->
+                            com.hikeratlas.android.atproto.ProfileRecord.saveSettings(
+                                app.account.xrpc, d, mapOf("license" to kotlinx.serialization.json.JsonPrimitive(l)),
                             )
-                        },
-                        waiting = waitingActions,
-                        refreshKey = postedCount,
-                    )
-                } else {
-                    YouScreen(
-                        StorageActions(
-                            areaCount = { offline.areas.size },
-                            offlineBytes = { offline.bytes() },
-                            mapCacheBytes = { mapCache.bytes() },
-                            deleteAll = { offline.deleteAll() },
-                            clearMapCache = { mapCache.clear() },
-                        ),
-                        accountActions,
-                        unitsActions,
-                        waiting = waitingActions,
-                    )
-                }
+                            license = l
+                        }
+                    },
+                    waiting = waitingActions,
+                    seePost = seePost,
+                    refreshKey = postedCount,
+                )
             }
         }
         AnimatedVisibility(
@@ -442,8 +432,15 @@ fun AppScreen(app: HikerAtlasApp, link: Uri? = null, onLinkHandled: () -> Unit =
                 for (t in tabs) {
                     NavigationBarItem(
                         selected = t == tab,
-                        onClick = { tab = t },
-                        icon = { Icon(if (t == tab) t.selected else t.unselected, contentDescription = null) },
+                        onClick = {
+                            // Chosen from the bar, the You tab opens at its top.
+                            seePost = null
+                            tab = t
+                        },
+                        icon = {
+                            if (t == Tab.You) YouTabIcon(accountState, t == tab)
+                            else Icon(if (t == tab) t.selected else t.unselected, contentDescription = null)
+                        },
                         label = { Text(t.label) },
                     )
                 }

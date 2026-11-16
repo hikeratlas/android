@@ -162,6 +162,8 @@ internal fun postTitle(routeKey: String?, own: String?, found: HikesFound): Stri
  * Your profile, as the website's /@handle: Overview (reviews, every track,
  * and faved hikes; your reviews can be edited, your posts deleted) and,
  * when [settings] is given, Settings.
+ * [onBack] null: it's a tab of its own (the You tab), headed by [avatar]
+ * rather than a back arrow.
  * [waiting]: posts waiting on the phone to go up, listed above the posts;
  * [refreshKey] changes when one has, so the posts are read again.
  */
@@ -169,19 +171,28 @@ internal fun postTitle(routeKey: String?, own: String?, found: HikesFound): Stri
 fun ProfileScreen(
     target: ProfileTarget,
     actions: ProfileActions,
-    onBack: () -> Unit,
+    onBack: (() -> Unit)?,
     settings: (@Composable ColumnScope.() -> Unit)? = null,
     waiting: WaitingActions? = null,
     refreshKey: Int = 0,
+    avatar: String? = null,
 ) {
-    BackHandler(onBack = onBack)
-    var tab by remember(target.did) { mutableIntStateOf(0) }
+    if (onBack != null) BackHandler(onBack = onBack)
+    // A "See post" lands on Overview, wherever the profile was left.
+    var tab by remember(target.did, target.highlight) { mutableIntStateOf(0) }
     Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surfaceContainerLowest).statusBarsPadding()) {
-        Row(Modifier.fillMaxWidth().padding(start = 4.dp, end = 16.dp, top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-            IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") }
+        val header = if (onBack != null) Modifier.padding(start = 4.dp, end = 16.dp, top = 4.dp)
+        else Modifier.padding(start = 20.dp, end = 16.dp, top = 16.dp, bottom = 8.dp)
+        Row(Modifier.fillMaxWidth().then(header), verticalAlignment = Alignment.CenterVertically) {
+            if (onBack != null) {
+                IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") }
+            } else {
+                Avatar(avatar, target.handle ?: "", 48)
+            }
             Text(
                 target.handle?.let { "@$it" } ?: target.did, style = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.Bold, maxLines = 1,
+                modifier = if (onBack != null) Modifier else Modifier.padding(start = 12.dp),
             )
         }
         if (settings != null) {
@@ -600,12 +611,6 @@ private fun TrackLine(segs: List<List<List<Double>>>?) {
         }
         drawPath(path, Color(0xFFC026D3), style = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round))
     }
-}
-
-/** The account card's way to your profile. */
-@Composable
-internal fun ProfileLink(onOpen: () -> Unit) {
-    Item("Your profile", "Your posts, faved hikes and settings", onClick = onOpen)
 }
 
 /** What "See post" opens: your profile at that post; null if signed out (or another account's post). */

@@ -346,26 +346,6 @@ class ProfileScreenTest {
     }
 
     @Test
-    fun signedInTheAccountCardOpensYourProfileWhereTheSettingsAre() {
-        var opened = 0
-        compose.setContent {
-            HikerAtlasTheme {
-                YouScreen(
-                    account = AccountActions(
-                        com.hikeratlas.android.atproto.AccountState.In(did, "alice.test", null),
-                        signIn = { "" }, openPage = {}, signOut = {}, openProfile = { opened++ },
-                    ),
-                    units = UnitsActions(Units.METRIC, signedIn = true, save = {}),
-                )
-            }
-        }
-        // Units are a profile setting signed in: in the profile's Settings, not here.
-        assertTrue(compose.onAllNodesWithText("UNITS").fetchSemanticsNodes().isEmpty())
-        compose.onNodeWithText("Your profile").performClick()
-        assertEquals(1, opened)
-    }
-
-    @Test
     fun theProfilesSettingsTab() {
         compose.setContent {
             HikerAtlasTheme {
