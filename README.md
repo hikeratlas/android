@@ -1,5 +1,9 @@
 # android
 
+> **[Download the latest APK](https://github.com/hikeratlas/android/releases/latest/download/hiker-atlas.apk)**
+> (built from `main` on every push; [release page](https://github.com/hikeratlas/android/releases/latest)).
+> Open it on your phone to install, allowing installs from your browser if asked.
+
 An Android client for [Hiker Atlas](https://www.hikeratlas.com): the same
 basemap and curated hikes as the website, as a native Kotlin app.
 
