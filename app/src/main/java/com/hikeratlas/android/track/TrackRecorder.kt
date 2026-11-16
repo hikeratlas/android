@@ -14,6 +14,8 @@ import java.util.concurrent.Executors
  * [store]. Steps are counted from [steps] only while recording (not while
  * paused), and only for a track counted from its start: one started without
  * a step counter, or without the permission, has none, rather than a part.
+ * Nor has one whose counter never gave a reading: it's counted (0 a real
+ * 0) only from the first reading, the base the rest count from.
  */
 class TrackRecorder(
     private val store: TrackStore,
@@ -61,6 +63,8 @@ class TrackRecorder(
     // waiting that it was overtaken (resumed meanwhile).
     private var stepTrack: Long? = null
     private var tally: StepTally? = null
+    /** Whether the counter has given a reading for [stepTrack]: until it has, the track has no steps (not 0). */
+    private var stepsReported = false
     private var stepsOpen = false
     private var listening = false
     private var stepGen = 0
@@ -78,12 +82,13 @@ class TrackRecorder(
         stopListening()
         stepTrack = id
         tally = StepTally(0, null)
+        stepsReported = false
         // Counted from the start, or not at all.
         if (!openSteps()) {
             tally = null
             stepTrack = null
         }
-        return State(id, now, 0, null, emptyList(), 0.0, null, tally?.total).also { state = it }
+        return State(id, now, 0, null, emptyList(), 0.0, null).also { state = it }
     }
 
     /**
@@ -111,6 +116,8 @@ class TrackRecorder(
         // counter's last saved reading, so what was walked meanwhile counts.
         // Paused: the next resume reads the counter afresh.
         tally = t.steps?.let { StepTally(it, if (pausedAt == null) t.stepsBase else null) }
+        // Saved steps are only ever from readings.
+        stepsReported = t.steps != null
         if (pausedAt != null && t.stepsBase != null) store.setSteps(t.id, t.steps ?: 0, null)
         state = State(t.id, t.started, t.pausedMs, pausedAt, lines(), metres(), gpsGain(), t.steps)
         if (pausedAt == null) openSteps(rebase = false)
@@ -167,8 +174,9 @@ class TrackRecorder(
         val id = stepTrack ?: return
         if (!stepsOpen) return
         val first = t.base == null
-        val before = t.total
         t.reading(value)
+        // From its first reading the track is counted.
+        stepsReported = true
         // The first reading's saved at once, as the base the rest count from.
         val now = clock()
         if (first || now - stepsSavedAt >= SAVE_STEPS_EVERY_MS) {
@@ -176,7 +184,7 @@ class TrackRecorder(
             stepsSavedAt = now
         }
         val s = state
-        if (t.total != before && s != null && s.trackId == id) state = s.copy(steps = t.total)
+        if (s != null && s.trackId == id && s.steps != t.total) state = s.copy(steps = t.total)
     }
 
     /**
@@ -195,7 +203,7 @@ class TrackRecorder(
         stepsOpen = listening
         if (!listening) return false
         stepsSavedAt = clock()
-        store.setSteps(id, t.total, t.base)
+        if (stepsReported) store.setSteps(id, t.total, t.base)
         return true
     }
 
@@ -205,7 +213,7 @@ class TrackRecorder(
         val id = stepTrack ?: return
         if (!stepsOpen) return
         val gen = ++stepGen
-        store.setSteps(id, t.total, t.base)
+        if (stepsReported) store.setSteps(id, t.total, t.base)
         val done = CompletableDeferred<Unit>()
         flushed = done
         val source = steps ?: return run { stepsOpen = false; done.complete(Unit) }
@@ -215,7 +223,7 @@ class TrackRecorder(
                     stepsOpen = false
                     stopListening()
                     t.base = null
-                    store.setSteps(id, t.total, null)
+                    if (stepsReported) store.setSteps(id, t.total, null)
                 }
             }
             done.complete(Unit)

@@ -70,10 +70,13 @@ class StepsTest {
         val counter = FakeSteps()
         val r = recorder(counter)
         val id = r.start().trackId
-        // Counted from the start: 0 until the first steps.
+        // Not counted until the counter gives a reading.
+        assertNull(r.state!!.steps)
+        assertNull(store.track(id)!!.steps)
+        counter.read(10_000) // the counter as recording starts
+        // Counted from then: none walked yet is a real 0.
         assertEquals(0L, r.state!!.steps)
         assertEquals(0L, store.track(id)!!.steps)
-        counter.read(10_000) // the counter as recording starts
         counter.read(10_100)
         assertEquals(100L, r.state!!.steps)
         // Batched with the screen off: only read when it's paused, by flushing.
@@ -161,6 +164,55 @@ class StepsTest {
             // Nor in its GPX.
             assertFalse(Gpx.write("T", 0, store.points(id), store.track(id)!!.steps).contains("steps"))
         }
+    }
+
+    @Test
+    fun aCounterThatNeverGivesAReadingLeavesTheTrackWithoutSteps() {
+        val counter = FakeSteps()
+        val r = recorder(counter)
+        val id = r.start().trackId
+        assertTrue(counter.listening)
+        r.onFix(Fix(now, 49.0, -123.0, 4f))
+        r.pause()
+        r.resume()
+        assertNull(r.state!!.steps)
+        r.stop()
+        val t = store.track(id)!!
+        assertNull(t.steps)
+        assertNull(t.stepsBase)
+        // Nowhere: not in its GPX, nor its record.
+        val gpx = Gpx.write("T", 0, store.points(id), t.steps)
+        assertFalse(gpx.contains("steps"))
+        assertNull(TrackMeasure.ofGpx(gpx).steps)
+        assertFalse(summary(TrackRecorder.State(id, 0, 0, null, emptyList(), 0.0, null, null), 0).contains("step"))
+    }
+
+    @Test
+    fun aReadingAfterAResumeStillCountsTheTrack() {
+        val counter = FakeSteps()
+        val r = recorder(counter)
+        val id = r.start().trackId
+        r.pause()
+        r.resume()
+        counter.read(700)
+        counter.read(760)
+        r.stop()
+        assertEquals(60L, store.track(id)!!.steps)
+    }
+
+    @Test
+    fun killedBeforeAnyReadingTheTrackIsntCounted() {
+        val r = recorder(FakeSteps())
+        val id = r.start().trackId
+        // Killed and restarted: nothing was counted, so it isn't counted in part from here.
+        val second = FakeSteps()
+        val again = recorder(second)
+        assertTrue(again.resumeUnfinished(paused = false))
+        second.read(100)
+        second.read(150)
+        assertNull(again.state!!.steps)
+        again.stop()
+        assertNull(store.track(id)!!.steps)
     }
 
     @Test
