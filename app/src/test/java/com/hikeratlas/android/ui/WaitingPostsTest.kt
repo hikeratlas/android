@@ -119,21 +119,23 @@ class WaitingPostsTest {
     @Test
     fun onTheYouTabWhenSignedOut() {
         var state by mutableStateOf<AccountState>(AccountState.Out())
-        var opened = 0
         compose.setContent {
             HikerAtlasTheme {
-                YouScreen(
-                    account = AccountActions(state, signIn = { "" }, openPage = {}, signOut = {}, openProfile = { opened++ }),
+                YouTab(
+                    account = AccountActions(state, signIn = { "" }, openPage = {}, signOut = {}),
+                    profile = actions { Profiles.Profile(did, "alice.test", "https://pds.example", emptyList(), emptyList(), emptyList()) },
+                    units = UnitsActions(com.hikeratlas.android.units.Units.METRIC, signedIn = false, save = {}),
                     waiting = WaitingActions(listOf(entry("1", "Mount Si", Outbox.State.NEEDS_SIGN_IN)), null, {}, {}),
                 )
             }
         }
         compose.onNodeWithText("Mount Si").assertExists()
         compose.onNodeWithText("Needs you to sign in again: your session ended").assertExists()
-        // Signed in: they're on your profile, linked to from here.
+        // Signed in: they're on your profile's Overview, which the You tab now is.
         state = AccountState.In(did, "alice.test", null)
-        compose.onNodeWithText("1 post waiting to go up").performClick()
-        assertEquals(1, opened)
+        waitFor("Nothing posted yet.")
+        compose.onNodeWithText("Waiting to post").assertExists()
+        compose.onNodeWithText("Mount Si").assertExists()
     }
 }
 

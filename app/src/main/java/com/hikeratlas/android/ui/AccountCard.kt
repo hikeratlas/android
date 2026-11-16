@@ -67,20 +67,18 @@ class AccountActions(
     val openPage: (String) -> Unit,
     val signOut: suspend () -> Unit,
     val clearError: () -> Unit = {},
-    /** Opens your profile (posts, faves, settings); null, not offered. */
-    val openProfile: (() -> Unit)? = null,
 )
 
 /**
  * Signed out: a "Sign in" button. Signed in: the account's
- * picture, @handle, and Sign out.
+ * picture, @handle, and Sign out. [title] null where a heading above says it.
  */
 @Composable
-internal fun AccountCard(account: AccountActions) {
+internal fun AccountCard(account: AccountActions, title: String? = "Account") {
     val scope = rememberCoroutineScope()
     var asking by remember { mutableStateOf(false) }
     var signingOut by remember { mutableStateOf(false) }
-    Card("Account") {
+    Card(title) {
         when (val s = account.state) {
             AccountState.Loading -> Row(Modifier.heightIn(min = 52.dp)) {}
             AccountState.SigningIn -> Row(Modifier.fillMaxWidth().heightIn(min = 52.dp).padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -115,8 +113,6 @@ internal fun AccountCard(account: AccountActions) {
                 }, enabled = !signingOut) { Text(if (signingOut) "Signing out…" else "Sign out") }
             }
         }
-        val open = account.openProfile
-        if (account.state is AccountState.In && open != null) ProfileLink(open)
     }
     if (asking) SignInDialog(account, onClose = { asking = false })
 }

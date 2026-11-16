@@ -50,6 +50,14 @@ import androidx.compose.foundation.selection.selectable
 import androidx.compose.material3.RadioButton
 import androidx.compose.ui.semantics.Role
 import kotlinx.coroutines.CancellationException
+import androidx.compose.foundation.layout.Box
+import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.outlined.Person
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
+import com.hikeratlas.android.atproto.AccountState
 
 /** What the Storage card shows and does: offline areas, and MapLibre's cache of what's been looked at. */
 class StorageActions(
@@ -60,6 +68,82 @@ class StorageActions(
     val clearMapCache: suspend () -> Unit,
 )
 
+/**
+ * The You tab: signed in, your profile (Overview, and Settings gathering
+ * the rest); otherwise, as before signing in, [YouScreen].
+ * [seePost]: a post to land on, from "See post".
+ */
+@Composable
+fun YouTab(
+    account: AccountActions,
+    profile: ProfileActions,
+    units: UnitsActions,
+    storage: StorageActions? = null,
+    /** Null while signed out (the licence is the profile's). */
+    license: LicenseActions? = null,
+    waiting: WaitingActions? = null,
+    seePost: PostRef? = null,
+    refreshKey: Int = 0,
+) {
+    val s = account.state
+    if (s is AccountState.In) {
+        ProfileScreen(
+            ProfileTarget(s.did, s.handle, seePost), profile, onBack = null, avatar = s.avatar,
+            settings = { YouSettings(account, units, license, storage) },
+            waiting = waiting, refreshKey = refreshKey,
+        )
+    } else {
+        YouScreen(storage, account, units, waiting)
+    }
+}
+
+/**
+ * Settings, signed in: what the You tab had, under small headings. Units
+ * and the licence are the profile's (as on the website's Settings tab);
+ * storage is this phone's.
+ */
+@Composable
+internal fun YouSettings(account: AccountActions, units: UnitsActions, license: LicenseActions?, storage: StorageActions?) {
+    SettingsGroup("Posting") {
+        UnitsCard(units)
+        if (license != null) LicenseCard(license)
+    }
+    if (storage != null) SettingsGroup("On this phone") { StorageCard(storage) }
+    SettingsGroup("Account") { AccountCard(account, title = null) }
+    SettingsGroup("About") { AboutCard(title = null) }
+}
+
+@Composable
+private fun SettingsGroup(title: String, content: @Composable () -> Unit) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(
+            title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.padding(start = 4.dp, top = 4.dp).semantics { heading() },
+        )
+        content()
+    }
+}
+
+/**
+ * The You tab's icon: your picture in a circle signed in (so the way to
+ * your profile is plain to see), else the person icon.
+ */
+@Composable
+internal fun YouTabIcon(state: AccountState, selected: Boolean) {
+    if (state is AccountState.In) {
+        // Not an Icon: the bar would tint the photo.
+        Box(
+            Modifier.semantics(mergeDescendants = true) { contentDescription = "You, ${state.handle?.let { "@$it" } ?: state.did}" }
+                .testTag("you-avatar"),
+        ) {
+            Avatar(state.avatar, state.handle ?: "", 26)
+        }
+    } else {
+        Icon(if (selected) Icons.Filled.Person else Icons.Outlined.Person, contentDescription = null, modifier = Modifier.testTag("you-person"))
+    }
+}
+
+/** Signed out (or signing in): Sign in, units on this phone, storage and About. */
 @Composable
 fun YouScreen(
     storage: StorageActions? = null,
@@ -70,11 +154,9 @@ fun YouScreen(
      * (as the website's), so there's one place to change them.
      */
     units: UnitsActions? = null,
-    /** Posts waiting to go up: listed here signed out, else on your profile (linked to from here). */
+    /** Posts waiting to go up (signed in, they're on your profile's Overview). */
     waiting: WaitingActions? = null,
 ) {
-    val context = LocalContext.current
-    var credits by remember { mutableStateOf(false) }
     Column(
         Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surfaceContainerLowest)
             .statusBarsPadding().verticalScroll(rememberScrollState()).padding(16.dp),
@@ -82,24 +164,24 @@ fun YouScreen(
     ) {
         Text("You", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 4.dp, top = 8.dp))
         if (account != null) AccountCard(account)
-        if (waiting != null && waiting.entries.isNotEmpty()) {
-            val open = account?.openProfile
-            if (account?.state is com.hikeratlas.android.atproto.AccountState.In && open != null) {
-                val n = waiting.entries.size
-                Card("Waiting to post") { Item("$n ${if (n == 1) "post" else "posts"} waiting to go up", "See them on your profile", onClick = open) }
-            } else {
-                WaitingPosts(waiting)
-            }
-        }
+        if (waiting != null && waiting.entries.isNotEmpty()) WaitingPosts(waiting)
         if (units != null && !units.signedIn) UnitsCard(units)
         if (storage != null) StorageCard(storage)
-        Card("About") {
-            Item("hikeratlas.com", external = true) { openUrl(context, SITE) }
-            // The source is a tap away on the version's commit hash, below.
-            Item("Terms and privacy", external = true) { openUrl(context, "$SITE/terms") }
-            Item("Map credits", "OpenStreetMap contributors, Mapterhorn, ESA WorldCover and others") { credits = true }
-            VersionRow(BuildConfig.COMMIT, BuildConfig.COMMIT_DATE) { openUrl(context, it) }
-        }
+        AboutCard()
+    }
+}
+
+/** The site, the terms, map credits and the version. [title] null where a heading above says it. */
+@Composable
+private fun AboutCard(title: String? = "About") {
+    val context = LocalContext.current
+    var credits by remember { mutableStateOf(false) }
+    Card(title) {
+        Item("hikeratlas.com", external = true, divider = title != null) { openUrl(context, SITE) }
+        // The source is a tap away on the version's commit hash, below.
+        Item("Terms and privacy", external = true) { openUrl(context, "$SITE/terms") }
+        Item("Map credits", "OpenStreetMap contributors, Mapterhorn, ESA WorldCover and others") { credits = true }
+        VersionRow(BuildConfig.COMMIT, BuildConfig.COMMIT_DATE) { openUrl(context, it) }
     }
     if (credits) {
         AlertDialog(
@@ -335,14 +417,16 @@ private fun StorageCard(storage: StorageActions) {
     }
 }
 
+/** A card of rows; [title] null for one with a heading above it instead. */
 @Composable
-internal fun Card(title: String, content: @Composable () -> Unit) {
+internal fun Card(title: String?, content: @Composable () -> Unit) {
     Column(
         Modifier.fillMaxWidth()
             .background(MaterialTheme.colorScheme.surface, RoundedCornerShape(16.dp))
-            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(16.dp)),
+            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(16.dp))
+            .padding(top = if (title == null) 4.dp else 0.dp),
     ) {
-        Text(
+        if (title != null) Text(
             title.uppercase(),
             style = MaterialTheme.typography.labelMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -388,8 +472,8 @@ internal fun VersionRow(commit: String, date: String, open: (String) -> Unit) {
 private const val SOURCE = "https://github.com/hikeratlas/android"
 
 @Composable
-internal fun Item(title: String, subtitle: String? = null, external: Boolean = false, onClick: () -> Unit) {
-    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+internal fun Item(title: String, subtitle: String? = null, external: Boolean = false, divider: Boolean = true, onClick: () -> Unit) {
+    if (divider) HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
     Row(
         Modifier.fillMaxWidth().clickable(onClick = onClick).heightIn(min = 52.dp).padding(horizontal = 16.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,

@@ -1,5 +1,6 @@
 package com.hikeratlas.android.ui
 
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.padding
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.test.onRoot
@@ -82,7 +83,7 @@ class AccountCardTest {
         var state by mutableStateOf<AccountState>(AccountState.In("did:plc:abcdefghijklmnopqrstuvwx", "alice.bsky.social", null))
         compose.setContent {
             HikerAtlasTheme {
-                YouScreen(account = AccountActions(state, signIn = { "" }, openPage = {}, signOut = { state = AccountState.Out() }))
+                Column { AccountCard(AccountActions(state, signIn = { "" }, openPage = {}, signOut = { state = AccountState.Out() })) }
             }
         }
         compose.onNodeWithText("@alice.bsky.social").fetchSemanticsNode()
