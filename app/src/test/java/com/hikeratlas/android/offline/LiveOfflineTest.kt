@@ -12,6 +12,7 @@ import com.hikeratlas.android.routes.lookup
 import com.hikeratlas.android.style.StyleLoader
 import kotlinx.coroutines.runBlocking
 import okhttp3.OkHttpClient
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Assume.assumeTrue
 import org.junit.Test
@@ -82,10 +83,14 @@ class LiveOfflineTest {
     fun everyIdOfAnAreaFindsIt() = runBlocking {
         assumeTrue(System.getenv("HIKERATLAS_LIVE") == "1")
         val areas = RoutesRepository(OkHttpClient()).regions().countries.flatMap { it.states }.flatMap { it.areas }
-        for (id in listOf("2017389", "2017391", "2100172")) {
-            val a = areas.single { it.covers(id) }
-            assertTrue(a.name, a.name.startsWith("Pacific Rim"))
-            assertTrue(a.bbox != null)
+        // Every park under several OSM ids, rather than a few named ones: the
+        // builds merge and split parks (Pacific Rim's West Coast Trail Unit
+        // is now on the Long Beach Unit's page), and a list of ids goes stale.
+        val several = areas.filter { it.ids.size > 1 }
+        assertTrue("parks with several ids: ${several.size}", several.size > 10)
+        for (a in several) for (id in a.ids) {
+            assertEquals("$id finds ${a.name}", a, areas.single { it.covers(id) })
+            assertTrue(a.name, a.bbox != null)
         }
     }
 
