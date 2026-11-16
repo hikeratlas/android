@@ -1,7 +1,7 @@
 package com.hikeratlas.android.routes
 
+import com.hikeratlas.android.Http
 import kotlinx.coroutines.runBlocking
-import okhttp3.OkHttpClient
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Assume.assumeTrue
@@ -12,7 +12,7 @@ class LiveRoutesTest {
     @Test
     fun readsGaribaldi() = runBlocking {
         assumeTrue(System.getenv("HIKERATLAS_LIVE") == "1")
-        val repo = RoutesRepository(OkHttpClient())
+        val repo = RoutesRepository(Http.builder().build())
         assertTrue(repo.index().parks.size > 1000)
         val doc = repo.park("2226817")!!
         assertEquals("Garibaldi Provincial Park", doc.park?.name)
@@ -28,7 +28,7 @@ class LiveRoutesTest {
     @Test
     fun findsNovaScotiasRoutesByKey() = runBlocking {
         assumeTrue(System.getenv("HIKERATLAS_LIVE") == "1")
-        val repo = RoutesRepository(OkHttpClient(), "https://public.hikeratlas.com/routes/nova-scotia")
+        val repo = RoutesRepository(Http.builder().build(), "https://public.hikeratlas.com/routes/nova-scotia")
         val index = repo.index()
         val regions = repo.regions()
         // A route listed in two parks (or twice in one) may be found in either.

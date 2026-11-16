@@ -1,5 +1,6 @@
 package com.hikeratlas.android.offline
 
+import com.hikeratlas.android.Http
 import androidx.test.core.app.ApplicationProvider
 import com.hikeratlas.android.elevation.MapterhornSource
 import com.hikeratlas.android.pmtiles.Compression
@@ -11,7 +12,6 @@ import com.hikeratlas.android.routes.hikeSlugs
 import com.hikeratlas.android.routes.lookup
 import com.hikeratlas.android.style.StyleLoader
 import kotlinx.coroutines.runBlocking
-import okhttp3.OkHttpClient
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Assume.assumeTrue
@@ -37,7 +37,7 @@ class LiveOfflineTest {
     @Test
     fun downloadsAHike() = runBlocking {
         assumeTrue(System.getenv("HIKERATLAS_LIVE") == "1")
-        val http = OkHttpClient()
+        val http = Http.builder().build()
         val routes = RoutesRepository(http)
         val parkId = routes.regions().countries.flatMap { it.states }.flatMap { it.areas }.first { it.slug == "raging-river-state-forest" }.id
         val doc = routes.park(parkId)!!
@@ -82,7 +82,7 @@ class LiveOfflineTest {
     @Test
     fun everyIdOfAnAreaFindsIt() = runBlocking {
         assumeTrue(System.getenv("HIKERATLAS_LIVE") == "1")
-        val areas = RoutesRepository(OkHttpClient()).regions().countries.flatMap { it.states }.flatMap { it.areas }
+        val areas = RoutesRepository(Http.builder().build()).regions().countries.flatMap { it.states }.flatMap { it.areas }
         // Every park under several OSM ids, rather than a few named ones: the
         // builds merge and split parks (Pacific Rim's West Coast Trail Unit
         // is now on the Long Beach Unit's page), and a list of ids goes stale.
@@ -101,7 +101,7 @@ class LiveOfflineTest {
     @Test
     fun aParksRoutesTilesComeInAFewReads() = runBlocking {
         assumeTrue(System.getenv("HIKERATLAS_LIVE") == "1")
-        val http = OkHttpClient()
+        val http = Http.builder().build()
         val areas = RoutesRepository(http).regions().countries.flatMap { it.states }.flatMap { it.areas }
         for (slug in listOf("garibaldi-provincial-park", "banff-national-park")) {
             val a = areas.first { it.slug == slug }

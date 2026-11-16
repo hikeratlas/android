@@ -1,8 +1,8 @@
 package com.hikeratlas.android.elevation
 
+import com.hikeratlas.android.Http
 import com.hikeratlas.android.routes.ParkDoc
 import com.hikeratlas.android.routes.RoutesRepository
-import okhttp3.OkHttpClient
 import org.junit.Assert.assertEquals
 import org.junit.Assume.assumeTrue
 import org.junit.Test
@@ -26,7 +26,7 @@ class LiveProfileTest {
             javaClass.getResource("/fixtures/garibaldi-park.json")!!.readText(),
         )
         val route = doc.day_hikes[5].route // The Black Tusk, with its whole line
-        val p = ElevationProfiler(listOf(MapterhornSource(OkHttpClient()))).profile(route.line)
+        val p = ElevationProfiler(listOf(MapterhornSource(Http.builder().build()))).profile(route.line)
         assertEquals(route.max_ele, p.high, 40.0)
         assertEquals(584.0, p.low, 40.0) // the routes data's min_ele
         assertEquals(route.km * 1000, p.length, 300.0)

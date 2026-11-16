@@ -1,5 +1,6 @@
 package com.hikeratlas.android.elevation
 
+import com.hikeratlas.android.Http
 import android.graphics.BitmapFactory
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -15,7 +16,7 @@ import org.robolectric.annotation.Config
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35], application = android.app.Application::class)
 class LiveDemServerTest {
-    private val base = OkHttpClient()
+    private val base = Http.builder().build()
     private val sources = listOf(NlDemSource(base), MapterhornSource(base))
     private val client = OkHttpClient.Builder().addInterceptor(DemServer(DemTiles(sources), sources)).build()
 

@@ -1,5 +1,6 @@
 package com.hikeratlas.android.routing
 
+import com.hikeratlas.android.Http
 import com.hikeratlas.android.pmtiles.HttpRangeSource
 import com.hikeratlas.android.pmtiles.Pmtiles
 import com.hikeratlas.android.pmtiles.RangeSource
@@ -11,7 +12,6 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
-import okhttp3.OkHttpClient
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -28,7 +28,7 @@ class LivePlannerTest {
     fun rubbleCreekToTaylorMeadows() = runBlocking {
         assumeTrue(System.getenv("HIKERATLAS_LIVE") == "1")
         val reads = AtomicInteger()
-        val http = HttpRangeSource(StyleLoader.BASEMAP_URL, OkHttpClient())
+        val http = HttpRangeSource(StyleLoader.BASEMAP_URL, Http.builder().build())
         val counting = object : RangeSource {
             override val key = http.key
             override fun read(offset: Long, length: Int): ByteArray { reads.incrementAndGet(); return http.read(offset, length) }

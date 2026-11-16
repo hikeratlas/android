@@ -1,5 +1,6 @@
 package com.hikeratlas.android.imagery
 
+import com.hikeratlas.android.Http
 import android.graphics.BitmapFactory
 import org.robolectric.RuntimeEnvironment
 import okhttp3.OkHttpClient
@@ -20,7 +21,7 @@ import org.robolectric.annotation.Config
 class LiveImageryTest {
     private val client by lazy {
         val app = RuntimeEnvironment.getApplication()
-        OkHttpClient.Builder().addInterceptor(ImageryServer(app.assets, OkHttpClient())).build()
+        OkHttpClient.Builder().addInterceptor(ImageryServer(app.assets, Http.builder().build())).build()
     }
 
     private fun get(path: String) = client.newCall(Request.Builder().url("https://${ImageryServer.HOST}/$path").build()).execute()

@@ -1,5 +1,6 @@
 package com.hikeratlas.android.trail
 
+import com.hikeratlas.android.Http
 import com.hikeratlas.android.pmtiles.HttpRangeSource
 import com.hikeratlas.android.pmtiles.Pmtiles
 import com.hikeratlas.android.routes.RoutesRepository
@@ -8,7 +9,6 @@ import com.hikeratlas.android.routes.lookup
 import com.hikeratlas.android.search.SearchApi
 import com.hikeratlas.android.style.StyleLoader
 import kotlinx.coroutines.runBlocking
-import okhttp3.OkHttpClient
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Assume.assumeTrue
@@ -19,7 +19,7 @@ class LiveTrailTest {
     @Test
     fun blackTuskTrail() = runBlocking {
         assumeTrue(System.getenv("HIKERATLAS_LIVE") == "1")
-        val http = OkHttpClient()
+        val http = Http.builder().build()
         val item = SearchApi(http).search("black tusk trail", 49.95, -123.05).first { it.kind == "trail" }
         assertEquals("Garibaldi PP", item.park)
 
