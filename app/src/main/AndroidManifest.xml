@@ -71,7 +71,7 @@
                 <data android:scheme="com.hikeratlas.www" />
             </intent-filter>
         </activity>
-        <!-- Shares exported tracks (GPX) with other apps, and a file for the camera to write a photo into. -->
+        <!-- Shares exported tracks (GPX) and posts' photos with other apps, and a file for the camera to write a photo into. -->
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.files"

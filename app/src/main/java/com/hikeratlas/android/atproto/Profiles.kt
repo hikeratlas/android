@@ -33,7 +33,14 @@ object Profiles {
     /** A blob as a record refers to it: its CID, and its type. */
     data class Blob(val cid: String, val mimeType: String?)
 
-    data class Photo(val image: Blob, val alt: String?)
+    /** A photo in a post: [lat] and [lon] in degrees, where it was taken (defs#photo's `at`), when known. */
+    data class Photo(
+        val image: Blob,
+        val alt: String?,
+        val takenAt: String? = null,
+        val lat: Double? = null,
+        val lon: Double? = null,
+    )
 
     data class Track(
         val uri: String,
@@ -294,8 +301,17 @@ object Profiles {
     private fun photos(e: kotlinx.serialization.json.JsonElement?): List<Photo> =
         (e as? JsonArray).orEmpty().mapNotNull { p ->
             val o = p as? JsonObject ?: return@mapNotNull null
-            Photo(blob(o["image"]) ?: return@mapNotNull null, o.str("alt"))
+            val at = point(o["at"])
+            Photo(blob(o["image"]) ?: return@mapNotNull null, o.str("alt"), o.str("takenAt"), at?.first, at?.second)
         }.take(MAX_PHOTOS)
+
+    /** A defs#point, microdegrees, as (lat, lon) in degrees; null when missing or off the globe. */
+    private fun point(e: kotlinx.serialization.json.JsonElement?): Pair<Double, Double>? {
+        val o = e as? JsonObject ?: return null
+        val lat = o.num("lat")?.div(1e6) ?: return null
+        val lon = o.num("lon")?.div(1e6) ?: return null
+        return if (lat in -90.0..90.0 && lon in -180.0..180.0) lat to lon else null
+    }
 
     /** A blob ref: {$type: blob, ref: {$link}, mimeType}; null without a link. */
     private fun blob(e: kotlinx.serialization.json.JsonElement?): Blob? {

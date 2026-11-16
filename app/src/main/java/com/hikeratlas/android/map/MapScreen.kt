@@ -125,6 +125,9 @@ fun MapScreen(
     /** A posted track to show (from a profile), until [onPostedClosed]. */
     viewPosted: com.hikeratlas.android.ui.PostedTrack? = null,
     onPostedClosed: () -> Unit = {},
+    /** A photo's place to show (from the photo viewer), until [onPhotoClosed]. */
+    viewPhoto: com.hikeratlas.android.ui.PhotoPin? = null,
+    onPhotoClosed: () -> Unit = {},
     /** An offline area to open (from the Saved tab): its park's or hike's sheet, until [onAreaOpened]. */
     openArea: OfflineAreas.Target? = null,
     onAreaOpened: () -> Unit = {},
@@ -321,7 +324,9 @@ fun MapScreen(
     // A fresh sheet each time one opens, so it starts low however the last was left.
     val sheet = remember(open) { AnchoredDraggableState(Stop.Peek) }
 
-    LaunchedEffect(open, planning, viewTrack, viewPosted) { onSheetOpen(open || planning || viewTrack != null || viewPosted != null) }
+    LaunchedEffect(open, planning, viewTrack, viewPosted, viewPhoto) {
+        onSheetOpen(open || planning || viewTrack != null || viewPosted != null || viewPhoto != null)
+    }
     // Draw the plan as it changes.
     LaunchedEffect(planner.points, planner.coords, planner.pending, style) {
         controller?.showPlan(planner.points, planner.coords, planner.pending)
@@ -468,6 +473,19 @@ fun MapScreen(
         if (postedPanelPx > 0) controller?.fitLine(p.segments.flatten(), postedPanelPx)
     }
     BackHandler(enabled = viewPosted != null && !open && !searching) { onPostedClosed() }
+    // A photo's place: marked, and centred above its panel once that's measured.
+    var photoPanelPx by remember { mutableIntStateOf(0) }
+    LaunchedEffect(viewPhoto, style) { controller?.showPhoto(viewPhoto?.let { doubleArrayOf(it.lon, it.lat) }) }
+    LaunchedEffect(viewPhoto) {
+        if (viewPhoto == null) return@LaunchedEffect
+        model.close()
+        if (planning) stopPlanning()
+    }
+    LaunchedEffect(viewPhoto, photoPanelPx, controller) {
+        val p = viewPhoto ?: return@LaunchedEffect
+        if (photoPanelPx > 0) controller?.centreOn(p.lon, p.lat, photoPanelPx)
+    }
+    BackHandler(enabled = viewPhoto != null && !open && !searching) { onPhotoClosed() }
     LaunchedEffect(viewTrack) {
         viewing = null
         val id = viewTrack ?: return@LaunchedEffect
@@ -617,7 +635,7 @@ fun MapScreen(
                     }
                 }
             }
-            if (inView.isNotEmpty() && viewing == null && viewPosted == null) {
+            if (inView.isNotEmpty() && viewing == null && viewPosted == null && viewPhoto == null) {
                 Surface(
                     shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp),
                     shadowElevation = 8.dp,
@@ -658,6 +676,14 @@ fun MapScreen(
                     onShare = { scope.launch { com.hikeratlas.android.track.shareGpx(context, p.title, p.gpx) } },
                     onScrub = { pt -> controller?.showHover(pt) },
                     modifier = Modifier.align(Alignment.BottomCenter).onSizeChanged { postedPanelPx = it.height },
+                )
+            }
+        }
+        viewPhoto?.let { p ->
+            if (!open && !planning && viewing == null && viewPosted == null) {
+                com.hikeratlas.android.ui.PhotoPlacePanel(
+                    p, onClose = onPhotoClosed,
+                    modifier = Modifier.align(Alignment.BottomCenter).onSizeChanged { photoPanelPx = it.height },
                 )
             }
         }

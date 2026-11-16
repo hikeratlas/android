@@ -61,6 +61,7 @@ import androidx.compose.ui.unit.dp
 import com.hikeratlas.android.atproto.Posts
 import com.hikeratlas.android.atproto.Profiles
 import com.hikeratlas.android.map.RemoteThumb
+import com.hikeratlas.android.map.Thumbs
 import com.hikeratlas.android.routes.KeyedHike
 import com.hikeratlas.android.routes.KeyedSearch
 import com.hikeratlas.android.track.TrackMeasure
@@ -107,8 +108,8 @@ class ProfileActions(
     val openHike: (KeyedHike) -> Unit,
     val showTrack: (PostedTrack) -> Unit,
     val shareGpx: (title: String, gpx: String) -> Unit,
-    /** A photo at full size (in the browser, as the website links it). */
-    val openPhoto: (String) -> Unit,
+    /** Opens a post's photos in the viewer. */
+    val openPhotos: (PhotoSet) -> Unit,
     /**
      * Saves an edit of one of your own reviews over it (putRecord, swapping
      * the CID read), giving its new address; null where the profile isn't
@@ -317,7 +318,7 @@ private fun PostList(
                 ) {
                     r.tags.takeIf { it.isNotEmpty() }?.let { Tags(it) }
                     Text(r.text, style = MaterialTheme.typography.bodyMedium)
-                    if (r.photos.isNotEmpty()) PhotoGrid(profile.pds, profile.did, r.photos, actions.openPhoto)
+                    if (r.photos.isNotEmpty()) PhotoGrid(PhotoSet(profile.pds, profile.did, profile.handle, r.license, r.photos), actions.openPhotos)
                     // Its track drawn here too: the profile is a full page, as the website's.
                     profile.trackOf(r)?.let { TrackBox(profile, it, actions, lines) }
                 }
@@ -332,7 +333,7 @@ private fun PostList(
                     error = failed?.takeIf { it.first == t.uri }?.second,
                     onDelete = { confirming = Confirming(t.uri, false, profile.deletion(t)) },
                 ) {
-                    if (t.photos.isNotEmpty()) PhotoGrid(profile.pds, profile.did, t.photos, actions.openPhoto)
+                    if (t.photos.isNotEmpty()) PhotoGrid(PhotoSet(profile.pds, profile.did, profile.handle, t.license, t.photos), actions.openPhotos)
                     TrackBox(profile, t, actions, lines)
                 }
             }
@@ -479,20 +480,20 @@ private fun PostCard(
 
 private val TAG_LABEL = Posts.TAGS.toMap()
 
-/** A post's photos, three to a row, from [did]'s PDS; tapped, at full size. */
+/** A post's photos, three to a row, from its author's PDS; tapped, in the viewer from that one. */
 @Composable
-internal fun PhotoGrid(pds: String, did: String, photos: List<Profiles.Photo>, openPhoto: (String) -> Unit) {
+internal fun PhotoGrid(set: PhotoSet, openPhotos: (PhotoSet) -> Unit) {
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        for (row in photos.chunked(3)) {
+        for ((r, row) in set.photos.chunked(3).withIndex()) {
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                for (ph in row) {
-                    val url = Profiles.blobUrl(pds, did, ph.image.cid)
+                for ((i, ph) in row.withIndex()) {
+                    val url = set.url(ph)
                     Box(
                         Modifier.weight(1f).aspectRatio(1f).background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(8.dp))
-                            .clickable { openPhoto(url) }
+                            .clickable { openPhotos(set.copy(start = r * 3 + i)) }
                             .semantics { contentDescription = ph.alt?.takeIf { it.isNotBlank() } ?: "Photo" },
                     ) {
-                        RemoteThumb(url, Modifier.fillMaxSize())
+                        RemoteThumb(url, Modifier.fillMaxSize(), Thumbs.GRID_PX)
                     }
                 }
                 repeat(3 - row.size) { Box(Modifier.weight(1f)) }

@@ -64,11 +64,13 @@ class HikerActions(
     val getTrack: suspend (pds: String, uri: String) -> Profiles.Track?,
     /** A track's GPX, from its author's PDS. */
     val gpx: suspend (pds: String, did: String, track: Profiles.Track) -> String,
-    /** Opens a page in the browser: an author's profile, a report form, a photo. */
+    /** Opens a page in the browser: an author's profile, a report form. */
     val openUrl: (String) -> Unit,
     /** Shows a track on the map; [hikeId] and [hikeTitle], the hike to come back to. */
     val showTrack: (track: PostedTrack, hikeId: String, hikeTitle: String) -> Unit,
     val shareGpx: (title: String, gpx: String) -> Unit,
+    /** Opens a post's photos in the viewer; [hikeId] and [hikeTitle], the hike to come back to from the map. */
+    val openPhotos: (photos: PhotoSet, hikeId: String, hikeTitle: String) -> Unit = { _, _, _ -> },
     /** The route keys of the app's own writes, once the indexer is told (null: route not known). */
     val writes: Flow<String?> = Indexer.written,
     val now: () -> Long = System::currentTimeMillis,
@@ -221,7 +223,7 @@ fun RouteCounts(hikers: RouteHikers) {
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun FromHikers(hikers: RouteHikers, showTrack: (PostedTrack) -> Unit) {
+fun FromHikers(hikers: RouteHikers, openPhotos: (PhotoSet) -> Unit = {}, showTrack: (PostedTrack) -> Unit) {
     val reviews = hikers.reviews.items
     val tracks = hikers.tracks.items
     if (reviews.isEmpty() && tracks.isEmpty()) return
@@ -239,13 +241,13 @@ fun FromHikers(hikers: RouteHikers, showTrack: (PostedTrack) -> Unit) {
             )
         }
         for (p in reviews) {
-            androidx.compose.runtime.key(p.uri) { ReviewCard(hikers, p) }
+            androidx.compose.runtime.key(p.uri) { ReviewCard(hikers, p, openPhotos) }
         }
         More(hikers.reviews, "reviews") { scope.launch { hikers.reviews.more() } }
         if (tracks.isNotEmpty()) {
             Text("Tracks", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 4.dp))
             for (p in tracks) {
-                androidx.compose.runtime.key(p.uri) { TrackCard(hikers, p, showTrack) }
+                androidx.compose.runtime.key(p.uri) { TrackCard(hikers, p, openPhotos, showTrack) }
             }
         }
         More(hikers.tracks, "tracks") { scope.launch { hikers.tracks.more() } }
@@ -301,7 +303,7 @@ private fun PostCard(
 }
 
 @Composable
-private fun ReviewCard(hikers: RouteHikers, post: IndexerClient.Post<Profiles.Review>) {
+private fun ReviewCard(hikers: RouteHikers, post: IndexerClient.Post<Profiles.Review>, openPhotos: (PhotoSet) -> Unit) {
     val r = post.record
     val pds by produceState(post.author.pds, post.author) { value = hikers.pdsOf(post.author) }
     // Only a track in the author's own repository: its GPX is a blob on their PDS.
@@ -319,7 +321,7 @@ private fun ReviewCard(hikers: RouteHikers, post: IndexerClient.Post<Profiles.Re
     PostCard(hikers, post, r.hikedAt ?: r.createdAt, null, r.license) {
         if (r.tags.isNotEmpty()) Tags(r.tags)
         if (r.text.isNotBlank()) Text(r.text, style = MaterialTheme.typography.bodyMedium)
-        pds?.let { if (r.photos.isNotEmpty()) PhotoGrid(it, post.author.did, r.photos, hikers.actions.openUrl) }
+        pds?.let { if (r.photos.isNotEmpty()) PhotoGrid(PhotoSet(it, post.author.did, post.author.handle, r.license, r.photos), openPhotos) }
         if (track != null) {
             Text(
                 "Has a track", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.primary,
@@ -334,7 +336,9 @@ private fun ReviewCard(hikers: RouteHikers, post: IndexerClient.Post<Profiles.Re
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun TrackCard(hikers: RouteHikers, post: IndexerClient.Post<Profiles.Track>, showTrack: (PostedTrack) -> Unit) {
+private fun TrackCard(
+    hikers: RouteHikers, post: IndexerClient.Post<Profiles.Track>, openPhotos: (PhotoSet) -> Unit, showTrack: (PostedTrack) -> Unit,
+) {
     val t = post.record
     val pds by produceState(post.author.pds, post.author) { value = hikers.pdsOf(post.author) }
     val here = remember { BringIntoViewRequester() }
@@ -349,7 +353,7 @@ private fun TrackCard(hikers: RouteHikers, post: IndexerClient.Post<Profiles.Tra
     PostCard(hikers, post, t.startedAt ?: t.createdAt, t.title, t.license, Modifier.bringIntoViewRequester(here).testTag("track-${post.uri}")) {
         pds?.let { p ->
             TrackBox(t, { hikers.actions.gpx(p, post.author.did, t) }, showTrack, hikers.actions.shareGpx, hikers.lines)
-            if (t.photos.isNotEmpty()) PhotoGrid(p, post.author.did, t.photos, hikers.actions.openUrl)
+            if (t.photos.isNotEmpty()) PhotoGrid(PhotoSet(p, post.author.did, post.author.handle, t.license, t.photos), openPhotos)
         }
     }
 }

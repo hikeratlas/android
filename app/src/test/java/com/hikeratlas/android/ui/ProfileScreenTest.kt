@@ -1,5 +1,7 @@
 package com.hikeratlas.android.ui
 
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasAnyDescendant
@@ -7,6 +9,7 @@ import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onLast
 import androidx.compose.ui.test.onNodeWithText
@@ -61,6 +64,7 @@ class ProfileScreenTest {
         delete: (suspend (Profiles.Deletion) -> Unit)? = null,
         shown: MutableList<PostedTrack> = mutableListOf(),
         edit: (suspend (Profiles.Review, Posts.ReviewEdit) -> Posts.StrongRef)? = null,
+        openPhotos: (PhotoSet) -> Unit = {},
     ) = ProfileActions(
         load = { load() },
         findHikes = { KeyedSearch(mapOf(key to KeyedHike("p", "Mount Si NRCA", "p/day/0", "Mount Si")), emptySet()) },
@@ -70,7 +74,7 @@ class ProfileScreenTest {
         openHike = {},
         showTrack = { shown += it },
         shareGpx = { _, _ -> },
-        openPhoto = {},
+        openPhotos = openPhotos,
         edit = edit,
     )
 
@@ -101,6 +105,36 @@ class ProfileScreenTest {
         compose.waitUntil(5_000) { count("Mount Si") > 0 }
         assertEquals(2, count("Edit"))
         assertEquals(3, count("Delete"))
+    }
+
+    @Test
+    @Config(qualifiers = "w390dp-h3000dp-xxhdpi")
+    fun aTappedPhotoOpensInTheViewerAtThatPhoto() {
+        val photos = listOf(
+            Profiles.Photo(Profiles.Blob("bafk-p1", "image/jpeg"), "Haystack"),
+            Profiles.Photo(Profiles.Blob("bafk-p2", "image/jpeg"), "Summit", lat = 47.49, lon = -121.72),
+        )
+        val p = profile(listOf(review("r1", "With photos.").copy(photos = photos)), emptyList())
+        var viewing by androidx.compose.runtime.mutableStateOf<PhotoSet?>(null)
+        compose.setContent {
+            HikerAtlasTheme {
+                // As the app hosts it: the viewer over the profile.
+                androidx.compose.foundation.layout.Box {
+                    ProfileScreen(ProfileTarget(did, "alice.test"), actions({ p }, openPhotos = { viewing = it }), onBack = {})
+                    viewing?.let { PhotoViewer(it, PhotoViewerActions({ _, _ -> null }, {}), onClose = { viewing = null }) }
+                }
+            }
+        }
+        compose.waitUntil(5_000) { compose.onAllNodes(androidx.compose.ui.test.hasContentDescription("Summit")).fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithContentDescription("Summit").performClick()
+        compose.onNodeWithTag("photo-viewer").assertIsDisplayed()
+        compose.onNodeWithText("2 / 2").assertIsDisplayed()
+        compose.onNodeWithText("CC BY 4.0 · @alice.test").assertIsDisplayed()
+        compose.onNodeWithText("Show on map").assertIsDisplayed()
+        assertEquals(PhotoSet("https://pds.example", did, "alice.test", "CC-BY-4.0", photos, 1), viewing)
+        compose.onNodeWithContentDescription("Close").performClick()
+        compose.waitForIdle()
+        assertEquals(0, compose.onAllNodesWithTag("photo-viewer").fetchSemanticsNodes().size)
     }
 
     @Test
