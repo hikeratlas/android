@@ -31,6 +31,11 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
+import com.hikeratlas.android.routes.sortParks
+import com.hikeratlas.android.routes.hasRanks
+import com.hikeratlas.android.routes.ParkOrder
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.material3.FilterChip
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -168,8 +173,30 @@ private fun ParkCards(state: Regions.State, key: String, cards: suspend (String)
     LaunchedEffect(key) {
         extra = try { cards(key) } catch (e: CancellationException) { throw e } catch (e: Exception) { emptyMap() }
     }
+    // Ordered by fame, hikes or name (#92, as the website's state pages): the
+    // choice is kept for the next state, and the next time. "Popular" only
+    // once the build has ranks; until then, most hikes first, as it lists them.
+    val context = LocalContext.current
+    val prefs = remember { context.getSharedPreferences(ORDER_PREFS, android.content.Context.MODE_PRIVATE) }
+    var order by remember { mutableStateOf(ParkOrder.of(prefs.getString(ORDER_KEY, null)) ?: ParkOrder.POPULAR) }
+    val ranked = hasRanks(state.areas)
+    val orders = if (ranked) ParkOrder.entries else ParkOrder.entries - ParkOrder.POPULAR
+    val shown = if (order == ParkOrder.POPULAR && !ranked) ParkOrder.HIKES else order
+    val sorted = remember(state.areas, shown) { sortParks(state.areas, shown) }
     LazyColumn(Modifier.fillMaxSize(), contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        items(state.areas, key = { it.id }) { a ->
+        if (state.areas.size > 1) item(key = "order") {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text("Sort", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                for (o in orders) {
+                    FilterChip(
+                        selected = shown == o,
+                        onClick = { order = o; prefs.edit().putString(ORDER_KEY, o.name).apply() },
+                        label = { Text(o.label) },
+                    )
+                }
+            }
+        }
+        items(sorted, key = { it.id }) { a ->
             val c = extra[a.id]
             val l = parkLabel(a.name, a.id)
             Row(
@@ -201,6 +228,9 @@ private fun ParkCards(state: Regions.State, key: String, cards: suspend (String)
         }
     }
 }
+
+private const val ORDER_PREFS = "explore"
+private const val ORDER_KEY = "parkOrder"
 
 /** The park's outline (an SVG path in a 100×100 box), tinted and edged; a mountain where there's none. */
 @Composable

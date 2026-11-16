@@ -215,6 +215,12 @@ data class Regions(val countries: List<Country> = emptyList()) {
         val ids: List<String> = emptyList(),
         /** Its curated hikes. */
         val hikes: Int = 0,
+        /**
+         * The park's QRank (Wikidata popularity, from basemap's hike-paths.py),
+         * for ordering a state's parks by fame (#92, website#168); 0 or absent
+         * where it has none, or in builds from before it.
+         */
+        val rank: Long? = null,
     ) {
         fun covers(parkId: String) = id == parkId || parkId in ids
     }

@@ -5,11 +5,14 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import com.hikeratlas.android.routes.Regions
 import com.hikeratlas.android.routes.StateCard
+import androidx.test.core.app.ApplicationProvider
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -75,6 +78,57 @@ class ExploreScreenTest {
 
         compose.onNodeWithContentDescription("Back").performClick()
         assertEquals(listOf("canada"), path)
+    }
+
+    // #92: a state's parks by fame, hikes or name, the choice kept.
+    @Test
+    fun parksSortedByFameHikesOrName() {
+        ApplicationProvider.getApplicationContext<android.content.Context>().getSharedPreferences("explore", 0).edit().clear().commit()
+        val ontario = Regions(listOf(Regions.Country("Canada", "canada", hikes = 300, parks = 3, states = listOf(
+            Regions.State("Ontario", "ontario", hikes = 300, parks = 3, areas = listOf(
+                Regions.Area("1", "La Verendrye Provincial Park", "la-verendrye", hikes = 140, rank = 0),
+                Regions.Area("2", "Algonquin Provincial Park", "algonquin", hikes = 90, rank = 50_000),
+                Regions.Area("3", "Bruce Peninsula National Park", "bruce", hikes = 30, rank = 20_000),
+            )),
+        ))))
+        var shown by mutableStateOf(true)
+        compose.setContent {
+            HikerAtlasTheme {
+                if (shown) ExploreScreen(regions = { ontario }, cards = { emptyMap() }, path = listOf("canada", "ontario"), onPath = {}, onPark = { _, _ -> })
+            }
+        }
+        fun top(name: String) = compose.onNodeWithText(name).fetchSemanticsNode().boundsInRoot.top
+        compose.waitUntil(5_000) { runCatching { compose.onNodeWithText("Algonquin").assertExists() }.isSuccess }
+        // Popular by default: the famous park first, not the one with most hikes.
+        compose.onNodeWithText("Popular").assertIsSelected()
+        assertTrue(top("Algonquin") < top("Bruce Peninsula") && top("Bruce Peninsula") < top("La Verendrye"))
+
+        compose.onNodeWithText("Most hikes").performClick()
+        compose.waitForIdle()
+        assertTrue(top("La Verendrye") < top("Algonquin") && top("Algonquin") < top("Bruce Peninsula"))
+
+        compose.onNodeWithText("A–Z").performClick()
+        compose.waitForIdle()
+        assertTrue(top("Algonquin") < top("Bruce Peninsula") && top("Bruce Peninsula") < top("La Verendrye"))
+
+        // Kept for next time.
+        shown = false
+        compose.waitForIdle()
+        shown = true
+        compose.waitUntil(5_000) { runCatching { compose.onNodeWithText("A–Z").assertIsSelected() }.isSuccess }
+    }
+
+    // A build from before ranks: no "Popular", most hikes first.
+    @Test
+    fun noPopularWithoutRanks() {
+        ApplicationProvider.getApplicationContext<android.content.Context>().getSharedPreferences("explore", 0).edit().clear().commit()
+        compose.setContent {
+            HikerAtlasTheme {
+                ExploreScreen(regions = { regions }, cards = { emptyMap() }, path = listOf("canada", "british-columbia"), onPath = {}, onPark = { _, _ -> })
+            }
+        }
+        compose.waitUntil(5_000) { runCatching { compose.onNodeWithText("Most hikes").assertIsSelected() }.isSuccess }
+        compose.onNodeWithText("Popular").assertDoesNotExist()
     }
 
     @Test
