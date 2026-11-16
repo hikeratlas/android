@@ -26,6 +26,14 @@ class TrackStore(context: Context, name: String? = "tracks.db") :
         val stats: Stats? = null,
         /** The post it was posted as, if it was: it isn't posted again. */
         val posted: Posted? = null,
+        /** Steps counted while recording; null where they weren't (no step counter, no permission, recorded before). */
+        val steps: Long? = null,
+        /**
+         * The step counter's reading when [steps] was last saved, while
+         * recording: after the app is killed, what was walked since is
+         * counted from it.
+         */
+        val stepsBase: Long? = null,
     )
 
     /**
@@ -60,6 +68,7 @@ class TrackStore(context: Context, name: String? = "tracks.db") :
         )
         addStats(db)
         addPosted(db)
+        addSteps(db)
         // alt: above the WGS84 ellipsoid; msl_alt: above sea level; both GPS's own.
         db.execSQL(
             """CREATE TABLE points (
@@ -85,6 +94,14 @@ class TrackStore(context: Context, name: String? = "tracks.db") :
         // numbers kept from before are worked out again.
         if (oldVersion < 3) db.execSQL("UPDATE tracks SET metres = NULL, elapsed_ms = NULL, moving_ms = NULL, gain = NULL, loss = NULL")
         if (oldVersion < 4) addPosted(db)
+        if (oldVersion < 5) addSteps(db)
+    }
+
+    // Version 5: steps counted while recording. Tracks from before have none (null, not 0).
+    private fun addSteps(db: SQLiteDatabase) {
+        for (col in listOf("steps INTEGER", "steps_base INTEGER")) {
+            db.execSQL("ALTER TABLE tracks ADD COLUMN $col")
+        }
     }
 
     // Version 4: what a track was posted as, so it's never posted twice.
@@ -119,6 +136,14 @@ class TrackStore(context: Context, name: String? = "tracks.db") :
     fun setPaused(track: Long, pausedMs: Long, pausedAt: Long?) {
         writableDatabase.update(
             "tracks", ContentValues().apply { put("paused_ms", pausedMs); put("paused_at", pausedAt) },
+            "id = ?", arrayOf(track.toString()),
+        )
+    }
+
+    /** A track's steps so far, and the counter's reading they were counted to (null when not counting). */
+    fun setSteps(track: Long, steps: Long, base: Long?) {
+        writableDatabase.update(
+            "tracks", ContentValues().apply { put("steps", steps); put("steps_base", base) },
             "id = ?", arrayOf(track.toString()),
         )
     }
@@ -173,7 +198,7 @@ class TrackStore(context: Context, name: String? = "tracks.db") :
         writableDatabase.update(
             "tracks",
             ContentValues().apply {
-                putNull("ended"); put("paused_at", pausedAt)
+                putNull("ended"); put("paused_at", pausedAt); putNull("steps_base")
                 for (c in listOf("metres", "elapsed_ms", "moving_ms", "gain", "loss")) putNull(c)
             },
             "id = ?", arrayOf(track.toString()),
@@ -215,6 +240,7 @@ class TrackStore(context: Context, name: String? = "tracks.db") :
             Stats(m, longOrNull("elapsed_ms") ?: 0, longOrNull("moving_ms") ?: 0, double("gain"), double("loss"))
         },
         string("posted_uri")?.let { uri -> Posted(uri, string("posted_cid") ?: "", string("posted_review"), longOrNull("posted_at") ?: 0) },
+        longOrNull("steps"), longOrNull("steps_base"),
     )
     private fun Cursor.col(n: String) = getColumnIndexOrThrow(n)
     private fun Cursor.long(n: String) = getLong(col(n))
@@ -224,6 +250,6 @@ class TrackStore(context: Context, name: String? = "tracks.db") :
     private fun Cursor.string(n: String) = col(n).let { if (isNull(it)) null else getString(it) }
 
     private companion object {
-        const val VERSION = 4
+        const val VERSION = 5
     }
 }

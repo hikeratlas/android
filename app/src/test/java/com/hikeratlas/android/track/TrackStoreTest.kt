@@ -99,6 +99,35 @@ class TrackStoreTest {
         }
     }
 
+    /** Version 5 adds steps: tracks from before have none (null, not 0), and new ones keep theirs. */
+    @Test
+    fun upgradingToVersion5LeavesOldTracksWithoutSteps() {
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        val file = context.getDatabasePath("v4.db").apply { parentFile?.mkdirs(); delete() }
+        android.database.sqlite.SQLiteDatabase.openOrCreateDatabase(file, null).use { db ->
+            db.execSQL("CREATE TABLE tracks (id INTEGER PRIMARY KEY AUTOINCREMENT, started INTEGER NOT NULL, ended INTEGER, name TEXT, paused_ms INTEGER NOT NULL DEFAULT 0, paused_at INTEGER, metres REAL, elapsed_ms INTEGER, moving_ms INTEGER, gain REAL, loss REAL, posted_uri TEXT, posted_cid TEXT, posted_review TEXT, posted_at INTEGER)")
+            db.execSQL("CREATE TABLE points (track INTEGER NOT NULL REFERENCES tracks(id) ON DELETE CASCADE, seg INTEGER NOT NULL, t INTEGER NOT NULL, lat REAL NOT NULL, lon REAL NOT NULL, acc REAL, alt REAL, msl_alt REAL, v_acc REAL, speed REAL)")
+            db.execSQL("INSERT INTO tracks (started, ended, name, metres, posted_uri, posted_cid, posted_at) VALUES (100, 900, 'Kept', 1234.0, 'at://did:plc:x/com.hikeratlas.temp.track/3abc', 'bafy', 5)")
+            db.version = 4
+        }
+        TrackStore(context, "v4.db").use { store ->
+            val t = store.saved().single()
+            assertEquals("Kept", t.name)
+            assertEquals("bafy", t.posted!!.trackCid)
+            assertNull(t.steps)
+            assertNull(t.stepsBase)
+            val id = store.start(1_000)
+            store.setSteps(id, 0, 777)
+            assertEquals(0L, store.track(id)!!.steps)
+            assertEquals(777L, store.track(id)!!.stepsBase)
+            // Recorded on again later: counted on from the next reading, so no base.
+            store.end(id, 2_000)
+            store.reopen(id, 2_000)
+            assertEquals(0L, store.track(id)!!.steps)
+            assertNull(store.track(id)!!.stepsBase)
+        }
+    }
+
     /** A phone with the first version's database keeps its tracks. */
     @Test
     fun upgradesTheFirstVersionsDatabase() {

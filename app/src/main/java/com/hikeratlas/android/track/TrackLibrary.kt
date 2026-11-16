@@ -99,13 +99,13 @@ class TrackLibrary(
         val dir = File(cacheDir, "gpx").apply { mkdirs() }
         // Only the one being shared is kept.
         dir.listFiles()?.forEach { it.delete() }
-        File(dir, Gpx.fileName(name)).apply { writeText(Gpx.write(name, t.started, store.points(id))) }
+        File(dir, Gpx.fileName(name)).apply { writeText(Gpx.write(name, t.started, store.points(id), t.steps)) }
     }
 
     /** A track as GPX, as it's shared and posted. */
     suspend fun gpxText(id: Long): String? = withContext(io) {
         val t = store.track(id) ?: return@withContext null
-        Gpx.write(t.name ?: "Track", t.started, store.points(id))
+        Gpx.write(t.name ?: "Track", t.started, store.points(id), t.steps)
     }
 
     /** What a track was posted as, if it was (read afresh, not from the list). */

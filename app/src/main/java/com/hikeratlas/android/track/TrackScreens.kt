@@ -62,9 +62,9 @@ private val CHART_HEIGHT = 110.dp
 fun statsLine(s: TrackStore.Stats): String =
     listOfNotNull(dist(s.metres / 1000, 1), duration(s.elapsedMs), s.gain?.let { "↑ ${elev(it)}" }).joinToString(" · ")
 
-/** "Moving 52:10 · ↓ 598 m". */
-private fun moreLine(s: TrackStore.Stats): String =
-    listOfNotNull("Moving ${duration(s.movingMs)}", s.loss?.let { "↓ ${elev(it)}" }).joinToString(" · ")
+/** "Moving 52:10 · ↓ 598 m · 3,120 steps": the steps only where they were counted. */
+internal fun moreLine(s: TrackStore.Stats, steps: Long?): String =
+    listOfNotNull("Moving ${duration(s.movingMs)}", s.loss?.let { "↓ ${elev(it)}" }, steps?.let(::stepsText)).joinToString(" · ")
 
 /** What deleting a track does: a post of it stays up. */
 internal fun deletedText(posted: TrackStore.Posted?) =
@@ -119,7 +119,7 @@ fun TrackSummarySheet(
             OutlinedTextField(name, { name = it }, label = { Text("Name") }, singleLine = true, modifier = Modifier.fillMaxWidth())
             Column {
                 Text(statsLine(detail.stats), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                Text(moreLine(detail.stats), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(moreLine(detail.stats, detail.track.steps), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             Chart(detail.profile, onScrub)
             when {
@@ -175,7 +175,7 @@ fun TrackPanel(
             }
             Box(Modifier.padding(end = 12.dp)) { Chart(detail.profile, onScrub) }
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(moreLine(detail.stats), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
+                Text(moreLine(detail.stats, detail.track.steps), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
                 TextButton(onClick = { deleting = true }) { Text("Delete") }
                 if (posted == null && onPost != null) TextButton(onClick = onPost) { Text("Post this track") }
             }

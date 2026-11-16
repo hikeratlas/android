@@ -219,6 +219,8 @@ object Posts {
         s.duration?.let { put("duration", it) }
         put("distance", s.distance)
         s.gain?.let { put("gain", it) }
+        // Only where the track was counted: absent means not counted, never 0.
+        s.steps?.let { put("steps", it) }
         title?.let { clip(it) }?.takeIf { it.isNotEmpty() }?.let { put("title", it) }
         routeKey?.takeIf { it.isNotEmpty() }?.let { put("routeKey", it) }
         if (photoEntries.isNotEmpty()) put("photos", JsonArray(photoEntries))

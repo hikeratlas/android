@@ -166,6 +166,22 @@ class PostsTest {
         assertEquals(track, fake.records["${Posts.TRACK}/3tid1"])
     }
 
+    /** Steps go in the record only where the track was counted (the app's <ha:steps>): never 0 for one that wasn't. */
+    @Test
+    fun aCountedTracksStepsGoInItsRecordAndOnlyThen() = runBlocking {
+        val counted = gpx.replace("<name>Raging River</name>\n", "<name>Raging River</name>\n    <extensions><ha:steps>3120</ha:steps></extensions>\n")
+        assertTrue(counted != gpx)
+        Posts.publish(account.xrpc, fake.did, Posts.Post(title = "Counted", gpx = counted))
+        Posts.publish(account.xrpc, fake.did, Posts.Post(title = "Not counted", gpx = gpx))
+        val (withSteps, without) = creates().map { it["record"]!!.jsonObject }
+        assertEquals(3120L, withSteps["steps"]!!.jsonPrimitive.content.toLong())
+        assertEquals(listOf("distance", "gain", "steps", "title"), withSteps.keys.filter { it in setOf("distance", "gain", "steps", "title") })
+        assertNull(without["steps"])
+        // Counted, with no steps walked: 0 is a count.
+        val zero = Posts.trackRecord(JsonObject(emptyMap()), com.hikeratlas.android.track.TrackMeasure.ofGpx(counted).copy(steps = 0), null, null, "CC0-1.0", emptyList())
+        assertEquals("0", zero["steps"]!!.jsonPrimitive.content)
+    }
+
     @Test
     fun aRefusalSaysWhatFailedInThePdssWords() = runBlocking {
         fake.createFails = 400 to """{"error":"InvalidRecord","message":"Invalid record: text too long"}"""

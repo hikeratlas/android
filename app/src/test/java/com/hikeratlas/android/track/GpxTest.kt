@@ -56,6 +56,25 @@ class GpxTest {
     }
 
     @Test
+    fun countedStepsGoInTheTracksExtensionsAndAreReadBack() {
+        val text = Gpx.write("Steps", 1_762_999_990_000, points, steps = 3120)
+        val trk = parse(text).all(gpxNs, "trk").single()
+        val ext = trk.all(gpxNs, "extensions").first()
+        // The <trk>'s own extensions, before its segments, as GPX 1.1 orders them.
+        assertEquals(trk, ext.parentNode)
+        assertEquals("3120", ext.text(Gpx.NS, "steps"))
+        assertTrue(text.indexOf("<ha:steps>") < text.indexOf("<trkseg>"))
+        assertEquals(3120L, TrackMeasure.ofGpx(text).steps)
+        // Counted, none walked: 0, unlike a track not counted, which has none.
+        assertEquals(0L, TrackMeasure.ofGpx(Gpx.write("Steps", 0, points, steps = 0)).steps)
+        val uncounted = Gpx.write("Steps", 0, points)
+        assertTrue(!uncounted.contains("steps"))
+        assertEquals(null, TrackMeasure.ofGpx(uncounted).steps)
+        // Measured the same either way.
+        assertEquals(TrackMeasure.ofGpx(uncounted).distance, TrackMeasure.ofGpx(text).distance)
+    }
+
+    @Test
     fun fileNamesAreSafe() {
         assertEquals("Raging River State Forest - 14 Nov.gpx", Gpx.fileName("Raging River State Forest · 14 Nov"))
         assertEquals("a b.gpx", Gpx.fileName("a/b:\n?b".replace("b:\n?b", " b")))

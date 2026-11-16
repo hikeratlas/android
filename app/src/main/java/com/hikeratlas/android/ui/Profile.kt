@@ -65,6 +65,7 @@ import com.hikeratlas.android.routes.KeyedHike
 import com.hikeratlas.android.routes.KeyedSearch
 import com.hikeratlas.android.track.TrackMeasure
 import com.hikeratlas.android.track.TrackStore
+import com.hikeratlas.android.track.stepsText
 import com.hikeratlas.android.units.dist
 import com.hikeratlas.android.units.elev
 import kotlinx.coroutines.CancellationException
@@ -127,12 +128,13 @@ internal data class HikesFound(val search: KeyedSearch?, val done: Boolean, val 
 
 /**
  * A track's numbers, from its record, in the viewer's units: "7.3 km · ↑ 612 m
- * · 2 h 5 min", as the website's TrackView.
+ * · 2 h 5 min · 3,120 steps", as the website's TrackView.
  */
 internal fun trackFacts(t: Profiles.Track): String = listOfNotNull(
     t.distance?.let { dist(it / 1000.0) },
     t.gain?.let { "↑ ${elev(it)}" },
     t.duration?.let { durationText(it.toLong()) },
+    t.steps?.let(::stepsText),
 ).joinToString(" · ")
 
 /** A GPX's line for a thumbnail: each segment's points, thinned to about [n] in all, as the website's `lines`. */
