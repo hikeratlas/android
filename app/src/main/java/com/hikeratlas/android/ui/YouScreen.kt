@@ -95,7 +95,8 @@ fun YouScreen(
         if (storage != null) StorageCard(storage)
         Card("About") {
             Item("hikeratlas.com", external = true) { openUrl(context, SITE) }
-            Item("Source code") { openUrl(context, "https://github.com/hikeratlas") }
+            // The source is a tap away on the version's commit hash, below.
+            Item("Terms and privacy", external = true) { openUrl(context, "$SITE/terms") }
             Item("Map credits", "OpenStreetMap contributors, Mapterhorn, ESA WorldCover and others") { credits = true }
             VersionRow(BuildConfig.COMMIT, BuildConfig.COMMIT_DATE) { openUrl(context, it) }
         }
