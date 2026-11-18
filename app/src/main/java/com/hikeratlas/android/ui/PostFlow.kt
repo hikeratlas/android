@@ -6,6 +6,7 @@ import com.hikeratlas.android.atproto.Posts
 import com.hikeratlas.android.atproto.Xrpc
 import com.hikeratlas.android.outbox.Outbox
 import com.hikeratlas.android.track.TrackLibrary
+import kotlinx.coroutines.CancellationException
 
 /** What became of a post sent from the form. */
 sealed interface PostOutcome {
@@ -61,7 +62,16 @@ internal suspend fun sendDraft(
         ),
         trackId = id,
     )
-    return when (val o = outbox.upload(entry.id, progress = progress)) {
+    val outcome = try {
+        outbox.upload(entry.id, progress = progress)
+    } catch (e: CancellationException) {
+        // The form went (closed, or the app stopped it) as it posted: it's
+        // saved waiting, so the background goes on with it rather than
+        // leaving it for a Retry (#99).
+        outbox.schedule(entry.id)
+        throw e
+    }
+    return when (val o = outcome) {
         Outbox.Outcome.Posted, Outbox.Outcome.Gone -> PostOutcome.Posted
         is Outbox.Outcome.Waiting -> {
             outbox.schedule(entry.id)

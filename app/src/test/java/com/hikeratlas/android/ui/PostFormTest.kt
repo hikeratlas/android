@@ -1,5 +1,8 @@
 package com.hikeratlas.android.ui
 
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertIsSelected
@@ -43,9 +46,11 @@ class PostFormTest {
         Units.current = Units.METRIC
     }
 
-    private fun actions(post: suspend (PostDraft, (String) -> Unit) -> PostOutcome = { _, _ -> PostOutcome.Posted }, license: String = "CC-BY-4.0") = PostActions(
+    private fun actions(
+        post: suspend (PostDraft, (String) -> Unit) -> PostOutcome = { _, _ -> PostOutcome.Posted }, license: String = "CC-BY-4.0", waiting: Set<Long> = emptySet(),
+    ) = PostActions(
         account, listOf(track), license = { license }, trackStats = { if (it == 7L) stats else null },
-        hikesNear = { emptyList() }, post = post, openProfile = { _ -> }, today = { LocalDate.of(2026, 7, 4) },
+        hikesNear = { emptyList() }, post = post, openProfile = { _ -> }, today = { LocalDate.of(2026, 7, 4) }, waitingTracks = waiting,
     )
 
     private fun waitFor(text: String) = compose.waitUntil(5_000) {
@@ -320,5 +325,25 @@ class PostFormTest {
         assertEquals("Placed on your track by its time", whereText(PhotoItem(1, Posts.Photo("f", takenAt = "2026-07-02T16:05:00.000Z")), gpx))
         // In the track's 40-minute stop: not placed.
         assertEquals("No location (not taken during your track)", whereText(PhotoItem(1, Posts.Photo("f", takenAt = "2026-07-02T15:40:00.000Z")), gpx))
+    }
+
+    // Posting a recorded track puts it in the outbox (waiting) as it starts
+    // to go up: the dialog mustn't then swap the form for "Waiting to post",
+    // which cancelled the upload (#99). Waiting when it opened, it says so.
+    @Test
+    fun aTrackThatStartsWaitingWhilePostingKeepsItsDialog() {
+        var posts by androidx.compose.runtime.mutableStateOf(actions())
+        compose.setContent { TrackPostDialog(7, "Morning walk", posts, onClose = {}) }
+        waitFor("None of these")
+        posts = actions(waiting = setOf(7L))
+        compose.waitForIdle()
+        compose.onNodeWithText("None of these").assertExists()
+        compose.onAllNodes(hasText("Waiting to post")).assertCountEquals(0)
+    }
+
+    @Test
+    fun aTrackWaitingWhenTheDialogOpensSaysSo() {
+        compose.setContent { TrackPostDialog(7, "Morning walk", actions(waiting = setOf(7L)), onClose = {}) }
+        waitFor("Waiting to post")
     }
 }

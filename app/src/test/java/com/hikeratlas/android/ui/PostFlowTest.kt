@@ -14,6 +14,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
@@ -240,5 +241,27 @@ class PostFlowTest {
         assertEquals("0", track["distance"]!!.jsonPrimitive.content)
         assertEquals("10", track["duration"]!!.jsonPrimitive.content)
         assertNotNull(lib.posted(id)!!.reviewUri)
+    }
+
+    // The form went as it posted (#99): the post isn't left waiting for a Retry.
+    @Test
+    fun aPostCutOffAsTheFormGoesIsLeftToTheBackground() = runBlocking {
+        val lib = library()
+        val id = recorded()
+        val outbox = outbox(lib)
+        // The track's upload is slow to answer, so the form can go meanwhile.
+        fake.fault = { r ->
+            if (r.url.encodedPath.endsWith("uploadBlob")) mockwebserver3.MockResponse.Builder().code(500).headersDelay(1, java.util.concurrent.TimeUnit.SECONDS).build() else null
+        }
+        val uploading = kotlinx.coroutines.CompletableDeferred<Unit>()
+        val form = scope.launch {
+            sendDraft(outbox, fake.did, fake.handle, lib, draft(id, "Muddy."), { if (it == "Uploading your track…") uploading.complete(Unit) })
+        }
+        kotlinx.coroutines.withTimeout(10_000) { uploading.await() }
+        form.cancel()
+        form.join()
+        val queued = java.io.File(context.filesDir, "outbox").list()!!.single()
+        val work = androidx.work.WorkManager.getInstance(context).getWorkInfosForUniqueWork(com.hikeratlas.android.outbox.Outbox.workName(queued)).get().single()
+        assertEquals(androidx.work.WorkInfo.State.ENQUEUED, work.state)
     }
 }
