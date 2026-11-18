@@ -17,6 +17,8 @@ import java.util.concurrent.Executors
  * a step counter, or without the permission, has none, rather than a part.
  * Nor has one whose counter never gave a reading: it's counted (0 a real
  * 0) only from the first reading, the base the rest count from.
+ * Steps turned off ([countSteps]) mid-track stop the count there: the
+ * track keeps what it counted, and counts on if they're turned on again.
  */
 class TrackRecorder(
     private val store: TrackStore,
@@ -26,6 +28,8 @@ class TrackRecorder(
     private val background: Executor = Executors.newSingleThreadExecutor { r -> Thread(r, "track-climb").apply { isDaemon = true } },
     /** The step counter; null for none. */
     private val steps: StepSource? = null,
+    /** Whether steps are to be counted (the You tab's switch): asked as counting starts or resumes, and by [stepsSettingChanged]. */
+    private val countSteps: () -> Boolean = { true },
 ) {
     data class State(
         val trackId: Long,
@@ -67,6 +71,8 @@ class TrackRecorder(
     /** Whether the counter has given a reading for [stepTrack]: until it has, the track has no steps (not 0). */
     private var stepsReported = false
     private var stepsOpen = false
+    /** Whether a close is waiting on its flush: still open until it's done, but on its way to closed. */
+    private var closing = false
     private var listening = false
     private var stepGen = 0
     private var stepsSavedAt = 0L
@@ -177,6 +183,28 @@ class TrackRecorder(
         d.await()
     }
 
+    /**
+     * Steps turned on or off (the You tab's switch, or the permission
+     * given since): a counted track being recorded stops counting, keeping
+     * what it counted, or counts again from here. A track started without
+     * steps stays without, rather than counted in part; a paused one counts
+     * again (if on) when resumed.
+     */
+    @Synchronized
+    fun stepsSettingChanged() {
+        val s = state ?: return
+        if (tally == null || stepTrack == null) return
+        val counting = stepsOpen && !closing
+        if (!countSteps()) {
+            if (counting) {
+                Log.i(LOG, "Steps turned off: track ${s.trackId} keeps ${s.steps?.let { "the $it counted so far" } ?: "no steps (none read yet)"}")
+                closeSteps()
+            }
+        } else if (!s.paused && !counting) {
+            if (openSteps()) Log.i(LOG, "Steps turned on: track ${s.trackId} counts again")
+        }
+    }
+
     /** A reading from the step counter: what was walked since the last is added, while recording. */
     @Synchronized
     fun onStepCount(value: Long) {
@@ -207,7 +235,12 @@ class TrackRecorder(
     private fun openSteps(rebase: Boolean = true): Boolean {
         val t = tally ?: return false
         val id = stepTrack ?: return false
+        if (!countSteps()) {
+            Log.i(LOG, "Steps are turned off: not counted now")
+            return false
+        }
         stepGen++
+        closing = false
         if (rebase) t.base = null
         if (!listening) listening = steps?.start { v -> onStepCount(v) } == true
         stepsOpen = listening
@@ -226,14 +259,16 @@ class TrackRecorder(
         val id = stepTrack ?: return
         if (!stepsOpen) return
         val gen = ++stepGen
+        closing = true
         if (stepsReported) store.setSteps(id, t.total, t.base)
         val done = CompletableDeferred<Unit>()
         flushed = done
-        val source = steps ?: return run { stepsOpen = false; done.complete(Unit) }
+        val source = steps ?: return run { stepsOpen = false; closing = false; done.complete(Unit) }
         source.flush {
             synchronized(this) {
                 if (gen == stepGen) {
                     stepsOpen = false
+                    closing = false
                     stopListening()
                     t.base = null
                     if (stepsReported) store.setSteps(id, t.total, null)
@@ -247,6 +282,7 @@ class TrackRecorder(
         if (listening) steps?.stop()
         listening = false
         stepsOpen = false
+        closing = false
     }
 
     /** A fix from GPS: kept (and saved) if it's good enough and it's not paused. */

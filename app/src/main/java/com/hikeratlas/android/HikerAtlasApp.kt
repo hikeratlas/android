@@ -43,7 +43,12 @@ class HikerAtlasApp : Application(), RecorderHost, OfflineHost, com.hikeratlas.a
     val search by lazy { SearchApi(http) }
     val recentSearches by lazy { RecentSearches(this) }
     val tracks by lazy { TrackStore(this) }
-    override val recorder by lazy { TrackRecorder(tracks, profiler, steps = com.hikeratlas.android.track.SensorStepSource(this)) }
+    override val recorder by lazy {
+        TrackRecorder(
+            tracks, profiler, steps = com.hikeratlas.android.track.SensorStepSource(this),
+            countSteps = { com.hikeratlas.android.track.StepsSetting.on(this) },
+        )
+    }
     val library by lazy { TrackLibrary(tracks, profiler, regions = { routes.regions() }) }
 
     /** Search with no network: the downloaded parks and hikes. */

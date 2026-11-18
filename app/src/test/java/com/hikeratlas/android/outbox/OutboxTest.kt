@@ -97,6 +97,7 @@ class OutboxTest {
 
     @After
     fun tearDown() {
+        app.getSharedPreferences("recording", android.content.Context.MODE_PRIVATE).edit().clear().commit()
         scope.cancel()
         fake.close()
         store.close()
@@ -394,13 +395,18 @@ class OutboxTest {
         assertEquals(1, fake.blobs.size)
     }
 
-    /** A counted track's steps survive waiting in the outbox: they're in its GPX, and go in its record. */
+    /**
+     * A counted track's steps survive waiting in the outbox: they're in its
+     * GPX, and go in its record. Even with steps since turned off: that's
+     * for counting, not for tracks already counted.
+     */
     @Test
     fun aQueuedTracksStepsGoUpWithIt() = runBlocking {
         val id = store.start(1_783_000_000_000)
         for (i in 0 until 20) store.add(id, 0, Fix(1_783_000_000_000 + i * 5_000L, 47.45 + i * 0.0002, -121.8, 4f, mslAltitude = 200.0 + i))
         store.setSteps(id, 2_345, null)
         store.end(id, 1_783_000_100_000)
+        com.hikeratlas.android.track.StepsSetting.set(app, false)
         fake.fault = { r -> if (isStep(r)) unavailable() else null }
         val e = queue(Posts.Post(title = "Mount Si", gpx = library.gpxText(id)!!), trackId = id)
         assertTrue(app.outbox.upload(e.id) is Outbox.Outcome.Waiting)

@@ -394,6 +394,8 @@ fun AppScreen(app: HikerAtlasApp, link: Uri? = null, onLinkHandled: () -> Unit =
                 )
             }
         }
+        // Out here, not in the You tab, so the permission question's answer finds its way back.
+        val stepsActions = rememberStepsActions { app.recorder.stepsSettingChanged() }
         if (tab == Tab.You) {
             val unitsActions = UnitsActions(
                 current = com.hikeratlas.android.units.Units.current,
@@ -422,6 +424,7 @@ fun AppScreen(app: HikerAtlasApp, link: Uri? = null, onLinkHandled: () -> Unit =
                     seePost = seePost,
                     refreshKey = postedCount,
                     logs = { showLogs = true },
+                    steps = stepsActions,
                 )
             }
         }
