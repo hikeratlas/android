@@ -42,6 +42,10 @@ class RecordingService : Service() {
 
     private val listener = LocationListener { l -> onLocation(l) }
 
+    // To learn how much recording uses: logged as it starts, pauses and
+    // stops, and as the level drops (read on fixes: it wakes nothing).
+    private val battery by lazy { BatteryLog({ readBattery(this) }) }
+
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -53,15 +57,18 @@ class RecordingService : Service() {
                 if (!recorder.resumeUnfinished(paused = false)) recorder.start()
                 recorder.resume()
                 listen()
+                battery.recording()
             }
             ACTION_PAUSE -> {
                 recorder.pause()
                 unlisten()
                 notifyNow()
+                battery.paused()
             }
             ACTION_STOP -> {
                 recorder.stop()
                 stop()
+                battery.stopped()
             }
             // Restarted by the system after the app was killed mid-track.
             null -> if (recorder.resumeUnfinished(paused = false) && recorder.state?.paused == false) {
@@ -69,6 +76,7 @@ class RecordingService : Service() {
                 try {
                     foreground()
                     listen()
+                    battery.recording()
                 } catch (e: Exception) {
                     // Not allowed to start in the background: it's left
                     // unfinished, and comes back paused when the app opens.
@@ -119,6 +127,7 @@ class RecordingService : Service() {
         }
         Log.d(LOG, "Fix ${Log.point(l.latitude, l.longitude)} ±${if (l.hasAccuracy()) l.accuracy.toInt() else "?"} m")
         recorder.onFix(l.toFix())
+        battery.check()
         val now = System.currentTimeMillis()
         if (now - notifiedAt >= NOTIFY_EVERY_MS) notifyNow()
     }
