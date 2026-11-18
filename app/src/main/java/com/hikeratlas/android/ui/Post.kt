@@ -221,7 +221,11 @@ fun TrackPostDialog(trackId: Long, trackName: String, posts: PostActions, onClos
         SignInDialog(posts.account, onClose = onClose, why = "Sign in to post your track.")
         return
     }
-    if (trackId in posts.waitingTracks) {
+    // Whether it was waiting when the dialog opened: posting it from here
+    // puts it in the outbox (waiting) before it goes up, and switching to
+    // this message then took the form away and cancelled the upload (#99).
+    val waiting = remember(trackId) { trackId in posts.waitingTracks }
+    if (waiting) {
         // Posted twice it mustn't be: it's going up already.
         AlertDialog(
             onDismissRequest = onClose,
