@@ -59,6 +59,38 @@ fun canCountSteps(context: Context): Boolean =
     Build.VERSION.SDK_INT < Build.VERSION_CODES.Q ||
         ContextCompat.checkSelfPermission(context, Manifest.permission.ACTIVITY_RECOGNITION) == PackageManager.PERMISSION_GRANTED
 
+/** Whether the phone says it has a step counter: without one, there's nothing to turn on or off. */
+fun hasStepCounter(context: Context): Boolean =
+    context.packageManager.hasSystemFeature(PackageManager.FEATURE_SENSOR_STEP_COUNTER)
+
+/**
+ * Whether to count steps while recording, chosen on the You tab: this
+ * phone's, not the profile's. Never chosen, it's on (as before there was a
+ * choice), so counting still waits on the permission alone. Tracks already
+ * recorded keep the steps they counted either way.
+ */
+object StepsSetting {
+    private const val PREFS = "recording"
+    private const val KEY = "count_steps"
+
+    /** What was chosen: null if never. */
+    fun stored(context: Context): Boolean? {
+        val p = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        return if (p.contains(KEY)) p.getBoolean(KEY, true) else null
+    }
+
+    /** Not turned off: never chosen counts as on. */
+    fun on(context: Context): Boolean = stored(context) != false
+
+    fun set(context: Context, on: Boolean) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit { putBoolean(KEY, on) }
+        Log.i("recording", "Steps turned ${if (on) "on" else "off"}")
+    }
+
+    /** Whether steps would be counted now: not turned off, allowed, and a step counter to count with. */
+    fun counting(context: Context): Boolean = on(context) && canCountSteps(context) && hasStepCounter(context)
+}
+
 /**
  * Android's step counter (Sensor.TYPE_STEP_COUNTER): the low-power
  * hardware one, not Play services. Its readings are cumulative, so batching
@@ -85,6 +117,7 @@ class SensorStepSource(context: Context) : StepSource {
 
     override fun start(onCount: (Long) -> Unit): Boolean {
         stop()
+        if (!StepsSetting.on(app)) return false.also { Log.i("recording", "Steps: turned off") }
         if (!canCountSteps(app)) return false.also { Log.i("recording", "Steps: no permission") }
         val sm = sensors ?: return false.also { Log.i("recording", "Steps: no sensor service") }
         val sensor = sm.getDefaultSensor(Sensor.TYPE_STEP_COUNTER) ?: return false.also { Log.i("recording", "Steps: no step counter") }
@@ -133,21 +166,33 @@ class SensorStepSource(context: Context) : StepSource {
 /**
  * Asking for the steps permission (ACTIVITY_RECOGNITION, Android 10+) as
  * recording starts, saying why first. Asked once: refused, tracks are
- * recorded as before, without steps, and it's for the phone's settings
- * after that.
+ * recorded as before, without steps, and it's for the You tab's switch (or
+ * the phone's settings) after that. Not asked with steps turned off.
  */
 object StepsPermission {
     private const val PREFS = "recording"
     private const val ASKED = "steps_asked"
 
-    /** Whether to ask now: a phone with a step counter, the permission not had, and not asked before. */
+    /** Whether to ask now: steps not turned off, a phone with a step counter, the permission not had, and not asked before. */
     fun toAsk(context: Context): Boolean =
         Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q &&
-            context.packageManager.hasSystemFeature(PackageManager.FEATURE_SENSOR_STEP_COUNTER) &&
+            StepsSetting.on(context) &&
+            hasStepCounter(context) &&
             !canCountSteps(context) &&
             !context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(ASKED, false)
 
     fun asked(context: Context) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit { putBoolean(ASKED, true) }
+    }
+
+    /**
+     * The explanation answered: [count], or not. Not counting is a choice
+     * the You tab's switch then shows (and can undo). Counting, then
+     * refusing Android's question, leaves the setting be: the switch shows
+     * off for want of the permission.
+     */
+    fun answered(context: Context, count: Boolean) {
+        asked(context)
+        if (!count) StepsSetting.set(context, false)
     }
 }

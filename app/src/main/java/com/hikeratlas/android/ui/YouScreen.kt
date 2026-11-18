@@ -86,31 +86,39 @@ fun YouTab(
     refreshKey: Int = 0,
     /** Opens the Logs screen. */
     logs: (() -> Unit)? = null,
+    /** Counting steps while recording: this phone's, shown signed in or out. */
+    steps: StepsActions? = null,
 ) {
     val s = account.state
     if (s is AccountState.In) {
         ProfileScreen(
             ProfileTarget(s.did, s.handle, seePost), profile, onBack = null, avatar = s.avatar,
-            settings = { YouSettings(account, units, license, storage, logs) },
+            settings = { YouSettings(account, units, license, storage, logs, steps) },
             waiting = waiting, refreshKey = refreshKey,
         )
     } else {
-        YouScreen(storage, account, units, waiting, logs)
+        YouScreen(storage, account, units, waiting, logs, steps)
     }
 }
 
 /**
  * Settings, signed in: what the You tab had, under small headings. Units
  * and the licence are the profile's (as on the website's Settings tab);
- * storage is this phone's.
+ * counting steps and storage are this phone's.
  */
 @Composable
-internal fun YouSettings(account: AccountActions, units: UnitsActions, license: LicenseActions?, storage: StorageActions?, logs: (() -> Unit)? = null) {
+internal fun YouSettings(
+    account: AccountActions, units: UnitsActions, license: LicenseActions?, storage: StorageActions?,
+    logs: (() -> Unit)? = null, steps: StepsActions? = null,
+) {
     SettingsGroup("Posting") {
         UnitsCard(units)
         if (license != null) LicenseCard(license)
     }
-    if (storage != null) SettingsGroup("On this phone") { StorageCard(storage) }
+    if (storage != null || steps?.available == true) SettingsGroup("On this phone") {
+        if (steps != null) StepsCard(steps)
+        if (storage != null) StorageCard(storage)
+    }
     SettingsGroup("Account") { AccountCard(account, title = null) }
     SettingsGroup("About") { AboutCard(title = null, logs = logs) }
 }
@@ -145,7 +153,7 @@ internal fun YouTabIcon(state: AccountState, selected: Boolean) {
     }
 }
 
-/** Signed out (or signing in): Sign in, units on this phone, storage and About. */
+/** Signed out (or signing in): Sign in, units on this phone, counting steps, storage and About. */
 @Composable
 fun YouScreen(
     storage: StorageActions? = null,
@@ -159,6 +167,7 @@ fun YouScreen(
     /** Posts waiting to go up (signed in, they're on your profile's Overview). */
     waiting: WaitingActions? = null,
     logs: (() -> Unit)? = null,
+    steps: StepsActions? = null,
 ) {
     Column(
         Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surfaceContainerLowest)
@@ -169,6 +178,7 @@ fun YouScreen(
         if (account != null) AccountCard(account)
         if (waiting != null && waiting.entries.isNotEmpty()) WaitingPosts(waiting)
         if (units != null && !units.signedIn) UnitsCard(units)
+        if (steps != null) StepsCard(steps)
         if (storage != null) StorageCard(storage)
         AboutCard(logs = logs)
     }

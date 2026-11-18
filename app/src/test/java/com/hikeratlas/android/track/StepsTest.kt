@@ -28,6 +28,9 @@ class FakeSteps(var available: Boolean = true) : StepSource {
     /** Readings the counter holds back until it's flushed. */
     val held = mutableListOf<Long>()
     var starts = 0
+    /** Flushes waiting to be done, when [slowFlush]: as a phone with the screen off takes its time. */
+    var slowFlush = false
+    val flushing = mutableListOf<() -> Unit>()
 
     val listening get() = onCount != null
 
@@ -39,6 +42,7 @@ class FakeSteps(var available: Boolean = true) : StepSource {
     }
 
     override fun flush(done: () -> Unit) {
+        if (slowFlush) return run { flushing += done }
         held.forEach { onCount?.invoke(it) }
         held.clear()
         done()
@@ -46,6 +50,13 @@ class FakeSteps(var available: Boolean = true) : StepSource {
 
     override fun stop() {
         onCount = null
+    }
+
+    /** Finishes the flushes waiting: what was held back delivered first. */
+    fun finishFlushes() {
+        held.forEach { onCount?.invoke(it) }
+        held.clear()
+        flushing.toList().also { flushing.clear() }.forEach { it() }
     }
 
     /** A reading delivered now (dropped if not listened to, as Android would). */
@@ -60,10 +71,116 @@ class StepsTest {
     private val store = TrackStore(ApplicationProvider.getApplicationContext(), name = null)
     private var now = 1_000_000L
 
+    /** The You tab's switch, as the recorder asks it. */
+    private var stepsOn = true
+
     @After
     fun tearDown() = store.close()
 
-    private fun recorder(steps: StepSource?) = TrackRecorder(store, null, clock = { now }, background = { it.run() }, steps = steps)
+    private fun recorder(steps: StepSource?) =
+        TrackRecorder(store, null, clock = { now }, background = { it.run() }, steps = steps, countSteps = { stepsOn })
+
+    @Test
+    fun stepsTurnedOffMidTrackKeepWhatWasCountedAndCountAgainWhenTurnedOn() {
+        val counter = FakeSteps()
+        val r = recorder(counter)
+        val id = r.start().trackId
+        counter.read(1_000)
+        counter.read(1_100)
+        stepsOn = false
+        counter.held += 1_150
+        r.stepsSettingChanged()
+        // What the counter held back was walked before: counted, then no more.
+        assertEquals(150L, r.state!!.steps)
+        assertFalse(counter.listening)
+        assertEquals(150L, store.track(id)!!.steps)
+        assertNull(store.track(id)!!.stepsBase)
+        counter.read(1_400)
+        // Turned off again: nothing to do.
+        r.stepsSettingChanged()
+        assertEquals(1, counter.starts)
+        stepsOn = true
+        r.stepsSettingChanged()
+        assertTrue(counter.listening)
+        counter.read(2_000) // where it got to meanwhile: not counted
+        counter.read(2_050)
+        assertEquals(200L, r.state!!.steps)
+        // Turned on again while counting: no new base, nothing lost.
+        r.stepsSettingChanged()
+        counter.read(2_060)
+        assertEquals(210L, r.state!!.steps)
+        r.stop()
+        assertEquals(210L, store.track(id)!!.steps)
+    }
+
+    @Test
+    fun aTrackStartedWithStepsOffStaysWithoutWhenTheyreTurnedOn() {
+        stepsOn = false
+        val counter = FakeSteps()
+        val r = recorder(counter)
+        val id = r.start().trackId
+        assertNull(r.state!!.steps)
+        assertEquals(0, counter.starts)
+        stepsOn = true
+        r.stepsSettingChanged()
+        r.pause()
+        r.resume()
+        counter.read(100)
+        counter.read(200)
+        assertNull(r.state!!.steps)
+        assertEquals(0, counter.starts)
+        r.stop()
+        assertNull(store.track(id)!!.steps)
+    }
+
+    @Test
+    fun resumedWithStepsOffItDoesntCount() {
+        val counter = FakeSteps()
+        val r = recorder(counter)
+        val id = r.start().trackId
+        counter.read(100)
+        counter.read(160)
+        r.pause()
+        stepsOn = false
+        // Paused: nothing counting to stop.
+        r.stepsSettingChanged()
+        r.resume()
+        assertFalse(counter.listening)
+        counter.read(900)
+        assertEquals(60L, r.state!!.steps)
+        // Turned on while paused: counted again only once resumed.
+        r.pause()
+        stepsOn = true
+        r.stepsSettingChanged()
+        assertFalse(counter.listening)
+        r.resume()
+        counter.read(1_000)
+        counter.read(1_040)
+        r.stop()
+        assertEquals(100L, store.track(id)!!.steps)
+    }
+
+    @Test
+    fun turnedBackOnBeforeTheCounterFlushedItCountsOn() {
+        val counter = FakeSteps().apply { slowFlush = true }
+        val r = recorder(counter)
+        val id = r.start().trackId
+        counter.read(500)
+        counter.read(520)
+        stepsOn = false
+        r.stepsSettingChanged()
+        // On again before the flush is done: counting on, not stopped when it is.
+        stepsOn = true
+        r.stepsSettingChanged()
+        counter.finishFlushes()
+        assertTrue(counter.listening)
+        counter.read(530)
+        counter.read(560)
+        assertEquals(50L, r.state!!.steps)
+        counter.slowFlush = false
+        r.stop()
+        assertEquals(50L, store.track(id)!!.steps)
+    }
 
     @Test
     fun stepsAreCountedOnlyWhileRecording() {
@@ -270,6 +387,66 @@ class SensorStepSourceTest {
     private val sm get() = app.getSystemService(SensorManager::class.java)
 
     private fun addCounter(): Sensor = ShadowSensor.newInstance(Sensor.TYPE_STEP_COUNTER).also { shadowOf(sm).addSensor(it) }
+
+    @After
+    fun tearDown() {
+        app.getSharedPreferences("recording", android.content.Context.MODE_PRIVATE).edit().clear().commit()
+    }
+
+    @Test
+    fun stepsTurnedOffArentCountedNorAskedFor() {
+        addCounter()
+        shadowOf(app.packageManager).setSystemFeature(PackageManager.FEATURE_SENSOR_STEP_COUNTER, true)
+        shadowOf(app).grantPermissions(Manifest.permission.ACTIVITY_RECOGNITION)
+        assertTrue(StepsSetting.counting(app))
+        StepsSetting.set(app, false)
+        assertEquals(false, StepsSetting.stored(app))
+        assertFalse(StepsSetting.counting(app))
+        assertFalse(SensorStepSource(app).start { })
+        // A new recording has no steps.
+        val store = TrackStore(app, name = null)
+        try {
+            val r = TrackRecorder(store, null, background = { it.run() }, steps = SensorStepSource(app), countSteps = { StepsSetting.on(app) })
+            val id = r.start().trackId
+            assertNull(r.state!!.steps)
+            assertTrue(shadowOf(sm).listeners.isEmpty())
+            r.stop()
+            assertNull(store.track(id)!!.steps)
+        } finally {
+            store.close()
+        }
+        // Nor is the permission asked for.
+        shadowOf(app).denyPermissions(Manifest.permission.ACTIVITY_RECOGNITION)
+        assertFalse(StepsPermission.toAsk(app))
+        StepsSetting.set(app, true)
+        assertTrue(StepsPermission.toAsk(app))
+    }
+
+    @Test
+    fun neverChosenStepsAreOn() {
+        addCounter()
+        shadowOf(app.packageManager).setSystemFeature(PackageManager.FEATURE_SENSOR_STEP_COUNTER, true)
+        shadowOf(app).grantPermissions(Manifest.permission.ACTIVITY_RECOGNITION)
+        assertNull(StepsSetting.stored(app))
+        assertTrue(StepsSetting.on(app))
+        assertTrue(StepsSetting.counting(app))
+        val source = SensorStepSource(app)
+        assertTrue(source.start { })
+        source.stop()
+    }
+
+    @Test
+    fun notCountingWhenAskedTurnsStepsOff() {
+        shadowOf(app.packageManager).setSystemFeature(PackageManager.FEATURE_SENSOR_STEP_COUNTER, true)
+        shadowOf(app).denyPermissions(Manifest.permission.ACTIVITY_RECOGNITION)
+        // Counting, then refusing Android's question: the setting's left be.
+        StepsPermission.answered(app, count = true)
+        assertNull(StepsSetting.stored(app))
+        assertFalse(StepsPermission.toAsk(app))
+        StepsPermission.answered(app, count = false)
+        assertEquals(false, StepsSetting.stored(app))
+        assertFalse(StepsSetting.on(app))
+    }
 
     @Test
     fun readsTheStepCounterOnceAllowed() {

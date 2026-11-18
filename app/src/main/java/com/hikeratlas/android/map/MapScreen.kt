@@ -537,7 +537,7 @@ fun MapScreen(
     if (askingSteps) {
         val answer = { count: Boolean ->
             askingSteps = false
-            StepsPermission.asked(context)
+            StepsPermission.answered(context, count)
             startRecording(count)
         }
         AlertDialog(
@@ -546,11 +546,11 @@ fun MapScreen(
             text = {
                 Text(
                     "Hiker Atlas can count your steps with your phone's step counter, only while recording, " +
-                        "and show them with the track and its post.",
+                        "and show them with the track and its post. You can change this on the You tab.",
                 )
             },
             confirmButton = { TextButton(onClick = { answer(true) }) { Text("Continue") } },
-            dismissButton = { TextButton(onClick = { answer(false) }) { Text("Not now") } },
+            dismissButton = { TextButton(onClick = { answer(false) }) { Text("Don't count") } },
         )
     }
 
