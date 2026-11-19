@@ -360,4 +360,18 @@ class ProfileScreenTest {
         compose.onNodeWithText("Overview").performClick()
         compose.waitUntil(5_000) { compose.onAllNodesWithText("Nothing posted yet.").fetchSemanticsNodes().isNotEmpty() }
     }
+
+    // A review of a track not tied to a curated hike is titled by its track,
+    // as the website shows it (#100); a review of a track tied to one, by that hike.
+    @Test
+    @Config(qualifiers = "w390dp-h3000dp-xxhdpi")
+    fun aReviewIsTitledByItsTrack() {
+        val walk = track("walk", null).copy(title = "Breithaupt Park walk")
+        val hiked = track("hiked")
+        show(profile(listOf(review("r1", "Chilly.", walk, routeKey = null), review("r2", "Steep.", hiked, routeKey = null)), listOf(walk, hiked)))
+        compose.waitUntil(5_000) { count("Mount Si") > 0 }
+        // The review and the track itself.
+        assertEquals(2, count("Breithaupt Park walk"))
+        assertEquals(0, count("A hike"))
+    }
 }

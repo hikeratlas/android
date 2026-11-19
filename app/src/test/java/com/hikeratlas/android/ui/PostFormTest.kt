@@ -13,6 +13,7 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.test.performTextReplacement
 import com.hikeratlas.android.atproto.AccountState
 import com.hikeratlas.android.atproto.PostException
 import com.hikeratlas.android.atproto.Posts
@@ -345,5 +346,29 @@ class PostFormTest {
     fun aTrackWaitingWhenTheDialogOpensSaysSo() {
         compose.setContent { TrackPostDialog(7, "Morning walk", actions(waiting = setOf(7L)), onClose = {}) }
         waitFor("Waiting to post")
+    }
+
+    // Not tied to a curated hike, a track takes a title of its own: its name
+    // on the phone, or what they type (#100).
+    @Test
+    fun aTrackAloneIsPostedWithTheTitleTyped() {
+        var got: PostDraft? = null
+        compose.setContent { PostForm(null, 7, actions(post = { d, _ -> got = d; PostOutcome.Posted }), onClose = {}, trackName = "Morning walk") }
+        waitFor("What your track is called")
+        compose.onNode(hasSetTextAction() and hasText("Morning walk")).performTextReplacement("Breithaupt loop")
+        compose.onNodeWithText("Post").assertIsEnabled().performClick()
+        waitFor("Posted")
+        assertEquals("Breithaupt loop", got!!.title)
+    }
+
+    @Test
+    fun aCuratedHikesPostTakesItsTitleAndAsksNone() {
+        var got: PostDraft? = null
+        compose.setContent { PostForm(hike, 7, actions(post = { d, _ -> got = d; PostOutcome.Posted }), onClose = {}, trackName = "Morning walk") }
+        waitFor("2.2 km")
+        compose.onAllNodes(hasText("What your track is called", substring = true)).assertCountEquals(0)
+        compose.onNodeWithText("Post").performClick()
+        waitFor("Posted")
+        assertEquals("Mount Si", got!!.title)
     }
 }
