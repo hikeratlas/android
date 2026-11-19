@@ -319,8 +319,10 @@ private fun PostList(
             sectionHeader("reviews", "Reviews")
             sectionNote("reviews", count(profile.reviews.size, "review", "No reviews yet."))
             items(profile.reviews, key = { "review-${it.uri}" }) { r ->
+                // Titled as the website does: its hike (its own, or its track's), else its track's title.
+                val track = profile.trackOf(r)
                 PostCard(
-                    profile, r.routeKey, null, r.hikedAt ?: r.createdAt, r.license, found, actions,
+                    profile, r.routeKey ?: track?.routeKey, track?.title, r.hikedAt ?: r.createdAt, r.license, found, actions,
                     highlighted = false,
                     deleting = r.uri in deleting,
                     error = failed?.takeIf { it.first == r.uri }?.second,
@@ -331,7 +333,7 @@ private fun PostList(
                     Text(r.text, style = MaterialTheme.typography.bodyMedium)
                     if (r.photos.isNotEmpty()) PhotoGrid(PhotoSet(profile.pds, profile.did, profile.handle, r.license, r.photos), actions.openPhotos)
                     // Its track drawn here too: the profile is a full page, as the website's.
-                    profile.trackOf(r)?.let { TrackBox(profile, it, actions, lines) }
+                    track?.let { TrackBox(profile, it, actions, lines) }
                 }
             }
             sectionHeader("tracks", "Tracks")

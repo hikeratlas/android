@@ -381,6 +381,8 @@ internal fun PostForm(
     var text by remember { mutableStateOf("") }
     val tags = remember { mutableStateListOf<String>() }
     var trackId by remember { mutableStateOf(fixedTrack) }
+    // The title typed, if they changed the track's name; null keeps the name.
+    var trackTitle by remember { mutableStateOf<String?>(null) }
     var stats by remember { mutableStateOf<GpxStats?>(null) }
     var license by remember { mutableStateOf(Posts.DEFAULT_LICENSE) }
     var busy by remember { mutableStateOf<String?>(null) }
@@ -436,10 +438,15 @@ internal fun PostForm(
     }
 
     val trackName0 = trackName ?: posts.tracks.firstOrNull { it.id == trackId }?.name
-    val title = hike?.title ?: trackName0 ?: "Your track"
+    // A track not tied to a curated hike is posted with a title of its own:
+    // its name on the phone, unless they change it here (#100).
+    val ownTitle = (trackTitle ?: trackName0)?.trim()?.ifEmpty { null }
+    val title = hike?.title ?: ownTitle ?: "Your track"
+    val asksTitle = hike == null && trackId != null
+    val titleTooLong = asksTitle && (trackTitle?.trim()?.length ?: 0) > Posts.MAX_TITLE
     val review = text.trim().isNotEmpty()
     // Every photo ready: one still being read, or unreadable, holds the post.
-    val canPost = (review || trackId != null) && text.length <= Posts.MAX_TEXT && busy == null && photos.all { it.photo != null }
+    val canPost = (review || trackId != null) && text.length <= Posts.MAX_TEXT && !titleTooLong && busy == null && photos.all { it.photo != null }
     fun addPhotos(inputs: List<PhotoInput>) {
         val actions = posts.photos ?: return
         for (input in inputs.take(Photos.MAX_PHOTOS - photos.size)) {
@@ -469,7 +476,7 @@ internal fun PostForm(
         scope.launch {
             try {
                 val ready = photos.mapNotNull { p -> p.photo?.copy(alt = p.alt.trim().take(Photos.MAX_ALT).ifEmpty { null }) }
-                val outcome = posts.post(PostDraft(hike, hike?.title ?: trackName0 ?: "Track", text, tags.toList(), day, trackId, ready)) { busy = it }
+                val outcome = posts.post(PostDraft(hike, hike?.title ?: ownTitle ?: "Track", text, tags.toList(), day, trackId, ready)) { busy = it }
                 queued = (outcome as? PostOutcome.Queued)?.message
                 done = true
             } catch (e: CancellationException) {
@@ -497,6 +504,19 @@ internal fun PostForm(
                     if (hike == null) "Your track, with a review if you like. It isn't tied to a curated hike." else "A review, your track, or both.",
                     style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+            }
+
+            if (asksTitle) {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Label("Title")
+                    OutlinedTextField(
+                        trackTitle ?: trackName0.orEmpty(), { trackTitle = it.take(Posts.MAX_TITLE + 50) },
+                        placeholder = { Text("Track") },
+                        singleLine = true, enabled = busy == null, isError = titleTooLong,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Hint(if (titleTooLong) "At most ${Posts.MAX_TITLE} characters." else "What your track is called on your profile.")
+                }
             }
 
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
